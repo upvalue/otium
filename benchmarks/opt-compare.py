@@ -82,6 +82,7 @@ def run_suites(config, args, out):
 def boot_build(config, runs, out):
     """Seconds for the native compiler to compile the standard boot file."""
     env = environment(config)
+    env['OTIUM_OPT_TIMES'] = '1'
     lib = ROOT / 'lib'
     primitives = ROOT / 'c/src/primitives.ot'
     times = []
@@ -90,8 +91,9 @@ def boot_build(config, runs, out):
         subprocess.run(['taskset', '-c', str(max(os.sched_getaffinity(0))), BUILD / 'otium', '--no-project',
                         '-L', lib, '-e',
                         f'(require otium.compiler.boot :as boot) '
-                        f'(boot/build-standard "{out / "stage2.boot"}" "{lib}" "{primitives}") (exit 0)'],
-                       env=env, check=True)
+                        f'(boot/build-standard "{out / "stage2.boot"}" "{lib}" "{primitives}") '
+                        f'(require otium.compiler :as nc) (write (nc/pass-times)) (newline) (exit 0)'],
+                       env=env, check=True, stdout=open(out / 'pass-times.txt', 'w'))
         times.append(time.perf_counter() - start)
     return times
 
@@ -141,6 +143,8 @@ def main():
         d.mkdir(parents=True, exist_ok=True)
         print(f'{key}: OTIUM_OPT={config}', file=sys.stderr)
         boots[key] = boot_build(config, args.runs, d)
+        print(f'{key} pass times, last boot build: {(d / "pass-times.txt").read_text().strip()}',
+              file=sys.stderr)
         loads[key] = source_load(config, args.runs)
         suites[key] = {} if args.no_suites else run_suites(config, args, d)
 

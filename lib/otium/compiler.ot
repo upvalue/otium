@@ -20,8 +20,28 @@
 ;; scopes and checks it again, for testing.
 (def- verify? (equal? (process/getenv "OTIUM_OPT_VERIFY") "1"))
 
+;; OTIUM_OPT_TIMES=1 adds up the time each pass takes, for pass-times.
+(def- times? (equal? (process/getenv "OTIUM_OPT_TIMES") "1"))
+
+(def- times {})
+
+(def (timed pass thunk)
+  (if times?
+      (let ((start (current-jiffy)))
+        (let ((result (thunk)))
+          (put! times pass (+ (get times pass 0) (- (current-jiffy) start)))
+          result))
+      (thunk)))
+
+;; Seconds spent in each pass so far, by name, when OTIUM_OPT_TIMES=1.
+(def (pass-times)
+  (let ((out {}))
+    (for ((pass :in (keys times)))
+      (put! out pass (/ (get times pass) (inexact (jiffies-per-second)))))
+    out))
+
 (def (convert form)
-  (let ((info (convert/convert-top form)))
+  (let ((info (timed :convert (fn () (convert/convert-top form)))))
     (when verify?
       (ir/verify info)
       (rescope/rescope info)
@@ -51,10 +71,10 @@
     (compile-info info)))
 
 (def (compile-info info)
-  (let ((lowered (lower/lower-top info)))
+  (let ((lowered (timed :lower (fn () (lower/lower-top info)))))
     (let ((u (get lowered 0)) (contexts (get lowered 1)))
-      (for ((fc :in contexts)) (alloc/allocate fc))
-      (emit/emit-unit u contexts))))
+      (timed :allocate (fn () (for ((fc :in contexts)) (alloc/allocate fc))))
+      (timed :emit (fn () (emit/emit-unit u contexts))))))
 
 ;; The closure that runs a compiled top-level form.
 (def (install-top form) (%native-install (compile-top form)))

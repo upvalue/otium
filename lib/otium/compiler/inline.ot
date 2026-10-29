@@ -222,9 +222,11 @@
 ;; the rest, with loops.
 
 (def (fact s var)
-  (if (cv/var-assigned var)
-      types/t-any
-      (get (state-facts s) (cv/var-id var) types/t-any)))
+  (let ((b (and (not (cv/var-assigned var)) (binding s var))))
+    (cond ((cv/var-assigned var) types/t-any)
+          ;; A copy of another variable has its facts.
+          ((and b (eq? (binding-kind b) :copy)) (fact s (get (binding-value b) 2)))
+          (else (get (state-facts s) (cv/var-id var) types/t-any)))))
 
 ;; Narrow var's fact to t.
 (def (learn! s var t)
@@ -270,6 +272,14 @@
             (let ((out (thunk)))
               (put! facts id old)
               out))))))
+
+;; A call of a predicate of locked core through its global, as without
+;; direct calls, settled by facts like the :known call would be.
+(def (core-predicate-by-fact s node)
+  (let ((cell (get node 2)))
+    (when (and (%native-core-cell? cell) (%core-locked?))
+      (let ((name (%native-cell-builtin cell)))
+        (and name (fold-by-fact s (get node 1) name (get node 3)))))))
 
 ;; A predicate that narrows, on a variable whose facts settle it: #t or #f.
 (def (fold-by-fact s off name args)
@@ -327,7 +337,8 @@
              (result [:known off (get node 2) (get node 3) args (get node 5)] ctx))))
       ((:gprim) [:gprim off (get node 2) (get node 3) (simplify-all s (get node 4))])
       ((:gcall :bcall)
-       (or (inline-core s node ctx)
+       (or (and (eq? (get node 0) :gcall) (core-predicate-by-fact s node))
+           (inline-core s node ctx)
            (let ((new (copy node)))
              (put! new 3 (simplify-all s (get node 3)))
              new)))

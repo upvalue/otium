@@ -129,18 +129,20 @@ def inline_bodies(t):
              stdout='checked\n')
 @test('compiler inline pass')
 def inline_pass(t):
-    """Hand-written trees through the inline pass, text in and text out, at
-    the default inlining budget the expected trees assume."""
+    """Hand-written trees through the inline pass, text in and text out, with
+    the default switches and inlining budget the expected trees assume."""
     t.expect(t.otium('--no-project', '-L', LIB, ROOT / 'tests/compiler/inline-check.ot',
-                     env={'OTIUM_OPT_INLINE_BUDGET': '100'}),
+                     env={'OTIUM_OPT': 'all', 'OTIUM_OPT_INLINE_BUDGET': '100'}),
              contains=[' 0 failures'])
 
 
 @test('compiler notes')
 def notes(t):
     """otium compile --notes reports generic arithmetic, checks and closures
-    in loops, and calls left out of inlining, without running the program."""
-    if os.environ.get('OTIUM_VM'):
+    in loops, and calls left out of inlining, without running the program.
+    The passes that make notes are all on only in the default configuration."""
+    if (os.environ.get('OTIUM_VM') or os.environ.get('OTIUM_OPT', 'all') not in ('', 'all')
+            or os.environ.get('OTIUM_OPT_INLINE_BUDGET', '100') != '100'):
         return
     fixture = ROOT / 'tests/compiler/notes.ot'
     out = t.expect(t.otium('--no-project', '-L', LIB, ROOT / 'lib/otium/tools/compile.ot', '--', '--notes', fixture),

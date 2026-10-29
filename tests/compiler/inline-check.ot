@@ -654,8 +654,8 @@
 
 (let ((show (equal? (otium.process/arguments) '("show"))))
   ;; A case marked :core inlines a core function, whose stored body only a
-  ;; process started from a boot file has.
-  (for ((c :in (filter (fn (c) (or (%native?) (not (memq :core c)))) cases)))
+  ;; process started from a boot file built with the optimizer has.
+  (for ((c :in (filter (fn (c) (or (get %inline-bodies 'first) (not (memq :core c)))) cases)))
     (let ((got (try
                  (simplified (car c))
                  (catch (error? problem) (list :error (condition-message problem))))))

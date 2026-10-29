@@ -99,16 +99,23 @@ Includes runtime builtins, special forms, and the Otium prelude."
    'sequence (fn (x) (or (nil? x) (pair? x) (null? x) (array? x) (string? x)))})
 
 ;; What (declare (type name)) runs: value, the value of name, unless it
-;; isn't of type.
+;; isn't of type. For (the type expression), name is nil.
 (def (%declared value type name)
   (if ((get declared-types type) value)
       value
       (error {:type 'type-error
               :message (let ((out (open-output-string)))
                          (write-to out value)
-                         (str "`" name "` is declared " type ", got " (get-output-string out)))
-              :who name
+                         (if name
+                             (str "`" name "` is declared " type ", got " (get-output-string out))
+                             (str "`the` expected " type ", got " (get-output-string out))))
+              :who (or name 'the)
               :value value})))
+
+(defmacro the (type expression)
+  "(the type expression)\nThe value of expression, checked to be of type, which declare lists. The compiler drops the check where it can prove it."
+  (unless (get declared-types type) (error "the: unknown type" type))
+  #`(%declared ,expression (quote ,type) nil))
 
 (defmacro declare (& specs)
   "(declare (type name ...) ...)\nAt the start of a def, fn or let body, check that each name holds a value of type, once, there; the compiler may rely on it after. Types are fixnum, float, number, pair, list, boolean, symbol, keyword, string, char, array, table, procedure, record and sequence. (declare inline) is accepted and does nothing yet."

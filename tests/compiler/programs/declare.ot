@@ -14,3 +14,5 @@
 (newline)
 (write (try (eval '(fn (x) (declare (vector x)) x)) (catch e (condition-message e))))
 (newline)
+(write (list (the fixnum (+ 1 2)) (try (the float 3) (catch e (condition-message e)))))
+(newline)

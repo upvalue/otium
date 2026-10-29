@@ -946,7 +946,7 @@ ot_value oti_alloc_slow(ot_state* rt, uint32_t kind, uint32_t fields, size_t byt
  * host IO all go through oti_alloc_slow. */
 static inline ot_value oti_alloc(ot_state* rt, uint32_t kind, uint32_t fields, size_t bytes) {
   oti_heap* h = &rt->heap;
-  if (__builtin_expect(fields < 65536 && bytes < SIZE_MAX / 2, 1)) {
+  if (__builtin_expect(fields < 65536 && bytes < UINT32_MAX / 2, 1)) {
     size_t base = sizeof(oti_object_header) + (size_t)fields * sizeof(ot_value);
     size_t size = (base + bytes + 7) & ~(size_t)7;
     if (__builtin_expect(size <= h->ready - h->used, 1)) {
@@ -1114,6 +1114,9 @@ bool oti_evaluate_form(ot_state* rt, const oti_ast* form, ot_value* result);
 /* Load a module by namespace, as require does without options. */
 bool oti_load_module(ot_state* rt, uint32_t space);
 void oti_foreign_collect(ot_state* rt);
+/* Drop dead foreign objects and follow moved ones; the heap calls this during
+ * every collection, through its weak hook. */
+void oti_foreign_weak(ot_state* rt);
 void oti_foreign_stats(const ot_state* rt, ot_stats* stats);
 bool oti_foreign_init(ot_state* rt);
 void oti_foreign_destroy(ot_state* rt);

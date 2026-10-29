@@ -18,7 +18,7 @@ typedef struct {
 
 typedef struct {
   ot_state* rt;
-  unsigned char *objects, *functions, *constants;
+  unsigned char *functions, *constants;
   oti_reclaim_task* work;
   size_t count, capacity;
 } oti_reclaim_mark;
@@ -38,18 +38,15 @@ static bool mark_function(oti_reclaim_mark* m, uint32_t id) {
   return enqueue(m, id, true);
 }
 
-static size_t object_index(oti_reclaim_mark* m, ot_value value) {
-  return (value - (ot_value)m->rt->heap.space[m->rt->heap.active]) / 8;
+static bool reached(ot_value value) {
+  return (((oti_object_header*)value)->gc & OTI_GC_RECLAIM) != 0;
 }
 
 static bool mark_value(oti_reclaim_mark* m, ot_value value) {
   if (!value_is_ptr(value)) return true;
-  uintptr_t start = (uintptr_t)m->rt->heap.space[m->rt->heap.active];
-  if (value < start || value - start >= m->rt->heap.used)
-    return oti_error(m->rt, "invalid live object");
-  size_t bit = object_index(m, value);
-  if (m->objects[bit / 8] & (1u << (bit % 8))) return true;
-  m->objects[bit / 8] |= (unsigned char)(1u << (bit % 8));
+  if (!oti_heap_contains(&m->rt->heap, value)) return oti_error(m->rt, "invalid live object");
+  if (reached(value)) return true;
+  ((oti_object_header*)value)->gc |= OTI_GC_RECLAIM;
   return enqueue(m, value, false);
 }
 
@@ -81,10 +78,9 @@ bool oti_reclaim(ot_state* rt) {
    * frames reach, so code is reclaimed only while one thread is left. */
   if (oti_thread_count(rt) > 1) return true;
   oti_reclaim_mark m = {.rt = rt};
-  m.objects = calloc(rt->heap.used / 64 + 1, 1);
   m.functions = calloc(rt->function_count + 1, 1);
   m.constants = calloc(rt->constant_count + 1, 1);
-  bool ok = m.objects && m.functions && m.constants;
+  bool ok = m.functions && m.constants;
   if (!ok) oti_error(rt, "out of host memory");
   for (oti_roots* root = rt->heap.roots; ok && root; root = root->previous) {
     if (root == &rt->constant_roots) continue;
@@ -123,10 +119,9 @@ bool oti_reclaim(ot_state* rt) {
       ot_value value = rt->constants[i];
       /* The intern table is weak: retain entries for symbols reachable
              * through user data as well as those referenced by live code. */
-      if (oti_kind(value, K_SYMBOL) || oti_kind(value, K_KEYWORD) || oti_kind(value, K_CLOSURE)) {
-        size_t bit = object_index(&m, value);
-        if (m.objects[bit / 8] & (1u << (bit % 8))) m.constants[i] = 1;
-      }
+      if ((oti_kind(value, K_SYMBOL) || oti_kind(value, K_KEYWORD) || oti_kind(value, K_CLOSURE)) &&
+          reached(value))
+        m.constants[i] = 1;
       if (!m.constants[i]) {
         rt->constants[i] = OT_NIL;
         rt->constant_state[i] = 0;
@@ -145,11 +140,12 @@ bool oti_reclaim(ot_state* rt) {
     while (rt->constant_count && !rt->constant_state[rt->constant_count - 1]) rt->constant_count--;
     rt->constant_roots.count = rt->constant_count;
     rt->constant_free = rt->function_free = 0;
-    oti_heap_collect(&rt->heap);
-    if (rt->stack_stale > rt->sp) rt->stack_stale = rt->sp;
-    oti_foreign_collect(rt);
   }
-  free(m.objects);
+  /* A full collection also clears the reclaim marks, including those left by
+   * a mark that failed partway. */
+  oti_heap_collect_full(&rt->heap);
+  if (rt->stack_stale > rt->sp) rt->stack_stale = rt->sp;
+  oti_foreign_collect(rt);
   free(m.functions);
   free(m.constants);
   free(m.work);

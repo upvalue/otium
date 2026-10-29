@@ -120,6 +120,10 @@ struct oti_foreign_state {
   uint32_t null_constant;
   char loader_error[512];
   oti_callback* callbacks;
+  /* Every K_POINTER and K_FOREIGN_FUNCTION object, held weakly: collections
+   * drop the dead ones and update moved ones (oti_foreign_weak). */
+  ot_value* tracked;
+  size_t tracked_count, tracked_capacity;
   ot_value* values;
   oti_roots roots;
   size_t value_capacity, callback_count, call_depth;
@@ -193,9 +197,30 @@ static bool pointer(ot_state* rt, ot_value value, oti_pointer* out) {
   return true;
 }
 
+/* Record a new foreign object, or return 0 if there is no room to. */
+static ot_value track(ot_state* rt, ot_value value) {
+  oti_foreign_state* state = rt->foreign;
+  if (!value || !oti_grow(rt, (void**)&state->tracked, &state->tracked_capacity,
+                          state->tracked_count + 1, sizeof(ot_value)))
+    return 0;
+  state->tracked[state->tracked_count++] = value;
+  return value;
+}
+
+void oti_foreign_weak(ot_state* rt) {
+  oti_foreign_state* state = rt->foreign;
+  if (!state) return;
+  size_t kept = 0;
+  for (size_t i = 0; i < state->tracked_count; i++) {
+    ot_value value = oti_heap_survivor(&rt->heap, state->tracked[i]);
+    if (value) state->tracked[kept++] = value;
+  }
+  state->tracked_count = kept;
+}
+
 static ot_value pointer_object(ot_state* rt, oti_pointer p) {
   if (!p.address && !p.owner) return rt->constants[rt->foreign->null_constant];
-  ot_value value = oti_alloc(rt, K_POINTER, 0, OTI_BYTES(oti_pointer_obj, 0));
+  ot_value value = track(rt, oti_alloc(rt, K_POINTER, 0, OTI_BYTES(oti_pointer_obj, 0)));
   if (value) pointer_obj(value)->pointer = p;
   return value;
 }
@@ -243,9 +268,8 @@ void oti_foreign_collect(ot_state* rt) {
   for (oti_signature* p = state->signatures; p; p = p->next) p->marked = false;
   for (oti_memory* p = state->memory; p; p = p->next) p->marked = false;
   for (oti_callback* p = state->callbacks; p; p = p->next) p->marked = false;
-  unsigned char* space = rt->heap.space[rt->heap.active];
-  for (size_t offset = 0; offset < rt->heap.used;) {
-    ot_value value = (ot_value)(space + offset);
+  for (size_t i = 0; i < state->tracked_count; i++) {
+    ot_value value = state->tracked[i];
     if (oti_kind(value, K_FOREIGN_FUNCTION)) {
       oti_foreign_binding* binding = function_obj(value)->binding;
       if (binding) {
@@ -257,7 +281,6 @@ void oti_foreign_collect(ot_state* rt) {
       if (pointer->owner) pointer->owner->marked = true;
       if (pointer->callback) pointer->callback->marked = true;
     }
-    offset += ((oti_object_header*)value)->size;
   }
   oti_callback** callback = &state->callbacks;
   while (*callback) {
@@ -312,7 +335,7 @@ bool oti_foreign_init(ot_state* rt) {
   rt->foreign->values[0] = OT_NIL;
   rt->foreign->roots.slots = rt->foreign->values;
   rt->foreign->roots.count = 1;
-  ot_value null = oti_alloc(rt, K_POINTER, 0, OTI_BYTES(oti_pointer_obj, 0));
+  ot_value null = track(rt, oti_alloc(rt, K_POINTER, 0, OTI_BYTES(oti_pointer_obj, 0)));
   if (!null) return false;
   uint32_t index = oti_constant(rt, null);
   if (index == UINT32_MAX) return false;
@@ -333,6 +356,7 @@ void oti_foreign_destroy(ot_state* rt) {
     state->callbacks = next;
   }
   free(state->values);
+  free(state->tracked);
   while (state->bindings) {
     oti_foreign_binding* next = state->bindings->next;
     free(state->bindings);
@@ -423,7 +447,9 @@ static ot_value bind_function(ot_state* rt, size_t first, bool codes) {
   budget = 65536;
   if (live[0]) live[1] = layout_copy(rt, rt->stack[first + 3], 0, &budget);
   ot_value value =
-      live[0] && live[1] ? oti_alloc(rt, K_FOREIGN_FUNCTION, 4, OTI_BYTES(oti_function_obj, 4)) : 0;
+      live[0] && live[1]
+          ? track(rt, oti_alloc(rt, K_FOREIGN_FUNCTION, 4, OTI_BYTES(oti_function_obj, 4)))
+          : 0;
   if (value) {
     oti_function_obj* f = function_obj(value);
     f->binding = b;
@@ -1552,6 +1578,8 @@ bool oti_foreign_init(ot_state* rt) {
 void oti_foreign_destroy(ot_state* rt) { (void)rt; }
 
 void oti_foreign_collect(ot_state* rt) { (void)rt; }
+
+void oti_foreign_weak(ot_state* rt) { (void)rt; }
 
 void oti_foreign_stats(const ot_state* rt, ot_stats* stats) {
   (void)rt;

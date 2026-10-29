@@ -19,8 +19,8 @@ typedef struct {
 /* Buffers handed to the host live in the managed heap, and the runtime refuses
  * every reentrant call while the host is running. */
 static void managed(Host* h, const void* bytes, size_t length) {
-  uintptr_t start = (uintptr_t)h->rt->heap.space[h->rt->heap.active];
-  CHECK((uintptr_t)bytes >= start && (uintptr_t)bytes + length <= start + h->rt->heap.used);
+  CHECK(oti_heap_contains(&h->rt->heap, (ot_value)bytes));
+  CHECK(length == 0 || oti_heap_contains(&h->rt->heap, (ot_value)bytes + length - 1));
   if (h->reenter) {
     size_t collections = ot_get_stats(h->rt).collections;
     ot_value result;

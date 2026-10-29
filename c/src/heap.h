@@ -62,6 +62,9 @@ struct oti_roots {
  * slot holding a managed value. */
 typedef void (*oti_root_visitor)(void* context, ot_value* slot);
 typedef void (*oti_root_hook)(void* data, oti_root_visitor visit, void* context);
+/* Called once per collection, after everything live has been found and before
+ * any memory is reused. It may call oti_heap_survivor and nothing else. */
+typedef void (*oti_weak_hook)(void* data);
 
 #ifdef OTIUM_CHECK_ROOTS
 #define OTI_RETIRED_SPACES 16
@@ -90,6 +93,7 @@ typedef struct {
   unsigned active;
   oti_roots* roots;
   oti_root_hook hook;
+  oti_weak_hook weak;
   void* hook_data;
 #ifdef OTIUM_CHECK_ROOTS
   oti_retired_space retired[OTI_RETIRED_SPACES];
@@ -117,6 +121,12 @@ static inline void oti_heap_set_ready(oti_heap* h, size_t ready) {
 }
 
 void oti_heap_collect(oti_heap* h);
+/* A collection that finds everything live, never a partial one. */
+void oti_heap_collect_full(oti_heap* h);
+/* Inside the weak hook: where v lives now, or 0 if it died. */
+ot_value oti_heap_survivor(oti_heap* h, ot_value v);
+/* Whether v is the address of memory the heap manages. For assertions. */
+bool oti_heap_contains(const oti_heap* h, ot_value v);
 /* Zero means exhaustion. Every live managed value must be rooted across this call.
  * Fields are traced; trailing bytes are opaque. Returned fields start as nil. */
 ot_value oti_heap_alloc(oti_heap* h, uint32_t kind, uint32_t fields, size_t bytes);
@@ -124,13 +134,17 @@ ot_value oti_heap_alloc(oti_heap* h, uint32_t kind, uint32_t fields, size_t byte
 void oti_heap_fill(oti_heap* h);
 
 /* Inline field access for runtime object operations. */
+/* The same 16 bytes on every word size. Native code writes size and gc as one
+ * 64-bit store, so allocation leaves gc zero. */
 typedef struct {
-  size_t size;
+  uint32_t size;
+  uint32_t gc;
   uint32_t fields, kind;
-#if SIZE_MAX == UINT32_MAX
-  uint32_t padding; /* Keeps 32-bit headers a multiple of 8 bytes. */
-#endif
 } oti_object_header;
+
+/* Bits of the gc word. Reclaim marks what oti_reclaim reached; the collection
+ * that follows clears it on every object it keeps. */
+#define OTI_GC_RECLAIM 32u
 
 /* Closures keep their code, a word the collector skips, ahead of their
  * captured values. internal.h checks that K_CLOSURE has this number. */

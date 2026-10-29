@@ -99,6 +99,7 @@ static ot_value evacuate(oti_heap* h, ot_value v, const unsigned char* from, uns
     memcpy(copy, old, size);
   }
   *used += size;
+  copy->gc &= ~OTI_GC_RECLAIM;
   ot_value forwarded = (ot_value)copy;
   old->size = 0;
   memcpy(&old->fields, &forwarded, sizeof(forwarded));
@@ -132,6 +133,7 @@ static void copy_live(oti_heap* h, const unsigned char* from, unsigned char* to)
     for (uint32_t i = 0; i < o->fields; i++) fields[i] = evacuate(h, fields[i], from, to, &used);
     scan += o->size;
   }
+  if (h->weak) h->weak(h->hook_data);
   h->allocated_bytes += h->used - h->live_bytes;
   h->reclaimed_bytes += h->used - used;
   if (h->used > h->peak_used) h->peak_used = h->used;
@@ -160,6 +162,22 @@ void oti_heap_collect(oti_heap* h) {
   copy_live(h, h->space[h->active], h->space[h->active ^ 1]);
   h->active ^= 1;
 #endif
+}
+
+void oti_heap_collect_full(oti_heap* h) { oti_heap_collect(h); }
+
+ot_value oti_heap_survivor(oti_heap* h, ot_value v) {
+  (void)h;
+  oti_object_header* o = (oti_object_header*)v;
+  if (o->size) return 0;
+  ot_value forwarded;
+  memcpy(&forwarded, &o->fields, sizeof(forwarded));
+  return forwarded;
+}
+
+bool oti_heap_contains(const oti_heap* h, ot_value v) {
+  uintptr_t start = (uintptr_t)h->start;
+  return v >= start && v - start < h->used;
 }
 
 static bool grow(oti_heap* h, size_t needed) {
@@ -193,7 +211,7 @@ ot_value oti_heap_alloc(oti_heap* h, uint32_t kind, uint32_t fields, size_t byte
   size_t base = sizeof(oti_object_header) + (size_t)fields * sizeof(ot_value);
   if (bytes > SIZE_MAX - base - 7) return 0;
   size_t size = (base + bytes + 7) & ~(size_t)7;
-  if (size > h->limit) return 0;
+  if (size > h->limit || size > UINT32_MAX) return 0;
   if (size > h->capacity - h->used) {
     oti_heap_collect(h);
     /* As more of the space stays live, each collection frees less and they

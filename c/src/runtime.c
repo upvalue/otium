@@ -342,6 +342,9 @@ static void visit_roots(void* data, oti_root_visitor visit, void* context) {
   oti_visit_threads(rt, visit, context);
 }
 
+/* Weak references the runtime keeps outside the heap. */
+static void runtime_weak(void* data) { oti_foreign_weak(data); }
+
 #ifndef OTIUM_NATIVE
 oti_function* oti_closure_fn(ot_state* rt, ot_value closure) {
   return rt->functions[oti_closure_function(closure)];
@@ -561,6 +564,7 @@ ot_state* ot_create(size_t bytes, size_t stack_limit) {
   rt->required_namespace = UINT32_MAX;
   rt->interrupt_handler = rt->load_hook = UINT32_MAX;
   rt->heap.hook = visit_roots;
+  rt->heap.weak = runtime_weak;
   rt->heap.hook_data = rt;
   oti_roots_push(&rt->heap, &rt->constant_roots, NULL, 0);
   rt->restart_transfer[0] = rt->restart_transfer[1] = OT_NIL;

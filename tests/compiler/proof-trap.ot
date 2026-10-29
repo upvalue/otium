@@ -1,0 +1,14 @@
+;; A wrong proof, written by hand: in check mode it traps where it's used.
+
+(require otium.compiler :as compiler)
+(require otium.compiler.ir :as ir)
+
+(def (run text)
+  (let ((f (%native-install (compiler/compile-info (ir/text->tree text)))))
+    (try
+      (f)
+      (catch e (println (condition-message e))))))
+
+(run '(fn nil () (prim %car 5)))
+(run '(fn nil () (prim %fx+ 1 (quote a))))
+(run '(fn nil () (if (prim %fx< 1.5 2) 1 2)))

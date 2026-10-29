@@ -1,0 +1,336 @@
+;; Pass tests for the types pass: each case is a tree in text form and the
+;; text the pass should turn it into. Cases with the same text on both sides
+;; are rewrites that must not happen.
+;;
+;;   types-check.ot            run the cases
+;;   types-check.ot -- show    print what the pass makes of each case
+
+(require otium.compiler.ir :as ir)
+(require otium.compiler.rescope :as rescope)
+(require otium.compiler.types :as types)
+
+(def (run text)
+  (let ((info (ir/text->tree text)))
+    (types/optimize info)
+    (rescope/rescope info)
+    (ir/verify info)
+    (ir/tree->text info)))
+
+(def cases
+  '( ;; car and cdr of a proven pair.
+    ((fn f
+       (x.1)
+       (if (prim pair? x.1)
+           (prim car x.1)
+           nil))
+     (fn f
+       (x.1)
+       (if (prim pair? x.1)
+           (prim %car x.1)
+           nil)))
+    ;; A pair from cons.
+    ((fn f
+       (x.1)
+       (let ((p.2 (prim cons x.1 x.1))) (prim cdr p.2)))
+     (fn f
+       (x.1)
+       (let ((p.2 (prim cons x.1 x.1))) (prim %cdr p.2))))
+    ;; After car returns, its argument is a pair.
+    ((fn f
+       (x.1)
+       (begin
+         (prim car x.1)
+         (prim cdr x.1)))
+     (fn f
+       (x.1)
+       (begin
+         (prim car x.1)
+         (prim %cdr x.1))))
+    ;; Must not: car of a maybe-pair.
+    ((fn f
+       (x.1)
+       (prim car x.1))
+     (fn f
+       (x.1)
+       (prim car x.1)))
+    ((fn f
+       (x.1)
+       (if (prim null? x.1)
+           nil
+           (prim car x.1)))
+     (fn f
+       (x.1)
+       (if (prim null? x.1)
+           nil
+           (prim car x.1))))
+    ;; null? false on a list leaves a pair.
+    ((fn f
+       (x.1)
+       (let ((l.2 (prim cons 1 '())))
+         (if (prim null? l.2)
+             nil
+             (prim car l.2))))
+     (fn f
+       (x.1)
+       (let ((l.2 (prim cons 1 '()))) (prim %car l.2))))
+    ;; and, as a nested if.
+    ((fn f
+       (x.1)
+       (if (if (prim pair? x.1)
+               (prim pair? (prim cdr x.1))
+               #f)
+           (prim car x.1)
+           nil))
+     (fn f
+       (x.1)
+       (if (if (prim pair? x.1)
+               (prim pair? (prim %cdr x.1))
+               #f)
+           (prim %car x.1)
+           nil)))
+    ;; not swaps the branches.
+    ((fn f
+       (x.1)
+       (if (prim not (prim pair? x.1))
+           nil
+           (prim car x.1)))
+     (fn f
+       (x.1)
+       (if (prim not (prim pair? x.1))
+           nil
+           (prim %car x.1))))
+    ;; A predicate from the table.
+    ((fn f
+       (x.1)
+       (if (known nil? otium.core/nil? x.1)
+           0
+           (if (prim pair? x.1)
+               (prim car x.1)
+               1)))
+     (fn f
+       (x.1)
+       (if (known nil? otium.core/nil? x.1)
+           0
+           (if (prim pair? x.1)
+               (prim %car x.1)
+               1))))
+    ;; An if whose answer is known: the test goes, being pure.
+    ((fn f
+       (x.1)
+       (let ((p.2 (prim cons x.1 x.1)))
+         (if (prim pair? p.2)
+             1
+             2)))
+     (fn f
+       (x.1)
+       (let ((p.2 (prim cons x.1 x.1))) 1)))
+    ((fn f
+       (x.1)
+       (if (prim eq? x.1 nil)
+           (if (known nil? otium.core/nil? x.1)
+               1
+               2)
+           3))
+     (fn f
+       (x.1)
+       (if (prim eq? x.1 nil)
+           1
+           3)))
+    ;; Must not: a call with effects in a test that's dropped.
+    ((fn f
+       (g.1)
+       (if (prim cons (call g.1) 1)
+           1
+           2))
+     (fn f
+       (g.1)
+       (begin
+         (prim cons (call g.1) 1)
+         1)))
+    ;; Fixnum arithmetic and comparisons.
+    ((fn f
+       ()
+       (let ((a.1 1)
+             (b.2 2))
+         (if (prim < a.1 b.2)
+             (prim + a.1 b.2)
+             (prim * a.1 b.2))))
+     (fn f
+       ()
+       (let ((a.1 1)
+             (b.2 2))
+         (if (prim %fx< a.1 b.2)
+             (prim %fx+ a.1 b.2)
+             (prim %fx* a.1 b.2)))))
+    ;; Must not: a maybe-fixnum.
+    ((fn f
+       (n.1)
+       (prim + n.1 1))
+     (fn f
+       (n.1)
+       (prim + n.1 1)))
+    ;; A loop counter stays a fixnum.
+    ((fn f
+       (n.1)
+       (loop l.2
+             ((i.3 0) (acc.4 0))
+             (if (prim >= i.3 10)
+                 acc.4
+                 (recur l.2 (prim + i.3 1) (prim + acc.4 i.3)))))
+     (fn f
+       (n.1)
+       (loop l.2
+             ((i.3 0) (acc.4 0))
+             (if (prim %fx>= i.3 10)
+                 acc.4
+                 (recur l.2 (prim %fx+ i.3 1) (prim %fx+ acc.4 i.3))))))
+    ;; Must not: a loop variable that becomes something else.
+    ((fn f
+       (n.1)
+       (loop l.2
+             ((i.3 0))
+             (if (prim > i.3 10)
+                 i.3
+                 (recur l.2 (prim + i.3 n.1)))))
+     (fn f
+       (n.1)
+       (loop l.2
+             ((i.3 0))
+             (if (prim > i.3 10)
+                 i.3
+                 (recur l.2 (prim + i.3 n.1))))))
+    ((fn f
+       (x.1)
+       (loop l.2
+             ((p.3 (prim cons 1 2)))
+             (begin
+               (prim car p.3)
+               (recur l.2 x.1))))
+     (fn f
+       (x.1)
+       (loop l.2
+             ((p.3 (prim cons 1 2)))
+             (begin
+               (prim car p.3)
+               (recur l.2 x.1)))))
+    ;; Must not: a set! variable in a loop.
+    ((fn f
+       (x.1)
+       (let ((p.2 (prim cons 1 2)))
+         (begin
+           (while (prim pair? x.1)
+             (begin
+               (prim car p.2)
+               (set! p.2 (prim cdr x.1))
+               (set! x.1 (prim cdr x.1))))
+           (prim car p.2))))
+     (fn f
+       (x.1)
+       (let ((p.2 (prim cons 1 2)))
+         (begin
+           (while (prim pair? x.1)
+             (begin
+               (prim car p.2)
+               (set! p.2 (prim %cdr x.1))
+               (set! x.1 (prim %cdr x.1))))
+           (prim car p.2)))))
+    ;; A set! variable that stays a fixnum.
+    ((fn f
+       ()
+       (let ((i.1 0))
+         (begin
+           (while (prim < i.1 10) (set! i.1 (prim + i.1 1)))
+           i.1)))
+     (fn f
+       ()
+       (let ((i.1 0))
+         (begin
+           (while (prim %fx< i.1 10) (set! i.1 (prim %fx+ i.1 1)))
+           i.1))))
+    ;; Must not: a captured assigned variable.
+    ((fn f
+       ()
+       (let ((p.1 (prim cons 1 2)))
+         (begin
+           (call (fn g
+                   ()
+                   (set! p.1 nil)))
+           (prim car p.1))))
+     (fn f
+       ()
+       (let ((p.1 (prim cons 1 2)))
+         (begin
+           (call (fn g
+                   ()
+                   (set! p.1 nil)))
+           (prim car p.1)))))
+    ;; A captured variable never assigned keeps its type in the closure.
+    ((fn f
+       ()
+       (let ((p.1 (prim cons 1 2)))
+         (fn g
+           ()
+           (prim car p.1))))
+     (fn f
+       ()
+       (let ((p.1 (prim cons 1 2)))
+         (fn g
+           ()
+           (prim %car p.1)))))
+    ;; Must not: a variable assigned in a try body, in the catch.
+    ((fn f
+       (x.1)
+       (let ((p.2 (prim cons 1 2)))
+         (try
+           (begin
+             (set! p.2 x.1)
+             (call x.1))
+           c.3
+           (catch e.4 (prim car p.2)))))
+     (fn f
+       (x.1)
+       (let ((p.2 (prim cons 1 2)))
+         (try
+           (begin
+             (set! p.2 x.1)
+             (call x.1))
+           c.3
+           (catch e.4 (prim car p.2))))))
+    ;; Must not: narrowing from car in a try body, in the catch.
+    ((fn f
+       (x.1)
+       (try
+         (prim car x.1)
+         c.2
+         (catch e.3 (prim cdr x.1))))
+     (fn f
+       (x.1)
+       (try
+         (prim car x.1)
+         c.2
+         (catch e.3 (prim cdr x.1)))))))
+
+(def (main args)
+  (let ((failures 0))
+    (for ((c :in cases))
+      (let ((got (try
+                   (run (car c))
+                   (catch (error? problem) (list 'error (condition-message problem)))))
+            (want (ir/tree->text (ir/text->tree (car (cdr c))))))
+        (cond
+          ((equal? args '("show")) (write got) (newline))
+          ((not (equal? got want))
+           (set! failures (+ failures 1))
+           (println "FAIL " (car c))
+           (print "  got  ")
+           (write got)
+           (newline)
+           (print "  want ")
+           (write want)
+           (newline)))))
+    (println (str (length cases) " cases, " failures " failures"))
+    (exit (if (= failures 0)
+              0
+              1))))
+
+(main (otium.process/arguments))

@@ -287,13 +287,13 @@ static size_t bind_fact(oti_compiler* c, const oti_ast* name, uint32_t reg, bool
   return c->binding_count++;
 }
 
-static size_t bind(oti_compiler* c, const oti_ast* name, uint32_t reg, bool initialized) {
+static size_t bind_local(oti_compiler* c, const oti_ast* name, uint32_t reg, bool initialized) {
   return bind_fact(c, name, reg, initialized, new_fact(c));
 }
 
 /* A binding created with its value already in its register. */
 static bool bind_value(oti_compiler* c, const oti_ast* name, uint32_t reg) {
-  size_t b = bind(c, name, reg, true);
+  size_t b = bind_local(c, name, reg, true);
   return b != SIZE_MAX && (!c->bindings[b].boxed || emit(c, OP_BOX, reg, 0, 0) != SIZE_MAX);
 }
 
@@ -922,7 +922,7 @@ static bool lambda(oti_compiler* c, const oti_ast* params, const oti_ast* forms,
       ok = error(c, name, "duplicate parameter");
       break;
     }
-    if (bind(&child, name, next_register(&child), true) == SIZE_MAX) {
+    if (bind_local(&child, name, next_register(&child), true) == SIZE_MAX) {
       ok = false;
       break;
     }
@@ -935,7 +935,7 @@ static bool lambda(oti_compiler* c, const oti_ast* params, const oti_ast* forms,
       ok = error(c, rest, "expected a rest parameter symbol");
     else if (prior != SIZE_MAX && child.bindings[prior].kind != BIND_SELF)
       ok = error(c, rest, "duplicate parameter");
-    else if (bind(&child, rest, next_register(&child), true) == SIZE_MAX) ok = false;
+    else if (bind_local(&child, rest, next_register(&child), true) == SIZE_MAX) ok = false;
     else child.fn->rest = true;
   }
   for (const oti_ast* p = optional; ok && p; p = p->next) {
@@ -996,7 +996,7 @@ static bool body(oti_compiler* c, const oti_ast* forms, uint32_t dst, bool tail,
       const oti_ast* name = definition_name(a);
       if (!name) continue;
       uint32_t reg = next_register(c);
-      size_t b = bind(c, name, reg, false);
+      size_t b = bind_local(c, name, reg, false);
       if (b == SIZE_MAX || !load_constant(c, V_UNBOUND, reg) ||
           (c->bindings[b].boxed && emit(c, OP_BOX, reg, 0, 0) == SIZE_MAX))
         return false;

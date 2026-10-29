@@ -242,7 +242,10 @@ void ot_request_interrupt(ot_state* rt, int reason) {
   int saved = errno;
   if (rt->wake_pipe[1] >= 0) {
     char byte = 0;
-    (void)write(rt->wake_pipe[1], &byte, 1);
+    /* A full pipe already wakes the reader. GCC doesn't take a (void) cast
+     * as ignoring write's result, so name it. */
+    ssize_t written = write(rt->wake_pipe[1], &byte, 1);
+    (void)written;
   }
   errno = saved;
 #endif

@@ -1,0 +1,39 @@
+;; Captures in the orders convert meets them, which rescope must follow.
+
+;; Local definitions captured before and after they are initialized.
+(def (definitions x)
+  (def (g)
+    (+ (h) x))
+  (def (h)
+    (* x 2))
+  (def k (fn () (g)))
+  (k))
+
+(println (definitions 5))
+
+;; An escaping named let converts its initializers before its function.
+(def (escaping a b)
+  (fn ()
+    (let loop ((i a)
+               (acc '()))
+      (if (= i 0)
+          (list acc (procedure? (fn () loop)))
+          (loop (- i 1) (cons b acc))))))
+
+(println ((escaping 3 :x)))
+
+;; %call-with-cleanup converts its thunk before its cleanup.
+;; lint: allow(unbound-name) a special form the compilers know
+(def (cleanups a b)
+  (fn () (%call-with-cleanup (fn () a) (fn (outcome) (println (list :cleanup b outcome))))))
+
+(println ((cleanups 1 2)))
+
+;; An assigned variable captured before its definition.
+(def (assigned-early)
+  (set! v 1)
+  (def get-v (fn () v))
+  (def v 2)
+  (get-v))
+
+(println (assigned-early))

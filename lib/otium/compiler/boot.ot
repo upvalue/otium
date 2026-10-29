@@ -27,8 +27,12 @@
   (let ((name (car (cdr form))))
     (if (pair? name) (car name) name)))
 
+;; A writer's :compile, when set, takes each form instead of the compiler:
+;; tests use it to see the forms a build compiles.
 (def (compile! w form)
-  (fasl/unit! w (nc/compile-top form)))
+  (if (w :compile)
+      ((w :compile) form)
+      (fasl/unit! w (nc/compile-top form))))
 
 ;; One form as read from a file: evaluate_top, then evaluate_expanded.
 (def (top! w form)
@@ -85,8 +89,9 @@
 
 ;; Write the boot file: the expander and core library, loaded at startup,
 ;; and modules native processes load from it instead of source.
-(def (build out library primitives modules)
-  (let ((w (fasl/make-writer)) (saved (current-ns)))
+;; Compile the expander, core library and modules into w.
+(def (boot! w library primitives modules)
+  (let ((saved (current-ns)))
     (fasl/source! w nil)
     ;; Each library file starts in the core namespace, as the runtime loads it.
     (library-file! w (str library "/otium/expander.ot"))
@@ -96,27 +101,38 @@
     (library-file! w primitives)
     (library-file! w (str library "/otium/core.ot"))
     (%set-namespace saved)
-    (for ((name :in modules)) (module! w name library))
+    (for ((name :in modules)) (module! w name library))))
+
+(def (build out library primitives modules)
+  (let ((w (fasl/make-writer)))
+    (boot! w library primitives modules)
     (let ((port (open-binary-output-file out)))
       (write-bytevector (fasl/finish w) port)
       (close-port port))))
 
+(def standard-modules
+  '(otium.loop otium.compiler.options otium.compiler.known otium.compiler.convert
+    otium.compiler.rescope otium.compiler.ir otium.compiler.lower otium.compiler.alloc otium.compiler.emit otium.compiler.fasl otium.compiler))
+
 ;; The standard boot file: the expander, core, and the compiler's modules.
 (def (build-standard out library primitives)
-  (build out library primitives
-         '(otium.loop otium.compiler.options otium.compiler.known otium.compiler.convert otium.compiler.lower otium.compiler.alloc
-           otium.compiler.emit otium.compiler.fasl otium.compiler)))
+  (build out library primitives standard-modules))
 
-;; Compile a program file to a fasl that a native process loads after its
-;; boot file, in the user namespace, for testing.
-(def (compile-file path out)
-  (let ((w (fasl/make-writer)) (saved (current-ns)))
+;; Compile a program into w, in the user namespace, evaluating it as it goes.
+(def (program! w path)
+  (let ((saved (current-ns)))
     (put! w :evaluate #t)
     (fasl/source! w path)
     (fasl/namespace! w 'user)
     (%set-namespace 'user)
     (file! w path)
-    (%set-namespace saved)
+    (%set-namespace saved)))
+
+;; Compile a program file to a fasl that a native process loads after its
+;; boot file, for testing.
+(def (compile-file path out)
+  (let ((w (fasl/make-writer)))
+    (program! w path)
     (let ((port (open-binary-output-file out)))
       (write-bytevector (fasl/finish w) port)
       (close-port port))))

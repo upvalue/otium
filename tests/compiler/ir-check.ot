@@ -1,0 +1,277 @@
+;; Checks of the tree IR over every form a build compiles: the verifier
+;; passes, printing, parsing and printing again gives the same text, copying
+;; gives the same text, and rescope reproduces what convert decided.
+;;
+;;   ir-check.ot -- boot LIBRARY PRIMITIVES
+;;   ir-check.ot -- programs FILE ...
+;;   ir-check.ot -- texts
+
+(require otium.compiler.boot :as boot)
+(require otium.compiler.convert :as cv)
+(require otium.compiler.fasl :as fasl)
+(require otium.compiler.ir :as ir)
+(require otium.compiler.rescope :as rescope)
+
+(def failures 0)
+
+(def checked 0)
+
+(def (fail! what form detail)
+  (set! failures (+ failures 1))
+  (when (<= failures 5)
+    (println (str "FAIL " what " in " (current-ns) " at " (%source-offset form)))
+    (println (str "  " detail))))
+
+;; The variables and functions of a tree, in the order a walk meets them, with
+;; what rescope decides: variables numbered by that order, so trees with
+;; different variables compare.
+(def (facts info)
+  (let ((ids {})
+        (out []))
+    (def (number var)
+      (or (get ids (var :id))
+          (let ((n (length ids)))
+            (put! ids (var :id) n)
+            n)))
+    (def (var! var)
+      (when var
+        (push! out
+               [(number var)
+                (if (var :captured)
+                    #t
+                    #f)
+                (if (var :assigned)
+                    #t
+                    #f)
+                (if (var :early)
+                    #t
+                    #f)])))
+    (def (function! info)
+      (var! (info :self))
+      (for ((v :in (info :params)))
+        (var! v))
+      (for ((pair :in (info :optionals)))
+        (var! (get pair 0))
+        (node! (get pair 1)))
+      (var! (info :rest))
+      (node! (info :body))
+      (push! out (cons :captures (map number (array-to-list (info :captures))))))
+    (def (node! node)
+      (case (get node 0)
+        ((:lref :lset) (var! (get node 2)))
+        ((:let)
+         (for ((v :in (get node 2)))
+           (var! v)))
+        ((:loop)
+         (var! ((get node 2) :var))
+         (for ((v :in ((get node 2) :vars)))
+           (var! v)))
+        ((:try)
+         (var! (get node 3))
+         (for ((clause :in (get node 4)))
+           (var! (get clause 1))))
+        ((:fn) (function! (get node 2))))
+      (for ((child :in (children node)))
+        (node! child)))
+    (function! info)
+    out))
+
+;; A node's children, other than in a function record.
+(def (children node)
+  (let ((out []))
+    (def (add! x)
+      (cond
+        ((nil? x) nil)
+        ((and (array? x) (keyword? (get x 0))) (push! out x))
+        ((array? x)
+         (for ((y :in x))
+           (add! y)))))
+    (unless (eq? (get node 0) :fn)
+      (for ((i :range 2 (length node)))
+        (add! (get node i))))
+    out))
+
+(def (check-form form)
+  (set! checked (+ checked 1))
+  (let ((info (cv/convert-top form)))
+    (try
+      (let ((decided (facts info)))
+        (ir/verify info)
+        (let ((text (ir/tree->text info)))
+          (let ((parsed (ir/text->tree text)))
+            (ir/verify parsed)
+            (unless (equal? text (ir/tree->text parsed)) (fail! "round trip" form (ir/tree->text parsed)))
+            (unless (equal? decided (facts parsed)) (fail! "parsed facts" form text)))
+          (let ((copied (ir/copy-function info nil)))
+            (rescope/rescope copied)
+            (ir/verify copied)
+            (unless (equal? text (ir/tree->text copied)) (fail! "copy" form text))
+            (unless (equal? decided (facts copied)) (fail! "copied facts" form text)))
+          (rescope/rescope info)
+          (ir/verify info)
+          (unless (equal? decided (facts info))
+            (fail! "rescope" form (str text "\n  convert " decided "\n  rescope " (facts info))))))
+      (catch (error? problem) (fail! "error" form (condition-message problem))))))
+
+(def (writer)
+  (let ((w (fasl/make-writer)))
+    (put! w :compile check-form)
+    w))
+
+(def (finish)
+  (println (str "checked " checked " forms, " failures " failures"))
+  (exit (if (= failures 0)
+            0
+            1)))
+
+;; --- Hand-written trees ------------------------------------------------------
+
+;; Texts that parse, verify, and print back as they are.
+(def good-texts
+  '((fn nil
+      ()
+      (known :tail map otium.core/map otium.core/car (quote (1 2))))
+    (fn f
+      :self f.1
+      (a.2 &optional (b.3 a.2) (c.4 :k))
+      (handlers ((otium.core/error? (fn nil
+                                      (e.5)
+                                      e.5)))
+                (with-params ((otium.core/list b.3))
+                  (restarts (((quote use)
+                              "doc"
+                              (fn nil
+                                x.6
+                                x.6)))
+                            (call :tail f.1 c.4)))))
+    (fn nil
+      (a.1 . r.2)
+      (try
+        (call (quote :tail) a.1)
+        condition.3
+        (catch e.4
+          (begin
+            (set! a.1 e.4)
+            (evaluator)))
+        (catch-if otium.core/error?
+                  e.5
+                  (cleanup :outcome (fn nil
+                                      (o.6)
+                                      o.6)
+                           (bcall :tail-position "list" (unbound) (class-object))))))
+    (fn nil
+      (x.1)
+      (loop l.2
+            ((i.3 0))
+            (if (prim < i.3 3)
+                (recur l.2 (prim + i.3 1))
+                (begin
+                  (while #f (gprim get otium.core/get x.1 0))
+                  (set-global! user/ir-check-x
+                               (fn nil
+                                 ()
+                                 (fn nil
+                                   ()
+                                   (checked x.1))))
+                  (gcall :check user/ir-check-x (make-param (quote p) nil))))))))
+
+(def (good)
+  (for ((text :in good-texts))
+    (try
+      (let ((info (ir/text->tree text)))
+        (ir/verify info)
+        (if (equal? text (ir/tree->text info))
+            (set! checked (+ checked 1))
+            (fail! "text" nil (ir/tree->text info))))
+      (catch (error? problem) (fail! "text" nil (condition-message problem))))))
+
+;; --- Trees the verifier rejects ---------------------------------------------
+
+(def (rejects name expected tree)
+  (let ((message (try
+                   (begin
+                     (ir/verify tree)
+                     nil)
+                   (catch (error? problem) (condition-message problem)))))
+    (cond
+      ((nil? message) (fail! name nil "accepted"))
+      ((not (string-contains? message expected)) (fail! name nil message))
+      (else (set! checked (+ checked 1))))))
+
+(def (bad)
+  (rejects "out of scope"
+           "out of scope"
+           (ir/text->tree '(fn nil
+                             ()
+                             (begin
+                               (let ((x.1 1)) x.1)
+                               x.1))))
+  (let ((info (ir/text->tree '(fn nil
+                                ()
+                                (let ((x.1 1)) x.1)))))
+    (let ((body (info :body)))
+      (put! info :body [:let 0 (get body 2) [[:const 0 2]] body])
+      (rejects "bound twice" "bound twice" info)))
+  (rejects "recur not in tail position"
+           "not in tail position"
+           (ir/text->tree '(fn nil
+                             ()
+                             (loop l.1
+                                   ((i.2 0))
+                                   (begin
+                                     (recur l.1 1)
+                                     2)))))
+  (rejects "recur from a function"
+           "not in tail position"
+           (ir/text->tree '(fn nil
+                             ()
+                             (loop l.1
+                                   ((i.2 0))
+                                   (fn nil
+                                     ()
+                                     (recur l.1 1))))))
+  (rejects "recur's arguments"
+           "one argument per loop variable"
+           (ir/text->tree '(fn nil
+                             ()
+                             (loop l.1 ((i.2 0)) (recur l.1)))))
+  (let ((info (ir/text->tree '(fn nil
+                                ()
+                                1))))
+    (put! info :body [:if 0 [:const 0 1] [:const 0 2]])
+    (rejects "shape" "wrong number of fields" info))
+  (let ((info (ir/text->tree '(fn nil
+                                ()
+                                1))))
+    (put! info :body [:bogus 0])
+    (rejects "unknown node" "unknown node" info))
+  (let ((info (ir/text->tree '(fn nil
+                                (x.1)
+                                (fn nil
+                                  ()
+                                  x.1)))))
+    (put! ((info :body) 2) :captures [])
+    (rejects "missing capture" "missing from captures" info))
+  (let ((info (ir/text->tree '(fn nil
+                                (x.1)
+                                (fn nil
+                                  ()
+                                  1)))))
+    (push! (((info :body) 2) :captures) (get (info :params) 0))
+    (rejects "extra capture" "doesn't use" info))
+  (let ((info (ir/text->tree '(fn nil
+                                (x.1)
+                                (fn nil
+                                  (y.2)
+                                  y.2)))))
+    (put! (get (((info :body) 2) :params) 0) :owner info)
+    (rejects "owner" "owned by another function" info)))
+
+(let ((args (otium.process/arguments)))
+  (case (string->symbol (car args))
+    ((boot) (boot/boot! (writer) (get (list-to-array args) 1) (get (list-to-array args) 2) boot/standard-modules))
+    ((programs)
+     (for ((path :in (cdr args)))
+       (boot/program! (writer) path)))
+    ((texts) (good) (bad)))
+  (finish))

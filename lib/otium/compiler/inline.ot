@@ -58,16 +58,16 @@
     info))
 
 (def (binding s var)
-  (get (s :env) (var :id)))
+  (get (s :env) (cv/var-id var)))
 
 (def (bind! s var b)
-  (put! (s :env) (var :id) b))
+  (put! (s :env) (cv/var-id var) b))
 
 (def (refs s var)
-  (get (s :refs) (var :id) 0))
+  (get (s :refs) (cv/var-id var) 0))
 
 (def (count-ref! s var)
-  (put! (s :refs) (var :id) (+ (refs s var) 1)))
+  (put! (s :refs) (cv/var-id var) (+ (refs s var) 1)))
 
 ;; The nodes directly inside node; for a fn, its defaults and body.
 (def (children node)
@@ -110,7 +110,7 @@
 ;; An lref that can stand for its variable anywhere in the variable's scope:
 ;; no initialization check, never assigned, not a loop's name.
 (def (copyable? node)
-  (and (eq? (get node 0) :lref) (not (get node 3)) (let ((var (get node 2))) (not (or (var :assigned) (var :loop))))))
+  (and (eq? (get node 0) :lref) (not (get node 3)) (let ((var (get node 2))) (not (or (cv/var-assigned var) (cv/var-loop var))))))
 
 ;; The table entry for a :prim or :known node.
 (def (entry-of node)
@@ -290,7 +290,7 @@
 
 (def (simplify-ref s node ctx)
   (let ((var (get node 2)))
-    (let ((b (and (not (var :assigned)) (binding s var))))
+    (let ((b (and (not (cv/var-assigned var)) (binding s var))))
       (cond
         ((and b (eq? (b :kind) :const))
          (if (eq? ctx :effect)
@@ -307,7 +307,7 @@
         (value (simplify s (get node 3) :value)))
     (let ((b (binding s var))
           (new [:lset (get node 1) var value]))
-      (if (and b (eq? (b :kind) :pending) (not (var :assigned)))
+      (if (and b (eq? (b :kind) :pending) (not (cv/var-assigned var)))
           (begin
             (put! b :kind (kind-of value))
             (put! b :value value)
@@ -386,7 +386,7 @@
            (put! values i init)
            (bind! s
                   var
-                  {:kind (if (var :assigned)
+                  {:kind (if (cv/var-assigned var)
                              :opaque (kind-of init))
                    :value init}))
           ((eq? (get init 0) :unbound)
@@ -394,10 +394,10 @@
            (put! values i init)
            (bind! s
                   var
-                  {:kind (if (var :assigned)
+                  {:kind (if (cv/var-assigned var)
                              :opaque
                              :pending)}))
-          ((var :assigned) (put! values i (simplify s init :value)) (bind! s var {:kind :opaque}))
+          ((cv/var-assigned var) (put! values i (simplify s init :value)) (bind! s var {:kind :opaque}))
           ((eq? (get init 0) :fn) (bind! s var {:kind :fn :value init :calls (call-count body var)}))
           ((copyable? init) (put! values i init) (bind! s var {:kind :copy :value init}))
           (else (let ((value (simplify s init :value)))
@@ -491,7 +491,7 @@
     ((:fn) node)
     ((:lref)
      (let ((var (get node 2)))
-       (let ((b (and (not (var :assigned)) (not (get node 3)) (binding s var))))
+       (let ((b (and (not (cv/var-assigned var)) (not (get node 3)) (binding s var))))
          (when b
            (case (b :kind)
              ((:fn) (when (or (<= (or (b :calls) 1) 1) (<= (node-size (b :value)) shared-fn-size)) (b :value)))
@@ -600,10 +600,11 @@
         (renames {})
         (params []))
     (for ((v :in (info :params)))
-      (let ((new (cv/make-var (v :name) owner #t)))
-        (for ((key :in '(:captured :assigned :early)))
-          (when (v key) (put! new key (v key))))
-        (put! renames (v :id) new)
+      (let ((new (cv/new-var (cv/var-name v) owner #t)))
+        (cv/set-var-captured! new (cv/var-captured v))
+        (cv/set-var-assigned! new (cv/var-assigned v))
+        (cv/set-var-early! new (cv/var-early v))
+        (put! renames (cv/var-id v) new)
         (push! params new)))
     (let ((body (ir/copy-node (info :body) owner renames))
           (outer (s :attempt))

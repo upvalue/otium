@@ -29,18 +29,20 @@
 
 ;; --- Variables and functions ----------------------------------------------
 
-;; Records are tables. A variable has :name, :id, :owner (its function),
-;; :captured, :assigned, :early (captured before initialized), :initialized,
-;; :self (refers to its own function's closure), :loop (names a loop) and
-;; :forms (the body it was defined in). A function has :name, :params,
-;; :optionals ([var default] pairs), :rest, :body, :captures, :self, :offset
-;; and :parent.
+;; A variable is a Var record: its name, id, owner (its function), whether
+;; it's captured, assigned, early (captured before initialized),
+;; initialized, and self (refers to its own function's closure), the loop it
+;; names and the forms of the body it was defined in. A function is a table
+;; with :name, :params, :optionals ([var default] pairs), :rest, :body,
+;; :captures, :self, :offset and :parent.
 
 (def- *var-count* 0)
 
-(def (make-var name owner initialized)
+(defrecord Var (name id owner captured assigned early initialized self loop forms) :prefix var)
+
+(def (new-var name owner initialized)
   (set! *var-count* (+ *var-count* 1))
-  {:name name :id *var-count* :owner owner :initialized initialized})
+  (make-var :name name :id *var-count* :owner owner :initialized initialized))
 
 (def (make-fn name parent offset)
   {:name name :params [] :optionals [] :captures [] :offset offset :parent parent})
@@ -81,10 +83,10 @@
 
 ;; Capture var in fn and every function between fn and the variable's owner.
 (def (capture! func var)
-  (put! var :captured #t)
-  (unless (var :initialized) (put! var :early #t))
+  (set-var-captured! var #t)
+  (unless (var-initialized var) (set-var-early! var #t))
   (let walk ((f func))
-    (when (and f (not (eq? f (var :owner))))
+    (when (and f (not (eq? f (var-owner var))))
       (let ((captures (f :captures)))
         (unless (find (fn (v) (eq? v var)) captures)
           (push! captures var)))
@@ -141,13 +143,13 @@
 
 (def (local-ref var site off)
   (let ((func (site :fn)))
-    (cond ((var :loop)
+    (cond ((var-loop var)
            ;; A loop's name used as a value means the loop needs a function.
-           (escape! (var :loop) site)
+           (escape! (var-loop var) site)
            [:lref off var #f])
           (else
-           (unless (eq? (var :owner) func) (capture! func var))
-           [:lref off var (not (var :initialized))]))))
+           (unless (eq? (var-owner var) func) (capture! func var))
+           [:lref off var (not (var-initialized var))]))))
 
 (def (escape! loop site)
   (unless (loop :escaped)
@@ -279,7 +281,7 @@
                         (fail "cond else must be last" clause off)
                         (body-forms (cdr clause) (with-site site :definitions #f) off)))
                    ((null? (cdr clause))
-                    (let ((var (make-var 'cond-value (site :fn) #t)))
+                    (let ((var (new-var 'cond-value (site :fn) #t)))
                       [:let off [var] [(expression (car clause) (non-tail site) off)]
                        [:if off [:lref off var #f] [:lref off var #f] (walk (cdr cs))]]))
                    (else
@@ -293,7 +295,7 @@
         (else
          (let ((first (expression (car args) (non-tail site) off))
                (rest (logic-form head (cdr args) site off))
-               (var (make-var 'logic (site :fn) #t)))
+               (var (new-var 'logic (site :fn) #t)))
            [:let off [var] [first]
             (if (eq? head 'and)
                 [:if off [:lref off var #f] rest [:lref off var #f]]
@@ -333,8 +335,8 @@
     (for ((f :in forms))
       (let ((name (definition-name f)))
         (when (symbol? name)
-          (let ((var (make-var name (site :fn) #f)))
-            (put! var :forms forms)
+          (let ((var (new-var name (site :fn) #f)))
+            (set-var-forms! var forms)
             (push! vars var)
             (set! env (bind env name var))))))
     (if (= (length vars) 0)
@@ -381,7 +383,7 @@
 
 (def (local-definition form name args value-form site off)
   (let ((var (lookup (site :env) name)))
-    (cond ((or (not var) (not (eq? (var :owner) (site :fn))) (var :loop))
+    (cond ((or (not var) (not (eq? (var-owner var) (site :fn))) (var-loop var))
            ;; Not in this body's binding list: assign what it resolves to.
            (let ((value (if (nil? value-form)
                             [:fn off (lambda-form (cdr (car args)) (cdr args) site off name nil)]
@@ -390,11 +392,11 @@
           (else
            (let ((value (if (nil? value-form)
                             [:fn off (lambda-form (cdr (car args)) (cdr args) site off name
-                                                  (unless (assigned-in? name (var :forms))
+                                                  (unless (assigned-in? name (var-forms var))
                                                     var))]
                             (expression value-form (non-tail site) off))))
-             (when (var :initialized) (put! var :assigned #t))
-             (put! var :initialized #t)
+             (when (var-initialized var) (set-var-assigned! var #t))
+             (set-var-initialized! var #t)
              [:lset off var value])))))
 
 ;; Whether forms set! sym anywhere, ignoring shadowing.
@@ -418,12 +420,12 @@
 (def (assignment sym value site off)
   (let ((var (lookup (site :env) sym)))
     (cond ((nil? var) [:gset off (%native-cell sym) value])
-          ((var :loop)
-           (escape! (var :loop) site)
+          ((var-loop var)
+           (escape! (var-loop var) site)
            [:seq off [value (literal nil off)]])
           (else
-           (put! var :assigned #t)
-           (unless (eq? (var :owner) (site :fn)) (capture! (site :fn) var))
+           (set-var-assigned! var #t)
+           (unless (eq? (var-owner var) (site :fn)) (capture! (site :fn) var))
            [:seq off [[:lset off var value] (literal nil off)]]))))
 
 ;; --- Functions -----------------------------------------------------------
@@ -436,12 +438,12 @@
   (let ((info (make-fn name (site :fn) off))
         (env (site :env)))
     (when self
-      (let ((own (make-var (self :name) info #t)))
-        (put! own :self #t)
+      (let ((own (new-var (var-name self) info #t)))
+        (set-var-self! own #t)
         (put! info :self own)
-        (set! env (bind env (self :name) own))))
+        (set! env (bind env (var-name self) own))))
     (cond ((symbol? params)
-           (let ((v (make-var params info #t)))
+           (let ((v (new-var params info #t)))
              (put! info :rest v)
              (set! env (bind env params v))))
           ((not (or (pair? params) (null? params)))
@@ -452,7 +454,7 @@
                    ((symbol? p)
                     (if (memq p seen)
                         (fail "duplicate parameter" p off)
-                        (let ((v (make-var p info #t)))
+                        (let ((v (new-var p info #t)))
                           (put! info :rest v)
                           (set! env (bind env p v)))))
                    ((eq? (car p) '&optional)
@@ -465,7 +467,7 @@
                                        (null? (cdr (cdr spec))))
                             (fail "expected (name default) after &optional" spec off))
                           (when (memq (car spec) seen) (fail "duplicate parameter" (car spec) off))
-                          (let ((v (make-var (car spec) info #t)))
+                          (let ((v (new-var (car spec) info #t)))
                             (push! (info :optionals)
                                    [v (expression (car (cdr spec))
                                                   (make-site info env #f #f #f (site :ctx))
@@ -475,7 +477,7 @@
                    ((not (symbol? (car p))) (fail "expected a symbol parameter" (car p) off))
                    ((memq (car p) seen) (fail "duplicate parameter" (car p) off))
                    (else
-                    (let ((v (make-var (car p) info #t)))
+                    (let ((v (new-var (car p) info #t)))
                       (push! (info :params) v)
                       (set! env (bind env (car p) v))
                       (walk (cdr p) (cons (car p) seen))))))))
@@ -506,7 +508,7 @@
   (let ((vars []) (inits []) (env (site :env)))
     (for ((b :in bindings))
       (push! inits (expression (car (cdr b)) (with-site (non-tail site) :env env) off))
-      (let ((v (make-var (car b) (site :fn) #t)))
+      (let ((v (new-var (car b) (site :fn) #t)))
         (push! vars v)
         (set! env (bind env (car b) v))))
     [:let off vars inits (body-forms body (with-site (scope site) :env env :definitions #t) off)]))
@@ -527,11 +529,11 @@
       (for ((b :in bindings))
         (when (memq (car b) seen) (fail "duplicate parameter" (car b) off))
         (set! seen (cons (car b) seen))
-        (let ((v (make-var (car b) (site :fn) #t)))
+        (let ((v (new-var (car b) (site :fn) #t)))
           (push! (loop :vars) v)
           (set! env (bind env (car b) v)))))
-    (let ((lv (make-var name (site :fn) #t)))
-      (put! lv :loop loop)
+    (let ((lv (new-var name (site :fn) #t)))
+      (set-var-loop! lv loop)
       (put! loop :var lv)
       (set! env (bind env name lv)))
     (let ((forms (if (and (pair? body) (string? (car body)) (pair? (cdr body))) (cdr body) body)))
@@ -547,16 +549,16 @@
         (inits (map (fn (b) (expression (car (cdr b)) (non-tail site) off)) bindings)))
     (if (assigned-in? name body)
         ;; An assigned loop name is a real binding the function captures.
-        (let ((var (make-var name (site :fn) #f)))
+        (let ((var (new-var name (site :fn) #f)))
           (let ((inner (with-site site :env (bind (site :env) name var))))
             (let ((info (lambda-form params body inner off name nil)))
-              (put! var :initialized #t)
-              (let ((temps (map (fn (p) (make-var p (site :fn) #t)) params)))
+              (set-var-initialized! var #t)
+              (let ((temps (map (fn (p) (new-var p (site :fn) #t)) params)))
                 [:let off (list-to-array temps) (list-to-array inits)
                  [:let off [var] [[:fn off info]]
                   [:call off [:lref off var #f]
                    (list-to-array (map (fn (t) [:lref off t #f]) temps)) (site :tail)]]]))))
-        (let ((self (make-var name (site :fn) #t)))
+        (let ((self (new-var name (site :fn) #t)))
           (let ((info (lambda-form params body site off name self)))
             [:call off [:fn off info] (list-to-array inits) (site :tail)])))))
 
@@ -571,9 +573,9 @@
 (def (call form site off)
   (let ((head (car form)) (args (cdr form)))
     (let ((var (and (symbol? head) (lookup (site :env) head))))
-      (cond ((and var (var :loop) (memq (var :loop) (site :loops))
-                  (= (length args) (length ((var :loop) :vars))))
-             [:recur off (var :loop) (list-to-array (map (fn (a) (expression a (non-tail site) off))
+      (cond ((and var (var-loop var) (memq (var-loop var) (site :loops))
+                  (= (length args) (length ((var-loop var) :vars))))
+             [:recur off (var-loop var) (list-to-array (map (fn (a) (expression a (non-tail site) off))
                                                          args))])
             ((and (symbol? head) (not var))
              (let ((cell (%native-cell head)))
@@ -729,7 +731,7 @@
     (if (null? clauses)
         (body-forms args (with-site site :definitions #f) off)
         (let ((body (body-forms protected (with-site (non-tail site) :definitions #f) off))
-              (var (make-var 'condition (site :fn) #t))
+              (var (new-var 'condition (site :fn) #t))
               (converted []))
           (for ((clause :in clauses))
             (let ((guard (and (pair? clause) (eq? (car clause) 'catch) (not (improper? clause))
@@ -742,7 +744,7 @@
                   (set! predicate (car guard))
                   (set! name (car (cdr guard))))
                 (unless (symbol? name) (fail "catch needs a variable" guard off))
-                (let ((bound (make-var name (site :fn) #t)))
+                (let ((bound (new-var name (site :fn) #t)))
                   (push! converted
                          [(and predicate (expression predicate (non-tail site) off))
                           bound

@@ -13,7 +13,7 @@
 ;; function; and %call-with-cleanup, a cleanup node with an outcome, had its
 ;; body converted before the cleanup function.
 
-(ns otium.compiler.rescope)
+(ns otium.compiler.rescope (:require (otium.compiler.convert :as cv)))
 
 ;; The walk's state: :uninit holds the ids of variables not yet initialized,
 ;; :lsets counts assignments by id, :defs the ids of variables bound by a body's
@@ -24,31 +24,31 @@
     info))
 
 (def (bind! var)
-  (put! var :captured nil)
-  (put! var :assigned nil)
-  (put! var :early nil))
+  (cv/set-var-captured! var nil)
+  (cv/set-var-assigned! var nil)
+  (cv/set-var-early! var nil))
 
 ;; A use of var in f: captured by f and every function up to its owner.
 (def (use! r var f)
-  (unless (or (var :loop) (eq? (var :owner) f))
-    (put! var :captured #t)
-    (when (get (r :uninit) (var :id)) (put! var :early #t))
+  (unless (or (cv/var-loop var) (eq? (cv/var-owner var) f))
+    (cv/set-var-captured! var #t)
+    (when (get (r :uninit) (cv/var-id var)) (cv/set-var-early! var #t))
     (let up ((g f))
-      (when (and g (not (eq? g (var :owner))))
+      (when (and g (not (eq? g (cv/var-owner var))))
         (let ((captures (g :captures))) (unless (find (fn (v) (eq? v var)) captures) (push! captures var)))
         (up (g :parent))))))
 
 ;; An assignment. A definition's variable has one assignment for its
 ;; definition; any other makes it assigned.
 (def (assign! r var f)
-  (let ((id (var :id)))
+  (let ((id (cv/var-id var)))
     (let ((n (+ (get (r :lsets) id 0) 1)))
       (put! (r :lsets) id n)
       (when (> n
                (if (get (r :defs) id)
                    1
                    0))
-        (put! var :assigned #t))))
+        (cv/set-var-assigned! var #t))))
   (use! r var f))
 
 (def (walk-function r info)
@@ -135,13 +135,13 @@
       (let ((var (get vars i))
             (init (get inits i)))
         (bind! var)
-        (put! uninit (var :id) #t)
+        (put! uninit (cv/var-id var) #t)
         (walk r init f)
         (if (eq? (get init 0) :unbound)
             (begin
-              (put! (r :defs) (var :id) #t)
+              (put! (r :defs) (cv/var-id var) #t)
               (push! defs var))
-            (put! uninit (var :id) nil))))
+            (put! uninit (cv/var-id var) nil))))
     (let ((body (get node 4)))
       (if (= (length defs) 0)
           (walk r body f)
@@ -150,4 +150,4 @@
                            [body])))
             (walk r n f)
             (when (and (eq? (get n 0) :lset) (find (fn (v) (eq? v (get n 2))) defs))
-              (put! uninit ((get n 2) :id) nil)))))))
+              (put! uninit (cv/var-id (get n 2)) nil)))))))

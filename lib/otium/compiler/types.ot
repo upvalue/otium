@@ -15,7 +15,8 @@
 ;;
 ;; A wrong proof is memory corruption, so anything unsure is any.
 
-(ns otium.compiler.types (:require (otium.compiler.known :as known) (otium.compiler.options :as options)))
+(ns otium.compiler.types
+  (:require (otium.compiler.convert :as cv) (otium.compiler.known :as known) (otium.compiler.options :as options)))
 
 ;; --- Types -------------------------------------------------------------------
 
@@ -106,17 +107,17 @@
 ;; A captured variable that is assigned, or captured before it's
 ;; initialized, lives in a box that closures can change: always any.
 (def (tracked? var)
-  (not (and (var :captured) (or (var :assigned) (var :early)))))
+  (not (and (cv/var-captured var) (or (cv/var-assigned var) (cv/var-early var)))))
 
 (def (var-type env var)
   (if (tracked? var)
-      (get env (var :id) t-any)
+      (get env (cv/var-id var) t-any)
       t-any))
 
 (def (set-var! env var t)
   (when (tracked? var)
     (put! env
-          (var :id)
+          (cv/var-id var)
           (if (= t t-any)
               nil
               t))))
@@ -177,7 +178,7 @@
       (cond
         ((and (array? x) (> (length x) 0) (keyword? (get x 0)))
          (unless (memq (get x 0) '(:fn :const))
-           (when (eq? (get x 0) :lset) (put! out ((get x 2) :id) #t))
+           (when (eq? (get x 0) :lset) (put! out (cv/var-id (get x 2)) #t))
            (for ((i :range 2 (length x)))
              (scan (get x i)))))
         ((array? x)
@@ -575,7 +576,7 @@
                         ((= n max-rounds)
                          (let ((ids (assigned (get node 4))))
                            (for ((var :in (loop :vars)))
-                             (put! ids (var :id) #t))
+                             (put! ids (cv/var-id var) #t))
                            (forget entry ids)))
                         (else (round next (+ n 1))))))))
         (put! st :rewrite rewrite)

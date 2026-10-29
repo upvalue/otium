@@ -234,17 +234,17 @@
 
 ;; --- Variables ----------------------------------------------------------------
 
-(def (boxed? var) (and (var :captured) (or (var :assigned) (var :early))))
+(def (boxed? var) (and (cv/var-captured var) (or (cv/var-assigned var) (cv/var-early var))))
 
 (def (closure-reg fc) (fc-closure fc))
 
 ;; Where var is: [:reg v], [:box v], or [:cap index boxed?].
 (def (var-loc fc var)
-  (or (get (fc-locs fc) (var :id))
+  (or (get (fc-locs fc) (cv/var-id var))
       (let ((captures ((fc-info fc) :captures)))
         (let find-it ((i 0))
           (cond ((= i (length captures))
-                 (error "native compiler: variable not in scope" (var :name)))
+                 (error "native compiler: variable not in scope" (cv/var-name var)))
                 ((eq? (get captures i) var) [:cap i (boxed? var)])
                 (else (find-it (+ i 1))))))))
 
@@ -289,8 +289,8 @@
 ;; Bind var to a value just computed: in a box when it needs one.
 (def (bind-var fc var value offset)
   (if (boxed? var)
-      (put! (fc-locs fc) (var :id) [:box (make-box fc value offset)])
-      (put! (fc-locs fc) (var :id) [:reg (fresh-copy fc value)])))
+      (put! (fc-locs fc) (cv/var-id var) [:box (make-box fc value offset)])
+      (put! (fc-locs fc) (cv/var-id var) [:reg (fresh-copy fc value)])))
 
 ;; --- Allocation -----------------------------------------------------------------
 
@@ -424,7 +424,7 @@
             ;; A function that captures the variable it's bound to, as for
             ;; a named let whose name is assigned: the box comes first.
             (let ((b (make-box fc [:imm word-unbound] offset)))
-              (put! (fc-locs fc) (var :id) [:box b])
+              (put! (fc-locs fc) (cv/var-id var) [:box b])
               (emit! fc [:mov [:mem b offset-box] (in-vreg fc (value fc init))]))
             (bind-var fc var (value fc init) offset))))))
 
@@ -1098,8 +1098,8 @@
         (unless (null? vars)
           (let ((var (car vars)))
             (if (boxed? var)
-                (put! (fc-locs fc) (var :id) [:box (make-box fc (car vs) (node-offset node))])
-                (put! (fc-locs fc) (var :id) [:reg (car vs)])))
+                (put! (fc-locs fc) (cv/var-id var) [:box (make-box fc (car vs) (node-offset node))])
+                (put! (fc-locs fc) (cv/var-id var) [:reg (car vs)])))
           (bind (cdr vars) (cdr vs))))
       (tail fc (get node 4) target))))
 
@@ -1155,7 +1155,7 @@
     (emit! fc [:label handler])
     (let ((condition (vreg! fc)))
       (emit! fc [:landing condition])
-      (put! (fc-locs fc) ((get node 3) :id) [:reg condition])
+      (put! (fc-locs fc) (cv/var-id (get node 3)) [:reg condition])
       (for ((clause :in (get node 4)))
         (let ((next (label! fc)))
           (when (get clause 0)
@@ -1261,8 +1261,8 @@
 
 (def (bind-param fc var v offset)
   (if (boxed? var)
-      (put! (fc-locs fc) (var :id) [:box (make-box fc v offset)])
-      (put! (fc-locs fc) (var :id) [:reg v])))
+      (put! (fc-locs fc) (cv/var-id var) [:box (make-box fc v offset)])
+      (put! (fc-locs fc) (cv/var-id var) [:reg v])))
 
 ;; Lower a converted top-level form and every function inside it. Returns
 ;; the unit and the function contexts in index order.

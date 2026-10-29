@@ -264,7 +264,7 @@
                                 (fn nil
                                   (y.2)
                                   y.2)))))
-    (put! (get (((info :body) 2) :params) 0) :owner info)
+    (cv/set-var-owner! (get (((info :body) 2) :params) 0) info)
     (rejects "owner" "owned by another function" info)))
 
 (let ((args (otium.process/arguments)))

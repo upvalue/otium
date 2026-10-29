@@ -7,7 +7,8 @@ otium-noopt.boot for none, otium.boot otherwise. Using one binary keeps
 code layout changes in the runtime out of the comparison.
 
 Runs the target benchmarks (R7RS and PLB ports), the boot build time (the
-native compiler compiling the standard boot file) and code size under each,
+native compiler compiling the standard boot file), the time to load some
+larger modules from source, and code size under each,
 then prints per-benchmark median ratios (b / a) and the geometric mean.
 Pass --a all --b all for an A/A run, which measures noise. See
 scratch/optimizer-design.md, section 8.
@@ -93,6 +94,24 @@ def boot_build(config, runs, out):
     return times
 
 
+# Larger modules loaded from source, compiled as they load. Manse's sources
+# need its native libraries, so aren't here.
+SOURCE_MODULES = ['otium.lint', 'otium.ui', 'otium.format']
+
+
+def source_load(config, runs):
+    """Seconds to start and load SOURCE_MODULES from source."""
+    env = environment(config)
+    requires = ' '.join(f'(require {m})' for m in SOURCE_MODULES)
+    times = []
+    for i in range(runs):
+        start = time.perf_counter()
+        subprocess.run(['taskset', '-c', str(max(os.sched_getaffinity(0))), BUILD / 'otium', '--no-project',
+                        '-L', ROOT / 'lib', '-e', f'{requires} (exit 0)'], env=env, check=True)
+        times.append(time.perf_counter() - start)
+    return times
+
+
 def summary(name, a, b):
     ma, mb = statistics.median(a), statistics.median(b)
     spread = max((max(s) - min(s)) / statistics.median(s) for s in (a, b))
@@ -114,12 +133,13 @@ def main():
 
     out = args.output or Path(tempfile.mkdtemp(prefix='opt-compare-'))
     configs = {'a': args.a, 'b': args.b}
-    suites, boots = {}, {}
+    suites, boots, loads = {}, {}, {}
     for key, config in configs.items():
         d = out / key
         d.mkdir(parents=True, exist_ok=True)
         print(f'{key}: OTIUM_OPT={config}', file=sys.stderr)
         boots[key] = boot_build(config, args.runs, d)
+        loads[key] = source_load(config, args.runs)
         suites[key] = {} if args.no_suites else run_suites(config, args, d)
 
     print(f'{"":16} {"a":>9} {"b":>9} {"b/a":>7}')
@@ -132,6 +152,7 @@ def main():
     if ratios:
         print(f'{"target geomean":16} {"":9} {"":9} {math.exp(sum(map(math.log, ratios)) / len(ratios)):7.3f}')
     summary('boot build', boots['a'], boots['b'])
+    summary('source load', loads['a'], loads['b'])
     for key, config in configs.items():
         boot = environment(config)['OTIUM_BOOT']
         print(f'boot file {key}: {os.path.getsize(boot)} bytes ({Path(boot).name})')

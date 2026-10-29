@@ -368,6 +368,7 @@ static bool setup(ot_state* rt) {
   ot_value name = keyword(rt, ":main");
   if (!name) return false;
   as_thread(primordial->object)->name = name;
+  oti_write(rt, primordial->object);
   return true;
 }
 
@@ -660,9 +661,11 @@ static _Noreturn void finish(ot_state* rt, ot_value result) {
     ot_value condition = oti_error_condition(rt);
     as_thread(me->object)->result = condition ? condition : OT_NIL;
   }
+  oti_write(rt, me->object);
   me->state = end;
   ot_value status = keyword(rt, state_name(me->state));
   as_thread(me->object)->status = status;
+  oti_write(rt, me->object);
   as_thread(me->object)->thread = NULL;
   while (me->joiners.head) wake(rt, me->joiners.head, OT_TRUE);
   ot_value watchers = me->watchers;

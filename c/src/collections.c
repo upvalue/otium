@@ -22,6 +22,7 @@ static bool reserve(ot_state* rt, ot_value* array, size_t needed) {
              oti_as_array(*array)->length * sizeof(ot_value));
     oti_as_array(*array)->data = storage;
     oti_as_array(*array)->capacity = grown;
+    oti_write(rt, *array);
   }
   oti_roots_pop(&rt->heap, &root);
   return storage != 0;
@@ -172,6 +173,7 @@ ot_value oti_array_from(ot_state* rt, size_t first, size_t count) {
   if (!a) return 0;
   if (count) memcpy(items(a), rt->stack + first, count * sizeof(ot_value));
   oti_as_array(a)->length = count;
+  if (count) oti_write(rt, oti_as_array(a)->data);
   return a;
 }
 
@@ -251,6 +253,7 @@ static ot_value collection_put_mut(ot_state* rt, size_t first, size_t count) {
     if (!index_of(rt->stack[first + i], oti_as_array(a)->length, &index))
       return oti_fail(rt, "array index out of bounds");
     items(a)[index] = rt->stack[first + i + 1];
+    oti_write(rt, oti_as_array(a)->data);
   }
   return a;
 }
@@ -265,6 +268,7 @@ static ot_value collection_push(ot_state* rt, size_t first, size_t count) {
   if (!reserve(rt, &a, length + count - 1)) return 0;
   if (count > 1) memcpy(items(a) + length, rt->stack + first + 1, (count - 1) * sizeof(ot_value));
   oti_as_array(a)->length = length + count - 1;
+  if (count > 1) oti_write(rt, oti_as_array(a)->data);
   return a;
 }
 

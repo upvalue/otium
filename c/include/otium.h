@@ -224,7 +224,7 @@ void* ot_host_object_data(ot_value v, const ot_host_type* type);
  * signatures and retained library handles. allocations/bytes describe
  * explicitly owned native buffers, not process RSS. */
 typedef struct {
-  size_t collections, max_frames, heap_capacity, heap_limit;
+  size_t collections, minor_collections, max_frames, heap_capacity, heap_limit;
   size_t heap_allocated_bytes, heap_copied_bytes, heap_reclaimed_bytes;
   size_t heap_used, heap_peak_used;
   size_t libraries, bindings, signatures, memory_records, allocations, bytes;

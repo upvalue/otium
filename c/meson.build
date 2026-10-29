@@ -45,6 +45,7 @@ if get_option('gc_profile') == 'large'
 elif get_option('gc_profile') == 'small'
   runtime_args += '-DOTIUM_GC_SMALL'
 endif
+runtime_args += '-DOTI_GENERATIONAL_DEFAULT=@0@'.format(get_option('gc_generational') ? 1 : 0)
 # Native code needs one of sljit's backends and the trampolines in
 # native-<machine>.inc.
 native_supported = host_machine.cpu_family() in ['x86_64', 'aarch64'] and \

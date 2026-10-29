@@ -505,12 +505,18 @@ static ot_value datum(oti_compiler* c, const oti_ast* a) {
         oti_as_pair(pair)->car = slots[2];
         oti_as_pair(pair)->cdr = OT_EMPTY;
         if (slots[0] == OT_EMPTY) slots[0] = pair;
-        else oti_as_pair(slots[1])->cdr = pair;
+        else {
+          oti_as_pair(slots[1])->cdr = pair;
+          oti_write(rt, slots[1]);
+        }
         slots[1] = pair;
       }
       if (!oti_failed(rt) && a->as.list.tail) {
         slots[2] = datum(c, a->as.list.tail);
-        if (slots[2]) oti_as_pair(slots[1])->cdr = slots[2];
+        if (slots[2]) {
+          oti_as_pair(slots[1])->cdr = slots[2];
+          oti_write(rt, slots[1]);
+        }
       }
       ot_value result = oti_failed(rt) ? 0 : slots[0];
       oti_roots_pop(&rt->heap, &roots);

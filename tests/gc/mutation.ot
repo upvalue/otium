@@ -1,0 +1,59 @@
+;; Every kind of store into an object that has survived collections, of a
+;; value made since, with enough garbage in between for minor collections to
+;; run. Run with OTIUM_GC_GENERATIONAL=1 OTIUM_GC_VERIFY=1, a missed write
+;; barrier aborts with the kinds involved; otherwise a lost value shows up as
+;; a wrong answer here.
+
+(defrecord Cell (value))
+(defclass Holder (item :init nil))
+
+(def pair (cons nil nil))
+(def items [nil nil nil])
+(def entries {:item nil})
+(def cell (record-new Cell nil))
+(def holder (make Holder))
+(def box-reader nil)
+(def box-writer nil)
+
+(let ((shared nil))
+  (set! box-reader (fn () shared))
+  (set! box-writer (fn (v) (set! shared v))))
+
+(def (churn n)
+  (let loop ((i 0) (acc '()))
+    (if (= i n) (length acc) (loop (+ i 1) (cons i acc)))))
+
+(def (fresh i) (list i (string-repeat "z" (remainder i 30))))
+
+;; Each store happens in a frame that has returned before the garbage that
+;; follows, so nothing but the old object keeps the value.
+(def (store! i)
+  (set-car! pair (fresh i))
+  (set-cdr! pair (fresh (+ i 1)))
+  (put! items 1 (fresh i))
+  (push! items (fresh i))
+  (put! entries :item (fresh i))
+  (put! entries i (fresh i))
+  (record-set! cell :value (fresh i))
+  (slot-set! holder :item (fresh i))
+  (box-writer (fresh i))
+  nil)
+
+(def (expect what got i)
+  (unless (and (pair? got) (= (car got) i)) (error "lost a stored value" what i got)))
+
+(churn 30000)
+(churn 30000)
+(dotimes (i 150)
+  (store! i)
+  (churn 20000)
+  (expect :car (car pair) i)
+  (expect :cdr (cdr pair) (+ i 1))
+  (expect :array (items 1) i)
+  (expect :push (items (+ 3 i)) i)
+  (expect :table (entries :item) i)
+  (expect :table-key (entries i) i)
+  (expect :record (cell :value) i)
+  (expect :slot (holder :item) i)
+  (expect :box (box-reader) i))
+(print :ok)

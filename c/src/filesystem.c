@@ -70,6 +70,7 @@ static ot_value directory(ot_state* rt, ot_value path) {
     if (ok) {
       oti_as_array(live[1])->data = storage;
       oti_as_array(live[1])->capacity = count;
+      oti_write(rt, live[1]);
     }
   }
   for (size_t i = 0; ok && i < count; i++) {
@@ -77,6 +78,7 @@ static ot_value directory(ot_state* rt, ot_value path) {
     ok = live[2] != 0;
     if (ok) {
       oti_as_array_data(oti_as_array(live[1])->data)->items[i] = live[2];
+      oti_write(rt, oti_as_array(live[1])->data);
       oti_as_array(live[1])->length = i + 1;
     }
   }

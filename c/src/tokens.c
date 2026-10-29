@@ -151,7 +151,10 @@ ot_value oti_tokens(ot_state* rt, size_t first, size_t count) {
       ok = node != 0;
       if (ok) {
         if (live[0] == OT_EMPTY) live[0] = node;
-        else oti_as_pair(live[1])->cdr = node;
+        else {
+          oti_as_pair(live[1])->cdr = node;
+          oti_write(rt, live[1]);
+        }
         live[1] = node;
       }
     }

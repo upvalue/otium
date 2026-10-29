@@ -259,7 +259,10 @@ static ot_value quasi_append(ot_state* rt, size_t first, size_t count) {
     oti_as_pair(pair)->car = oti_car(slots[0]);
     oti_as_pair(pair)->cdr = slots[1];
     if (slots[2] == OT_EMPTY) slots[2] = pair;
-    else oti_as_pair(slots[3])->cdr = pair;
+    else {
+      oti_as_pair(slots[3])->cdr = pair;
+      oti_write(rt, slots[3]);
+    }
     slots[3] = pair;
     slots[0] = oti_cdr(slots[0]);
   }
@@ -410,6 +413,7 @@ static ot_value set_car_builtin(ot_state* rt, size_t first, size_t count) {
   if (!core_arity(rt, count, 2) || !mutable_pair(rt, rt->stack[first])) return 0;
   ot_value a = rt->stack[first];
   oti_as_pair(a)->car = rt->stack[first + 1];
+  oti_write(rt, a);
   return a;
 }
 
@@ -417,6 +421,7 @@ static ot_value set_cdr_builtin(ot_state* rt, size_t first, size_t count) {
   if (!core_arity(rt, count, 2) || !mutable_pair(rt, rt->stack[first])) return 0;
   ot_value a = rt->stack[first];
   oti_as_pair(a)->cdr = rt->stack[first + 1];
+  oti_write(rt, a);
   return a;
 }
 

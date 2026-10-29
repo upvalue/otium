@@ -46,8 +46,10 @@ static bool migrate(ot_state* rt, ot_value* instance, ot_value properties) {
                                ? values(live[2])[old]
                                : V_UNBOUND;
     }
+    oti_write(rt, live[4]);
     oti_as_instance(live[0])->layout = live[3];
     oti_as_instance(live[0])->data = live[4];
+    oti_write(rt, live[0]);
     installed = true;
   }
   for (size_t i = 0; ok && i < n; i++)
@@ -56,7 +58,10 @@ static bool migrate(ot_state* rt, ot_value* instance, ot_value properties) {
       if (init != OT_FALSE) {
         ot_value value = oti_call_list(rt, init, OT_EMPTY);
         ok = value != 0;
-        if (ok) values(live[4])[i] = value;
+        if (ok) {
+          values(live[4])[i] = value;
+          oti_write(rt, live[4]);
+        }
       }
     }
   if (ok) {
@@ -78,6 +83,7 @@ static bool migrate(ot_state* rt, ot_value* instance, ot_value properties) {
   if (!ok && installed) {
     oti_as_instance(live[0])->layout = live[1];
     oti_as_instance(live[0])->data = live[2];
+    oti_write(rt, live[0]);
   }
   *instance = live[0];
   oti_roots_pop(&rt->heap, &roots);
@@ -130,6 +136,7 @@ ot_value oti_instance_copy(ot_state* rt, ot_value instance) {
     if (ok) {
       if (n) memcpy(values(data), instance_values(live[0]), n * sizeof(ot_value));
       oti_as_instance(live[1])->data = data;
+      oti_write(rt, live[1]);
     }
   }
   ot_value result = ok ? live[1] : 0;
@@ -218,6 +225,7 @@ static ot_value instance_define_class(ot_state* rt, size_t first, size_t count) 
     c->parent = rt->stack[first + 1];
     c->layout = live[1];
     c->owner = live[2];
+    oti_write(rt, live[0]);
     oti_set_global(rt, global, live[0]);
     rt->global_info[global].defined = 1;
   }
@@ -253,7 +261,10 @@ static ot_value instance_class_mount(ot_state* rt, size_t first, size_t count) {
       if (slot.property == OT_TRUE) {
         ot_value value = oti_call_list(rt, slot.init, OT_EMPTY);
         ok = value != 0;
-        if (ok) instance_values(live[2])[i] = value;
+        if (ok) {
+          instance_values(live[2])[i] = value;
+          oti_write(rt, oti_as_instance(live[2])->data);
+        }
       }
     }
   }
@@ -277,6 +288,7 @@ static ot_value instance_class_update(ot_state* rt, size_t first, size_t count) 
       ot_value *to = instance_values(live[0]), *from = instance_values(live[1]);
       for (size_t i = 0; i < oti_layout_slots(layout); i++)
         if (slots(layout)[i].property == OT_FALSE) to[i] = from[i];
+      oti_write(rt, oti_as_instance(live[0])->data);
     }
   }
   ot_value result = ok ? live[0] : 0;
@@ -302,7 +314,10 @@ static ot_value instance_slot_set(ot_state* rt, size_t first, size_t count) {
   if (migrate_to_current(rt, &instance)) {
     size_t index = slot_index(oti_as_instance(instance)->layout, rt->stack[first + 1]);
     if (index == SIZE_MAX) missing_slot(rt, "slot-set!", instance, rt->stack[first + 1]);
-    else result = instance_values(instance)[index] = rt->stack[first + 2];
+    else {
+      result = instance_values(instance)[index] = rt->stack[first + 2];
+      oti_write(rt, oti_as_instance(instance)->data);
+    }
   }
   oti_roots_pop(&rt->heap, &root);
   return result;
@@ -341,7 +356,10 @@ static ot_value instance_make(ot_state* rt, size_t first, size_t count, bool pro
     oti_as_instance(live[2])->layout = live[1];
     ot_value data = oti_alloc(rt, K_ARRAY_DATA, (uint32_t)n, 0);
     ok = data != 0;
-    if (ok) oti_as_instance(live[2])->data = data;
+    if (ok) {
+      oti_as_instance(live[2])->data = data;
+      oti_write(rt, live[2]);
+    }
   }
   for (size_t i = 0; ok && i < n; i++) {
     oti_slot slot = slots(live[1])[i];
@@ -365,6 +383,7 @@ static ot_value instance_make(ot_state* rt, size_t first, size_t count, bool pro
       }
     }
     instance_values(live[2])[i] = value;
+    oti_write(rt, oti_as_instance(live[2])->data);
   }
   ot_value result = ok ? live[2] : 0;
   oti_roots_pop(&rt->heap, &roots);

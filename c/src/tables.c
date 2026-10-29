@@ -132,6 +132,7 @@ static bool resize(ot_state* rt, ot_value* table) {
   }
   oti_table_obj* t = oti_as_table(*table);
   t->data = storage;
+  oti_write(rt, *table);
   t->count = t->used = count;
   t->capacity = capacity;
   return true;
@@ -143,6 +144,7 @@ ot_value oti_table_set(ot_state* rt, ot_value table, ot_value key, ot_value valu
   if (oti_as_table(table)->capacity && !lookup(rt, table, key, &slot, &entry)) return 0;
   if (entry != SIZE_MAX) {
     entries(table)[2 * entry + 1] = value;
+    oti_write(rt, oti_as_table(table)->data);
     if (value == OT_NIL) {
       entries(table)[2 * entry] = OT_NIL;
       buckets(table)[slot] = UINT32_MAX;
@@ -168,6 +170,7 @@ ot_value oti_table_set(ot_state* rt, ot_value table, ot_value key, ot_value valu
   oti_as_table(table)->count++;
   entries(table)[2 * entry] = key;
   entries(table)[2 * entry + 1] = value;
+  oti_write(rt, oti_as_table(table)->data);
   buckets(table)[slot] = (uint32_t)entry + 1;
   return table;
 }
@@ -254,6 +257,7 @@ ot_value oti_table_copy_builtin(ot_state* rt, size_t first, size_t count) {
   memcpy(oti_table_buckets(storage), buckets(table), 2 * capacity * sizeof(uint32_t));
   oti_table_obj *to = oti_as_table(copy), *from = oti_as_table(table);
   to->data = storage;
+  oti_write(rt, copy);
   to->count = from->count;
   to->used = from->used;
   to->capacity = from->capacity;
@@ -281,6 +285,7 @@ static ot_value table_keys_or_values(ot_state* rt, size_t first, size_t count, b
     if (entries(table)[2 * i + 1] != OT_NIL)
       oti_as_array_data(storage)->items[out++] = entries(table)[2 * i + values];
   oti_as_array(array)->data = storage;
+  oti_write(rt, array);
   return array;
 }
 

@@ -519,7 +519,9 @@ next:
     NEXT();
   }
   CASE(OP_SET_UPVALUE) {
-    oti_as_box(oti_as_closure(R[0])->captures[ins.b])->value = R[ins.a];
+    v = oti_as_closure(R[0])->captures[ins.b];
+    oti_as_box(v)->value = R[ins.a];
+    oti_write(rt, v);
     NEXT();
   }
   CASE(OP_BOX) {
@@ -540,6 +542,7 @@ next:
   }
   CASE(OP_SET_BOX) {
     oti_as_box(R[ins.a])->value = R[ins.b];
+    oti_write(rt, R[ins.a]);
     NEXT();
   }
   CASE(OP_CHECK) {

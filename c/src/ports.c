@@ -313,6 +313,7 @@ static ot_value make_custom(ot_state* rt, ot_value* port, size_t first, size_t c
       ok = buffer != 0;
       if (ok) {
         port_object(*port)->buffer = buffer;
+        oti_write(rt, *port);
         ok = register_port(rt, *port);
       }
     }
@@ -359,6 +360,7 @@ static ot_value open_file(ot_state* rt, ot_value* port, size_t first, size_t cou
   ot_value buffer = oti_bytes_new(rt, size);
   if (!buffer) return 0;
   port_object(*port)->buffer = buffer;
+  oti_write(rt, *port);
   port_object(*port)->kind = 4;
   port_object(*port)->input = input;
   port_object(*port)->capacity = size;
@@ -422,6 +424,7 @@ static ot_value standard(ot_state* rt, unsigned which) {
     bool ok = buffer != 0;
     if (ok) {
       port_object(p)->buffer = buffer;
+      oti_write(rt, p);
       ok = register_port(rt, p);
     }
     if (ok) rt->standard_ports[which] = p;
@@ -661,6 +664,7 @@ static bool append(ot_state* rt, ot_value* port, const char* bytes, size_t n) {
                oti_as_buffer_data(port_object(*port)->buffer)->bytes, length);
       port_object(*port)->buffer = data;
       port_object(*port)->capacity = capacity;
+      oti_write(rt, *port);
     }
     if (!data) return false;
   }
@@ -757,6 +761,7 @@ static ot_value port_open_memory(ot_state* rt, size_t first, size_t count, ot_va
     if (bytes) {
       if (n) memcpy(oti_bytes_data(bytes), oti_bytes_data(rt->stack[first]), n);
       port_object(live[0])->buffer = bytes;
+      oti_write(rt, live[0]);
     }
     if (!bytes) return 0;
   }

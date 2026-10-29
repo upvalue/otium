@@ -40,10 +40,12 @@ endif
 if get_option('vm_switch')
   runtime_args += '-DOTIUM_VM_SWITCH'
 endif
-# Native code needs sljit's x86-64 backend and the trampolines in native.c.
-native_supported = host_machine.cpu_family() == 'x86_64' and host_machine.system() == 'linux'
+# Native code needs one of sljit's backends and the trampolines in
+# native-<machine>.inc.
+native_supported = host_machine.cpu_family() in ['x86_64', 'aarch64'] and \
+  host_machine.system() in ['linux', 'darwin']
 native_enabled = get_option('native').require(native_supported,
-  error_message: 'native code needs x86-64 Linux').allowed()
+  error_message: 'native code needs x86-64 or arm64, on Linux or macOS').allowed()
 # The amalgamation is the VM alone.
 amalgamation_args = runtime_args
 if native_enabled

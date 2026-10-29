@@ -1,24 +1,29 @@
 #include "internal.h"
 
-/* Native code for x86-64. The compiler, written in Otium, hands over a unit:
- * an instruction stream close to sljit's own operations, with registers
- * already allocated, plus tables of literals, global cells, functions and
- * frame descriptors. This file turns units into machine code, keeps the code
- * objects, and provides what that code calls: the entry trampoline, stubs
- * for every callee that isn't a closure, the unwinder, and helpers for
- * allocation, slow paths and control forms. See
- * scratch/native-compiler-design.md, sections 6 to 9.
+/* Native code, for x86-64 and arm64. The compiler, written in Otium, hands
+ * over a unit: an instruction stream close to sljit's own operations, with
+ * registers already allocated, plus tables of literals, global cells,
+ * functions and frame descriptors. This file turns units into machine code,
+ * keeps the code objects, and provides what that code calls: the entry
+ * trampoline, stubs for every callee that isn't a closure, the unwinder, and
+ * helpers for allocation, slow paths and control forms. See
+ * scratch/native-compiler-design.md, sections 6 to 9. What depends on the
+ * machine is in native-x86-64.inc and native-arm64.inc.
  *
- * Registers, in sljit's names: S0 (rbx) holds the state and S1 (r15) the
- * allocation pointer, heap.start + heap.used, which is stored back before
- * every call into C. Allocation compares a bumped S1 with heap.end. At a call R0 holds the argument count, R1 the callee and R2 to R6 the
- * first five arguments; the rest are in native.args from index 5. The result
- * comes back in R0. Every register but S0 and S1 is clobbered by a call.
+ * Registers, in sljit's names: S0 holds the state and S1 the allocation
+ * pointer, heap.start + heap.used, which is stored back before every call
+ * into C. Allocation compares a bumped S1 with heap.end. At a call R0 holds
+ * the argument count, R1 the callee and R2 to R6 the first five arguments;
+ * the rest are in native.args from index 5. The result comes back in R0.
+ * Every register but S0 and S1 is clobbered by a call.
  *
- * Frames are sljit's: the return address, any registers its prologue pushed,
- * then the locals, which hold spilled values and registers saved around
- * slow paths. Each call site has a descriptor, found by its return address,
- * that gives the frame size and the slots holding live values. */
+ * Frames are sljit's, holding the return address, any registers its
+ * prologue saved, and the locals, from SLJIT_LOCALS_OFFSET above the stack
+ * pointer, which hold spilled values and registers saved around slow paths.
+ * Each call site has a descriptor, found by its return address, that gives
+ * the frame size and the slots holding live values. Where the return address
+ * is depends on the machine (return_slot); a call into C always leaves it
+ * at sp[-1]. */
 
 #ifdef OTIUM_NATIVE
 
@@ -90,13 +95,9 @@ static const sljit_s32 op2_ops[] = {SLJIT_ADD, SLJIT_SUB,  SLJIT_MUL,  SLJIT_AND
                                     SLJIT_OR,  SLJIT_XOR,  SLJIT_SHL,  SLJIT_LSHR,
                                     SLJIT_ASHR};
 
-/* Registers R7 and up overlap sljit's saved registers, which a prologue
- * pushes when the function uses them. */
-#define SCRATCH_REGISTERS 7
-
 typedef struct {
   uint32_t ra;       /* return address, as an offset from the code start */
-  uint32_t frame;    /* bytes from the frame's stack pointer to its return address */
+  uint32_t frame;    /* the frame's size, as frame_size gives it */
   uint32_t offset;   /* source offset of the call, or UINT32_MAX */
   uint32_t function; /* the oti_function id, or UINT32_MAX for runtime stubs */
   uint32_t slots;    /* first word of the live slot bitmap in the code object */
@@ -151,7 +152,7 @@ struct oti_native_runtime {
   bool verbose;
 };
 
-/* The trampoline and resume routine, below. */
+/* The trampolines, in the machine's file. */
 ot_value oti_native_enter(ot_state* rt, ot_value callee, uintptr_t entry, size_t argc);
 extern char oti_native_return[], oti_native_fail[], oti_segment_return[], oti_segment_grow[],
     oti_poll[];
@@ -202,6 +203,76 @@ typedef struct oti_segment_chunk {
   struct oti_segment_chunk* next;
   void* base;
 } oti_segment_chunk;
+
+/* The machine's assembly reads these state fields; the C compiler gives
+ * the assembler their offsets. */
+void oti_native_offsets(void);
+void oti_native_offsets(void) {
+  __asm__(".set OFF_SP, %c0\n"
+          ".set OFF_ENTRY, %c1\n"
+          ".set OFF_TOP, %c2\n"
+          ".set OFF_ARGS, %c3\n"
+          ".set OFF_DEPTH, %c4\n"
+          ".set OFF_HEAP_START, %c5\n"
+          ".set OFF_HEAP_USED, %c6\n"
+          ".set OFF_CSP, %c7\n"
+          ".set OFF_CBASE, %c8\n"
+          ".set OFF_CALLEE, %c9\n"
+          ".set OFF_ARGC, %c10\n"
+          ".set OFF_SEGMENT, %c11\n"
+          ".set OFF_STACK_BYTES, %c12\n"
+          ".set OFF_BASE_LIMIT, %c13\n"
+          ".set OFF_RUNTIME, %c14\n"
+          ".set OFF_FRAMES, %c15\n"
+          ".set FRAME_MASK, %c16\n"
+          ".set SEGMENT_PREV, %c17\n"
+          ".set SEGMENT_NEXT, %c18\n"
+          ".set SEGMENT_SIZE, %c19\n"
+          ".set SEGMENT_LIMIT, %c20\n"
+          ".set SEGMENTS_MAX, %c21\n"
+          ".set OFF_LIMIT, %c22\n"
+          ".set SEGMENTS_MAX_HIGH, %c23\n"
+          :
+          : "i"(offsetof(ot_state, native.sp)), "i"(offsetof(ot_state, native.entry)),
+            "i"(offsetof(ot_state, native.stack_top)), "i"(offsetof(ot_state, native.args)),
+            "i"(offsetof(ot_state, native.depth)), "i"(offsetof(ot_state, heap.start)),
+            "i"(offsetof(ot_state, heap.used)), "i"(offsetof(ot_state, native_c_sp)),
+            "i"(offsetof(ot_state, native_c_base)), "i"(offsetof(ot_state, native.callee)),
+            "i"(offsetof(ot_state, native.argc)), "i"(offsetof(ot_state, native.segment)),
+            "i"(offsetof(ot_state, native.stack_bytes)), "i"(offsetof(ot_state, native.base_limit)),
+            "i"(offsetof(ot_state, native_runtime)), "i"(offsetof(oti_native_runtime, frames)),
+            "i"(FRAME_CACHE - 1), "i"(offsetof(oti_segment, prev)), "i"(offsetof(oti_segment, next)),
+            "i"(offsetof(oti_segment, size)), "i"(sizeof(oti_segment) + SEGMENT_MARGIN),
+            "i"(STACK_MAX), "i"(offsetof(ot_state, native.limit)), "i"(STACK_MAX >> 16));
+}
+
+
+/* Assembler directives, for ELF and Mach-O. A function's inner entry points
+ * (ASM_INNER) stay in its block, which Mach-O's linker could otherwise
+ * split at any global symbol. */
+#ifdef __APPLE__
+#define ASM_SYM(name) "_" #name
+#define ASM_FUNC(name) ".globl _" #name "\n.private_extern _" #name "\n_" #name ":\n"
+#define ASM_INNER(name) ".globl _" #name "\n.private_extern _" #name "\n.alt_entry _" #name "\n_" #name ":\n"
+#define ASM_END(name) ""
+#define ASM_TEXT ".text\n"
+#define ASM_TEXT_END ""
+#else
+#define ASM_SYM(name) #name
+#define ASM_FUNC(name) ".globl " #name "\n.hidden " #name "\n.type " #name ",@function\n" #name ":\n"
+#define ASM_INNER(name) ".globl " #name "\n.hidden " #name "\n" #name ":\n"
+#define ASM_END(name) ".size " #name ", .-" #name "\n"
+#define ASM_TEXT ".pushsection .text\n"
+#define ASM_TEXT_END ".popsection\n"
+#endif
+
+#if defined(__x86_64__)
+#include "native-x86-64.inc"
+#elif defined(__aarch64__)
+#include "native-arm64.inc"
+#else
+#error "native code needs x86-64 or arm64"
+#endif
 
 static uintptr_t segment_top(const oti_segment* s) { return (uintptr_t)s; }
 
@@ -343,15 +414,14 @@ static oti_segment* grow_segment(ot_state* rt, size_t size) {
   return s;
 }
 
-/* Put a link record at the top of s, with oti_segment_return under it as
- * the return address of a frame placed below. Returns that slot. */
+/* Put a link record at the top of s: the stack pointer and return address
+ * of the frame below it, a moved one's or the one oti_segment_return goes
+ * back to. Returns the record, where that frame's stack pointer would be. */
 static uintptr_t link_segment(oti_segment* s, uintptr_t caller_sp, uintptr_t return_address) {
-  uintptr_t top = segment_top(s);
-  uintptr_t* link = (uintptr_t*)(top - 16);
+  uintptr_t* link = (uintptr_t*)(segment_top(s) - 16);
   link[0] = caller_sp;
   link[1] = return_address;
-  link[-1] = (uintptr_t)oti_segment_return;
-  return top - 24;
+  return (uintptr_t)link;
 }
 
 static const oti_descriptor* descriptor_at(const oti_native_runtime* n, uintptr_t ra,
@@ -370,21 +440,23 @@ static bool grow_frame(ot_state* rt) {
     n->frames[cached].ra = ra;
     n->frames[cached].frame = d->frame;
   }
-  size_t frame = n->frames[cached].frame;
-  oti_segment* s = grow_segment(rt, frame + 16);
+  size_t frame = n->frames[cached].frame, span = frame_span(frame);
+  oti_segment* s = grow_segment(rt, span + 16);
   if (!s) return false;
-  uintptr_t slot = link_segment(s, sp + frame + 8, ((uintptr_t*)(sp + frame))[0]);
-  uintptr_t moved = slot - frame;
+  uintptr_t moved = link_segment(s, sp + span, *return_slot(sp, frame)) - span;
   memcpy((void*)moved, (void*)sp, frame);
+  *return_slot(moved, frame) = (uintptr_t)oti_segment_return;
   ((uintptr_t*)moved)[-1] = ra;
   rt->native.sp = moved;
   return true;
 }
 
 /* oti_segment_grow: a big frame's check before its prologue failed. sp
- * points at the argument registers it saved, the return into the function
- * and the function's own return address; size is what the frame needs.
- * Returns where the function's stack pointer goes, on a new segment. */
+ * points at the 80 bytes the trampoline saved, the argument registers and
+ * where to continue, with the function's own return address in the last
+ * word, at the caller's sp[-1]; size is what the frame needs. Returns the
+ * new segment's link record, under which the trampoline continues the
+ * function. */
 uintptr_t oti_segment_grow_entry(ot_state* rt, size_t size, uintptr_t sp);
 uintptr_t oti_segment_grow_entry(ot_state* rt, size_t size, uintptr_t sp) {
   oti_segment* s = grow_segment(rt, size);
@@ -402,339 +474,6 @@ static void unwind_segments(ot_state* rt, uintptr_t sp) {
     drop_segment(rt);
 }
 
-/* The assembly below reads these state fields; the C compiler gives the
- * assembler their offsets. */
-void oti_native_offsets(void);
-void oti_native_offsets(void) {
-  __asm__(".set OFF_SP, %c0\n"
-          ".set OFF_ENTRY, %c1\n"
-          ".set OFF_TOP, %c2\n"
-          ".set OFF_ARGS, %c3\n"
-          ".set OFF_DEPTH, %c4\n"
-          ".set OFF_HEAP_START, %c5\n"
-          ".set OFF_HEAP_USED, %c6\n"
-          ".set OFF_CSP, %c7\n"
-          ".set OFF_CBASE, %c8\n"
-          ".set OFF_CALLEE, %c9\n"
-          ".set OFF_ARGC, %c10\n"
-          ".set OFF_SEGMENT, %c11\n"
-          ".set OFF_STACK_BYTES, %c12\n"
-          ".set OFF_BASE_LIMIT, %c13\n"
-          ".set OFF_RUNTIME, %c14\n"
-          ".set OFF_FRAMES, %c15\n"
-          ".set FRAME_MASK, %c16\n"
-          ".set SEGMENT_PREV, %c17\n"
-          ".set SEGMENT_NEXT, %c18\n"
-          ".set SEGMENT_SIZE, %c19\n"
-          ".set SEGMENT_LIMIT, %c20\n"
-          ".set SEGMENTS_MAX, %c21\n"
-          ".set OFF_LIMIT, %c22\n"
-          :
-          : "i"(offsetof(ot_state, native.sp)), "i"(offsetof(ot_state, native.entry)),
-            "i"(offsetof(ot_state, native.stack_top)), "i"(offsetof(ot_state, native.args)),
-            "i"(offsetof(ot_state, native.depth)), "i"(offsetof(ot_state, heap.start)),
-            "i"(offsetof(ot_state, heap.used)), "i"(offsetof(ot_state, native_c_sp)),
-            "i"(offsetof(ot_state, native_c_base)), "i"(offsetof(ot_state, native.callee)),
-            "i"(offsetof(ot_state, native.argc)), "i"(offsetof(ot_state, native.segment)),
-            "i"(offsetof(ot_state, native.stack_bytes)), "i"(offsetof(ot_state, native.base_limit)),
-            "i"(offsetof(ot_state, native_runtime)), "i"(offsetof(oti_native_runtime, frames)),
-            "i"(FRAME_CACHE - 1), "i"(offsetof(oti_segment, prev)), "i"(offsetof(oti_segment, next)),
-            "i"(offsetof(oti_segment, size)), "i"(sizeof(oti_segment) + SEGMENT_MARGIN),
-            "i"(STACK_MAX), "i"(offsetof(ot_state, native.limit)));
-}
-
-#define OFF_LIMIT 16
-_Static_assert(offsetof(ot_state, native.limit) == OFF_LIMIT, "the poll's displacement");
-
-/* oti_native_enter(rt, callee, entry, argc): call native code from C with the
- * arguments in native.args. Native code runs on the thread's Otium stack:
- * the outermost entry starts at its top, a nested one just below the frame
- * that called C, leaving that call's return address in place. The entry
- * leaves a record under the call (the previous native.sp, the previous
- * record, the C stack pointer to return on and the previous native_c_sp)
- * that frame walking and unwinding use, and points native_c_sp below its
- * own C frame, so C called from here doesn't overwrite it. The unwinder
- * returns failure here through oti_native_fail, with the stack pointer at
- * the record. */
-__asm__(".text\n"
-        ".p2align 4\n"
-        ".globl oti_native_enter\n"
-        ".type oti_native_enter,@function\n"
-        "oti_native_enter:\n"
-        "  push %rbp\n"
-        "  push %rbx\n"
-        "  push %r12\n"
-        "  push %r13\n"
-        "  push %r14\n"
-        "  push %r15\n"
-        "  mov %rdi, %rbx\n"
-        "  mov %rsp, %r12\n"
-        "  cmpq $0, OFF_DEPTH(%rbx)\n"
-        "  jne 1f\n"
-        "  mov OFF_TOP(%rbx), %rsp\n"
-        "  jmp 3f\n"
-        "1:\n"
-        "  mov OFF_SP(%rbx), %rsp\n"
-        "  sub $16, %rsp\n"
-        "3:\n"
-        "  and $-16, %rsp\n"
-        "  sub $32, %rsp\n"
-        "  mov OFF_SP(%rbx), %rax\n"
-        "  mov %rax, 0(%rsp)\n"
-        "  mov OFF_ENTRY(%rbx), %rax\n"
-        "  mov %rax, 8(%rsp)\n"
-        "  mov %r12, 16(%rsp)\n"
-        "  mov OFF_CSP(%rbx), %rax\n"
-        "  mov %rax, 24(%rsp)\n"
-        "  mov %r12, %rax\n"
-        "  and $-16, %rax\n"
-        "  mov %rax, OFF_CSP(%rbx)\n"
-        "  cmpq $0, OFF_CBASE(%rbx)\n"
-        "  jne 4f\n"
-        "  mov %rax, OFF_CBASE(%rbx)\n"
-        "4:\n"
-        "  mov %rsp, OFF_ENTRY(%rbx)\n"
-        "  movq $0, OFF_SP(%rbx)\n"
-        "  incq OFF_DEPTH(%rbx)\n"
-        "  mov OFF_HEAP_USED(%rbx), %r15\n"
-        "  add OFF_HEAP_START(%rbx), %r15\n"
-        "  mov %rdx, %r9\n"
-        "  mov %rcx, %rax\n"
-        "  mov OFF_ARGS(%rbx), %r10\n"
-        "  mov 0(%r10), %rdi\n"
-        "  mov 8(%r10), %rcx\n"
-        "  mov 16(%r10), %r8\n"
-        "  mov 24(%r10), %r11\n"
-        "  mov 32(%r10), %r10\n"
-        "  call *%r9\n"
-        ".globl oti_native_return\n"
-        "oti_native_return:\n"
-        "  jmp 2f\n"
-        ".globl oti_native_fail\n"
-        "oti_native_fail:\n"
-        "  xor %eax, %eax\n"
-        "2:\n"
-        "  sub OFF_HEAP_START(%rbx), %r15\n"
-        "  mov %r15, OFF_HEAP_USED(%rbx)\n"
-        "  decq OFF_DEPTH(%rbx)\n"
-        "  mov 0(%rsp), %rdx\n"
-        "  mov %rdx, OFF_SP(%rbx)\n"
-        "  mov 8(%rsp), %rdx\n"
-        "  mov %rdx, OFF_ENTRY(%rbx)\n"
-        "  mov 24(%rsp), %rdx\n"
-        "  mov %rdx, OFF_CSP(%rbx)\n"
-        "  test %rdx, %rdx\n"
-        "  jne 5f\n"
-        "  movq $0, OFF_CBASE(%rbx)\n"
-        "5:\n"
-        "  mov 16(%rsp), %rsp\n"
-        "  pop %r15\n"
-        "  pop %r14\n"
-        "  pop %r13\n"
-        "  pop %r12\n"
-        "  pop %rbx\n"
-        "  pop %rbp\n"
-        "  ret\n"
-        ".size oti_native_enter, .-oti_native_enter\n"
-        ".p2align 4\n"
-        /* oti_thread_begin: a green thread's first instructions, on its own
-         * Otium stack, with the state in rbx, the entry address in rax and
-         * the callee, count and arguments in native.callee, native.argc and
-         * native.args. It leaves an entry record as oti_native_enter does,
-         * but whose return path pops a frame built here and lands in
-         * oti_thread_end, which hands the result (0 after failure) to
-         * oti_thread_finished on the C stack. The callee is entered with
-         * oti_native_return as its return address, which frame walking
-         * looks for. */
-        ".globl oti_thread_begin\n"
-        ".type oti_thread_begin,@function\n"
-        "oti_thread_begin:\n"
-        "  lea oti_thread_end(%rip), %rcx\n"
-        "  push %rcx\n"
-        "  push $0\n"
-        "  push %rbx\n"
-        "  push $0\n"
-        "  push $0\n"
-        "  push $0\n"
-        "  push $0\n"
-        "  mov %rsp, %r12\n"
-        "  mov %rax, %r9\n"
-        "  and $-16, %rsp\n"
-        "  sub $32, %rsp\n"
-        "  movq $0, 0(%rsp)\n"
-        "  movq $0, 8(%rsp)\n"
-        "  mov %r12, 16(%rsp)\n"
-        "  mov OFF_CSP(%rbx), %rax\n"
-        "  mov %rax, 24(%rsp)\n"
-        "  mov %rsp, OFF_ENTRY(%rbx)\n"
-        "  movq $0, OFF_SP(%rbx)\n"
-        "  incq OFF_DEPTH(%rbx)\n"
-        "  mov OFF_CALLEE(%rbx), %rsi\n"
-        "  mov OFF_ARGC(%rbx), %rax\n"
-        "  mov OFF_ARGS(%rbx), %r10\n"
-        "  mov 0(%r10), %rdi\n"
-        "  mov 8(%r10), %rcx\n"
-        "  mov 16(%r10), %r8\n"
-        "  mov 24(%r10), %r11\n"
-        "  mov 32(%r10), %r10\n"
-        "  lea oti_native_return(%rip), %rdx\n"
-        "  push %rdx\n"
-        "  jmp *%r9\n"
-        ".size oti_thread_begin, .-oti_thread_begin\n"
-        ".type oti_thread_end,@function\n"
-        /* The C stack position the record restored is from when the thread
-         * began; the main thread may have moved on since. A thread ends with
-         * no C frames of its own, at the current base. */
-        "oti_thread_end:\n"
-        "  mov OFF_CBASE(%rbx), %rsp\n"
-        "  mov %rsp, OFF_CSP(%rbx)\n"
-        "  mov %rbx, %rdi\n"
-        "  mov %rax, %rsi\n"
-        "  call oti_thread_finished\n"
-        "  ud2\n"
-        ".size oti_thread_end, .-oti_thread_end\n"
-        /* oti_segment_return: the return address of a function at the top
-         * of a segment. The link record is at the stack pointer; the
-         * result in rax goes back to the caller on the segment below,
-         * which becomes the one in use (drop_segment and use_segment). Only
-         * rax, rbx and r15 matter to native code here, and the callee-saved
-         * registers hold the caller's values, so it uses scratch ones. */
-        ".globl oti_segment_return\n"
-        ".type oti_segment_return,@function\n"
-        "oti_segment_return:\n"
-        "  mov OFF_SEGMENT(%rbx), %rdi\n"
-        "  mov SEGMENT_SIZE(%rdi), %rcx\n"
-        "  sub %rcx, OFF_STACK_BYTES(%rbx)\n"
-        "  mov SEGMENT_PREV(%rdi), %rsi\n"
-        "  mov %rsi, OFF_SEGMENT(%rbx)\n"
-        "  mov SEGMENT_SIZE(%rsi), %rcx\n"
-        "  neg %rcx\n"
-        "  lea SEGMENT_LIMIT(%rsi,%rcx), %rcx\n"
-        "  mov %rax, %r8\n"
-        "  mov OFF_BASE_LIMIT(%rbx), %rax\n"
-        "  mov %rcx, OFF_BASE_LIMIT(%rbx)\n"
-        "  cmpxchg %rcx, OFF_LIMIT(%rbx)\n"
-        "  mov %r8, %rax\n"
-        "  mov 8(%rsp), %rdx\n"
-        "  mov (%rsp), %rsp\n"
-        "  jmp *%rdx\n"
-        ".size oti_segment_return, .-oti_segment_return\n"
-        /* oti_poll: the entry check or loop check failed. A function past
-         * its segment's limit with no interrupt pending, whose frame size
-         * is cached, moves as grow_frame would move it when a segment is
-         * kept above; everything else goes to h_poll. The return address
-         * into the function is at the stack pointer, its frame above it.
-         * Native code expects only callee-saved registers kept here. */
-        ".globl oti_poll\n"
-        ".type oti_poll,@function\n"
-        "oti_poll:\n"
-        "  lea 8(%rsp), %rsi\n"
-        "  mov OFF_BASE_LIMIT(%rbx), %rax\n"
-        "  cmp %rax, %rsi\n"
-        "  jae 1f\n"
-        "  cmp %rax, OFF_LIMIT(%rbx)\n"
-        "  jne 1f\n"
-        "  mov OFF_SEGMENT(%rbx), %r10\n"
-        "  mov SEGMENT_NEXT(%r10), %r10\n"
-        "  test %r10, %r10\n"
-        "  jz 1f\n"
-        "  mov (%rsp), %rdx\n"
-        "  mov %rdx, %rcx\n"
-        "  shr $3, %rcx\n"
-        "  and $FRAME_MASK, %rcx\n"
-        "  shl $4, %rcx\n"
-        "  mov OFF_RUNTIME(%rbx), %r8\n"
-        "  cmp OFF_FRAMES(%r8,%rcx), %rdx\n"
-        "  jne 1f\n"
-        "  mov OFF_FRAMES+8(%r8,%rcx), %rcx\n"
-        "  mov SEGMENT_SIZE(%r10), %r8\n"
-        "  mov OFF_STACK_BYTES(%rbx), %r9\n"
-        "  add %r8, %r9\n"
-        "  cmp $SEGMENTS_MAX, %r9\n"
-        "  ja 1f\n"
-        "  mov %r9, OFF_STACK_BYTES(%rbx)\n"
-        "  mov %r10, OFF_SEGMENT(%rbx)\n"
-        "  neg %r8\n"
-        "  lea SEGMENT_LIMIT(%r10,%r8), %r9\n"
-        "  mov %r9, OFF_BASE_LIMIT(%rbx)\n"
-        "  cmpxchg %r9, OFF_LIMIT(%rbx)\n"
-        /* link_segment, then the frame copied under it. */
-        "  lea 8(%rsi,%rcx), %r9\n"
-        "  mov %r9, -16(%r10)\n"
-        "  mov (%rsi,%rcx), %r9\n"
-        "  mov %r9, -8(%r10)\n"
-        "  lea oti_segment_return(%rip), %r9\n"
-        "  mov %r9, -24(%r10)\n"
-        "  sub $24, %r10\n"
-        "  sub %rcx, %r10\n"
-        "  test %rcx, %rcx\n"
-        "  jz 3f\n"
-        "2:\n"
-        "  mov -8(%rsi,%rcx), %r9\n"
-        "  mov %r9, -8(%r10,%rcx)\n"
-        "  sub $8, %rcx\n"
-        "  jnz 2b\n"
-        "3:\n"
-        "  mov %rdx, -8(%r10)\n"
-        "  lea -8(%r10), %rsp\n"
-        "  ret\n"
-        "1:\n"
-        "  jmp oti_bridge_h_poll\n"
-        ".size oti_poll, .-oti_poll\n"
-        /* oti_segment_grow: called from a big frame's check before its
-         * prologue, with the frame's size in rdx and the arguments still in
-         * their registers. It saves them, gets a new segment from
-         * oti_segment_grow_entry on the C stack, and continues the function
-         * there, as if called with oti_segment_return as return address. */
-        ".globl oti_segment_grow\n"
-        ".type oti_segment_grow,@function\n"
-        "oti_segment_grow:\n"
-        "  push %r12\n"
-        "  push %rax\n"
-        "  push %rsi\n"
-        "  push %rdi\n"
-        "  push %rcx\n"
-        "  push %r8\n"
-        "  push %r11\n"
-        "  push %r10\n"
-        "  mov %rsp, %r12\n"
-        "  mov %rdx, %rsi\n"
-        "  mov %r12, %rdx\n"
-        "  mov %rbx, %rdi\n"
-        "  mov OFF_CSP(%rbx), %rsp\n"
-        "  call oti_segment_grow_entry\n"
-        "  mov %rax, %r9\n"
-        "  mov 0(%r12), %r10\n"
-        "  mov 8(%r12), %r11\n"
-        "  mov 16(%r12), %r8\n"
-        "  mov 24(%r12), %rcx\n"
-        "  mov 32(%r12), %rdi\n"
-        "  mov 40(%r12), %rsi\n"
-        "  mov 48(%r12), %rax\n"
-        "  mov 64(%r12), %rdx\n"
-        "  mov 56(%r12), %r12\n"
-        "  mov %r9, %rsp\n"
-        "  jmp *%rdx\n"
-        ".size oti_segment_grow, .-oti_segment_grow\n"
-        /* Where a thread that stopped in a C call (see BRIDGE) resumes, with
-         * the call's value in rax. */
-        ".globl oti_c_resume\n"
-        ".type oti_c_resume,@function\n"
-        "oti_c_resume:\n"
-        "  mov OFF_SP(%rbx), %rsp\n"
-        "  sub $8, %rsp\n"
-        "  ret\n"
-        ".size oti_c_resume, .-oti_c_resume\n"
-        ".globl oti_native_resume\n"
-        ".type oti_native_resume,@function\n"
-        "oti_native_resume:\n"
-        "  mov %rdi, %rbx\n"
-        "  mov %rsi, %rsp\n"
-        "  mov OFF_HEAP_USED(%rbx), %r15\n"
-        "  add OFF_HEAP_START(%rbx), %r15\n"
-        "  mov %rcx, %rax\n"
-        "  jmp *%rdx\n"
-        ".size oti_native_resume, .-oti_native_resume\n");
 
 /* --- Code space -------------------------------------------------------- */
 
@@ -1053,47 +792,14 @@ static void after_c_call(struct sljit_compiler* c) {
                  (sljit_sw)offsetof(ot_state, heap.used));
 }
 
-/* The poll at function entries and loop back edges: one compare of the stack
- * pointer with native.limit, which sljit can't name, so it goes in as bytes:
- * cmp rsp, [rbx + limit]. */
-static struct sljit_jump* poll(struct sljit_compiler* c) {
-  _Static_assert(OFF_LIMIT < 128, "poll uses an 8-bit displacement");
-  unsigned char cmp[] = {0x48, 0x3b, 0x63, OFF_LIMIT};
-  sljit_emit_op_custom(c, cmp, sizeof(cmp));
-  sljit_set_current_flags(c, SLJIT_CURRENT_FLAGS_SUB | SLJIT_CURRENT_FLAGS_COMPARE |
-                                 SLJIT_SET_LESS);
-  return sljit_emit_jump(c, SLJIT_LESS);
-}
-
 /* Two scratch float registers, for float fast paths; they never hold values
  * across a call. */
 static void enter(struct sljit_compiler* c, sljit_s32 scratches, sljit_s32 slots, uint32_t* frame) {
-  /* A frame too big for the check after the prologue checks before it,
-   * with r9 and rdx, which carry no arguments, and moves to a new segment
-   * before it is made. */
   size_t need = (size_t)slots * 8 + 256;
-  if (need > SMALL_FRAME) {
-    int32_t down = -(int32_t)need, limit = (int32_t)offsetof(ot_state, native.base_limit);
-    uint64_t grow = (uint64_t)(uintptr_t)oti_segment_grow;
-    unsigned char lea[8] = {0x4c, 0x8d, 0x8c, 0x24}, cmp[7] = {0x4c, 0x3b, 0x8b},
-                  jae[2] = {0x73, 18}, size[5] = {0xba}, target[10] = {0x49, 0xb9},
-                  call[3] = {0x41, 0xff, 0xd1};
-    memcpy(lea + 4, &down, 4);
-    memcpy(cmp + 3, &limit, 4);
-    uint32_t bytes = (uint32_t)need;
-    memcpy(size + 1, &bytes, 4);
-    memcpy(target + 2, &grow, 8);
-    sljit_emit_op_custom(c, lea, sizeof(lea));
-    sljit_emit_op_custom(c, cmp, sizeof(cmp));
-    sljit_emit_op_custom(c, jae, sizeof(jae));
-    sljit_emit_op_custom(c, size, sizeof(size));
-    sljit_emit_op_custom(c, target, sizeof(target));
-    sljit_emit_op_custom(c, call, sizeof(call));
-  }
+  if (need > SMALL_FRAME) check_big_frame(c, need);
   sljit_emit_enter(c, SLJIT_ENTER_REG_ARG | SLJIT_ENTER_KEEP(2), SLJIT_ARGS0(W),
                    scratches | SLJIT_ENTER_FLOAT(2), 2, slots * 8);
-  sljit_s32 pushed = scratches > SCRATCH_REGISTERS ? scratches - SCRATCH_REGISTERS : 0;
-  *frame = (uint32_t)(c->local_size + pushed * 8);
+  *frame = frame_size(c, scratches);
 }
 
 static bool translate(oti_bridge* b) {
@@ -1114,7 +820,7 @@ static bool translate(oti_bridge* b) {
       }
       case NS_ENTER: {
         uint64_t scratches = read_unsigned(b), slots = read_unsigned(b);
-        if (scratches < SCRATCH_REGISTERS || scratches > 11 || slots > 100000) return false;
+        if (scratches < 7 || scratches > 11 || slots > 100000) return false;
         enter(c, (sljit_s32)scratches, (sljit_s32)slots, &b->frame);
         break;
       }
@@ -1203,8 +909,9 @@ static bool translate(oti_bridge* b) {
         break;
       }
       case NS_SPBASE:
+        /* Offsets are from the stack pointer, not from the locals. */
         operand(b, &d, &dw);
-        sljit_get_local_base(c, d, dw, (sljit_sw)read_signed(b));
+        sljit_get_local_base(c, d, dw, (sljit_sw)read_signed(b) - SLJIT_LOCALS_OFFSET);
         break;
       case NS_POLL: pend(b, poll(c), read_label(b)); break;
       case NS_FMOV:
@@ -1631,28 +1338,54 @@ ot_value oti_native_invoke_list(ot_state* rt, ot_value function, ot_value args) 
 
 /* --- Frame walking ------------------------------------------------------ */
 
+/* A frame in a walk from the one that last called C outwards: its stack
+ * pointer, and the return address of the call it is making. */
+typedef struct {
+  uintptr_t sp, ra;
+} oti_walk;
+
+static oti_walk walk_from(uintptr_t sp) { return (oti_walk){sp, sp ? ((uintptr_t*)sp)[-1] : 0}; }
+
+/* Step over entry records (to the run of frames that called C) unless
+ * entries is false, and over segment links. Returns whether w is a frame. */
+static bool walk_frame(oti_walk* w, bool entries) {
+  while (w->sp) {
+    uintptr_t* at = (uintptr_t*)w->sp;
+    if (w->ra == (uintptr_t)oti_native_return) {
+      if (!entries) return false;
+      *w = walk_from(at[0]);
+    } else if (w->ra == (uintptr_t)oti_segment_return) {
+      *w = (oti_walk){at[0], at[1]};
+    } else {
+      return true;
+    }
+  }
+  return false;
+}
+
+/* Move w from a frame with descriptor d to its caller. */
+static void walk_next(oti_walk* w, const oti_descriptor* d) {
+  w->ra = *return_slot(w->sp, d->frame);
+  w->sp += frame_span(d->frame);
+}
+
 /* Visit the live slots of every native frame, run by run, from the frame
  * that last called C out to the outermost entry record. */
 static void visit_frames(ot_state* rt, uintptr_t sp, oti_root_visitor visit, void* context) {
-  oti_native_runtime* n = rt->native_runtime;
-  while (sp) {
-    uintptr_t ra = ((uintptr_t*)sp)[-1];
-    if (ra == (uintptr_t)oti_native_return || ra == (uintptr_t)oti_segment_return) {
-      sp = ((uintptr_t*)sp)[0];
-      continue;
-    }
+  for (oti_walk w = walk_from(sp); walk_frame(&w, true);) {
     const oti_code* c;
-    const oti_descriptor* d = descriptor_at(n, ra, &c);
+    const oti_descriptor* d = descriptor_at(rt->native_runtime, w.ra, &c);
     if (!d) {
-      fprintf(stderr, "otium: no frame descriptor for return address %#lx\n", (unsigned long)ra);
+      fprintf(stderr, "otium: no frame descriptor for return address %#lx\n", (unsigned long)w.ra);
       abort();
     }
     const uint64_t* bits = c->bitmaps + d->slots;
-    OTI_UNPOISON(sp, d->frame);
-    for (uint32_t w = 0; w < d->words; w++)
-      for (uint64_t word = bits[w]; word; word &= word - 1)
-        visit(context, (ot_value*)sp + w * 64 + (uint32_t)__builtin_ctzll(word));
-    sp += d->frame + 8;
+    ot_value* slots = (ot_value*)(w.sp + SLJIT_LOCALS_OFFSET);
+    OTI_UNPOISON(w.sp, d->frame);
+    for (uint32_t i = 0; i < d->words; i++)
+      for (uint64_t word = bits[i]; word; word &= word - 1)
+        visit(context, slots + i * 64 + (uint32_t)__builtin_ctzll(word));
+    walk_next(&w, d);
   }
 }
 
@@ -1687,16 +1420,10 @@ void oti_native_trace(ot_state* rt) {
   if (!places) return;
   size_t count = 0;
   bool seen = false;
-  uintptr_t sp = rt->native.sp;
-  while (sp && count < TRACE_LIMIT) {
-    uintptr_t ra = ((uintptr_t*)sp)[-1];
-    if (ra == (uintptr_t)oti_native_return || ra == (uintptr_t)oti_segment_return) {
-      sp = ((uintptr_t*)sp)[0];
-      continue;
-    }
-    const oti_descriptor* d = descriptor_at(rt->native_runtime, ra, NULL);
+  for (oti_walk w = walk_from(rt->native.sp); count < TRACE_LIMIT && walk_frame(&w, true);) {
+    const oti_descriptor* d = descriptor_at(rt->native_runtime, w.ra, NULL);
     if (!d) break;
-    sp += d->frame + 8;
+    walk_next(&w, d);
     if (d->function == UINT32_MAX || d->offset == UINT32_MAX) continue;
     const oti_function* fn = rt->functions[d->function];
     if (!fn || fn->source == OTI_NO_SOURCE) continue;
@@ -1718,22 +1445,15 @@ void oti_native_trace(ot_state* rt) {
 
 /* The source offset of the innermost native call site with one. */
 static bool innermost_offset(ot_state* rt, uint32_t* source, uint32_t* offset) {
-  uintptr_t sp = rt->native.sp;
-  while (sp) {
-    uintptr_t ra = ((uintptr_t*)sp)[-1];
-    if (ra == (uintptr_t)oti_native_return) return false;
-    if (ra == (uintptr_t)oti_segment_return) {
-      sp = ((uintptr_t*)sp)[0];
-      continue;
-    }
-    const oti_descriptor* d = descriptor_at(rt->native_runtime, ra, NULL);
+  for (oti_walk w = walk_from(rt->native.sp); walk_frame(&w, false);) {
+    const oti_descriptor* d = descriptor_at(rt->native_runtime, w.ra, NULL);
     if (!d) return false;
     if (d->function != UINT32_MAX && d->offset != UINT32_MAX && rt->functions[d->function]) {
       *source = rt->functions[d->function]->source;
       *offset = d->offset;
       return true;
     }
-    sp += d->frame + 8;
+    walk_next(&w, d);
   }
   return false;
 }
@@ -1770,7 +1490,7 @@ static _Noreturn void unwind_cleanup(ot_state* rt) {
   oti_cleanup cleanup = rt->cleanup_states[index];
   rt->native.callee = rt->cleanups[index];
   oti_restore_cleanups(rt, index);
-  uintptr_t sp = rt->native.sp - 8;
+  uintptr_t sp = call_sp(rt->native.sp);
   if (!oti_grow(rt, (void**)&rt->unwinds, &rt->unwind_capacity, rt->unwind_count + 1,
                 sizeof(oti_unwind_save))) {
     /* Out of memory: skip the cleanup and keep unwinding with that error. */
@@ -2211,27 +1931,6 @@ enum {
 
 static W dispatch(ot_state* rt);
 
-/* A bridge per C function native code calls: it records the calling frame
- * (whose return address stays on the Otium stack, where frame walking reads
- * it) and calls the function on the C stack. Each has its own direct call,
- * which predicts far better than one shared indirect call. A thread that
- * stopped in one resumes at oti_c_resume with the call's value in rax. */
-#define BRIDGE(fn)                                                                                  \
-  __asm__ volatile(".pushsection .text\n"                                                          \
-                   ".p2align 4\n"                                                                  \
-                   ".globl oti_bridge_" #fn "\n"                                                   \
-                   ".hidden oti_bridge_" #fn "\n"                                                  \
-                   "oti_bridge_" #fn ":\n"                                                         \
-                   "  lea 8(%%rsp), %%rax\n"                                                       \
-                   "  mov %%rax, OFF_SP(%%rbx)\n"                                                  \
-                   "  mov OFF_CSP(%%rbx), %%rsp\n"                                                 \
-                   "  call %P0\n"                                                                  \
-                   "  mov OFF_SP(%%rbx), %%rsp\n"                                                  \
-                   "  sub $8, %%rsp\n"                                                             \
-                   "  ret\n"                                                                       \
-                   ".popsection\n"                                                                 \
-                   :                                                                               \
-                   : "i"(fn))
 #define HELPER_BRIDGE(id, fn) BRIDGE(fn);
 #define HELPER_DECLARE(id, fn) extern char oti_bridge_##fn[];
 HELPERS(HELPER_DECLARE)

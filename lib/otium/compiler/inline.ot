@@ -476,9 +476,8 @@
 ;; --- Calls and inlining ----------------------------------------------------------
 
 ;; A fn bound to a variable that's called in more than one place is inlined
-;; into each only when it's no bigger than this, so that inlining for-each,
-;; which calls its function in a loop for arrays and another for lists,
-;; doesn't copy the function's body into both.
+;; into each only when it's no bigger than this, so its body isn't copied
+;; into every call.
 (def- shared-fn-size 24)
 
 ;; How many calls of var node makes, inside functions too.
@@ -566,17 +565,11 @@
                  (put! core-functions name [text info])
                  info)))))))
 
-;; Whether a higher-order core function's function argument is a fn written
-;; at the call, when known.ot asks for one.
-(def (function-argument-ready? node args)
-  (let ((i (get known/inline-function-arguments (string->symbol (cdr (%native-cell-name (get node 2)))))))
-    (or (nil? i) (and (< i (length args)) (eq? (get (get args i) 0) :fn)))))
-
 ;; A call of a core function inlined, or nil, as simplify-call does for local
 ;; functions.
 (def (inline-core s node ctx)
   (let ((info (core-function node)) (args (get node 3)))
-    (when (and info (inlinable? s info args) (function-argument-ready? node args))
+    (when (and info (inlinable? s info args))
       (let ((ready (list-to-array (map (fn (a) (not (or (eq? (get a 0) :fn) (copyable? a)))) (array-to-list args)))))
         (let ((prepared (map (fn (i)
                                (if (get ready i)

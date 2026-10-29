@@ -48,14 +48,9 @@
 ;; definitions (design, section 6.2) until declarations exist. Each is kept
 ;; only if inlining it measures well.
 (def inline-candidates
-  '(identity inc dec zero? true? false? even? odd? first second third rest for-each))
+  '(identity inc dec zero? true? false? even? odd? first second third rest))
 
 (def (inline-candidate? name) (and (memq name inline-candidates) #t))
-
-;; Higher-order candidates and the argument that must be a fn written at the
-;; call for them to be inlined: copying the loop pays off when the function
-;; inlines into it, and otherwise only makes the caller bigger to compile.
-(def inline-function-arguments {'for-each 0})
 
 ;; --- Pairs and lists ---------------------------------------------------------
 

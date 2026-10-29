@@ -20,7 +20,7 @@ TEST(growth_keeps_cycles_and_aliases_and_recovers_from_exhaustion) {
   CHECK(oti_heap_set_limit(&h, 4096));
   live[2] = oti_heap_alloc(&h, 2, 0, 1000);
   CHECK(live[2]);
-  CHECK(h.capacity == 2048 && live[0] == live[1]);
+  CHECK(h.capacity >= 1048 && h.capacity <= 4096 && live[0] == live[1]);
   CHECK(object_fields(live[0])[0] == live[0] && object_identity(live[0]) == identity);
   memset(object_bytes(live[2]), 0x55, 1000);
   object_fields(live[0])[1] = live[2];

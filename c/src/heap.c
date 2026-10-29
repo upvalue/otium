@@ -1,209 +1,505 @@
 #include "internal.h"
 #include <assert.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#ifdef OTIUM_CHECK_ROOTS
-#include <stdio.h>
+#ifndef OTIUM_FREESTANDING
 #include <sys/mman.h>
 #endif
 
-_Static_assert(sizeof(oti_object_header) % 8 == 0, "object alignment");
+/* A mark-region heap after Immix (Blackburn and McKinley, PLDI 2008); see
+ * scratch/immix-gc.md. Allocation bumps through holes, runs of free lines in
+ * blocks. A collection marks live objects and the lines they cover, then
+ * sweeps the line marks to find free blocks and holes for the next round.
+ * Dead objects are never visited. */
 
-/* The most of the space that may stay live after a collection before the heap
- * grows, as a percentage. Growth aims to bring it back to this. Lower means
- * fewer collections and more memory. */
+_Static_assert(sizeof(oti_object_header) == 16, "object header");
+_Static_assert(OTI_LARGE_MIN <= OTI_BLOCK / 2, "medium objects fit a block");
+
+/* The most of the heap that may stay live after a collection before it grows,
+ * as a percentage. Growth aims to bring it back to this. Lower means fewer
+ * collections and more memory. */
 #define OTI_HEAP_LIVE_PERCENT 50
 
-#ifdef OTIUM_CHECK_ROOTS
-/* Root-checking builds copy every collection into fresh memory and make the old
- * space inaccessible, so a pointer that missed a collection faults when used.
- * Retired spaces stay mapped for a while so new spaces can't reuse their
- * addresses. Only space[active] is used. */
-static unsigned char* fresh_space(size_t bytes) {
-  void* p = mmap(NULL, bytes, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-  if (p == MAP_FAILED) {
-    perror("otium: root check space");
+typedef struct {
+  uint8_t state, mark;
+  uint16_t live_lines;
+} oti_block_info;
+
+enum { BLOCK_FREE, BLOCK_USED };
+
+/* Metadata sits at the start of each chunk, in blocks of its own, so every
+ * other block's payload is whole. */
+struct oti_chunk {
+  oti_chunk* next;
+  oti_block_info blocks[OTI_BLOCKS_PER_CHUNK];
+  uint8_t lines[OTI_BLOCKS_PER_CHUNK][OTI_LINES_PER_BLOCK];
+};
+
+#define META_BLOCKS ((sizeof(oti_chunk) + OTI_BLOCK - 1) / OTI_BLOCK)
+#define USABLE_BLOCKS (OTI_BLOCKS_PER_CHUNK - META_BLOCKS)
+
+/* Large objects follow this link, malloc'd one at a time. */
+struct oti_large {
+  oti_large *previous, *next;
+};
+
+_Static_assert(sizeof(oti_large) % 8 == 0, "large object alignment");
+
+static inline oti_chunk* heap_chunk_of(const void* p) {
+  return (oti_chunk*)((uintptr_t)p & ~(uintptr_t)(OTI_CHUNK - 1));
+}
+
+static inline size_t heap_block_index(const void* p) {
+  return ((uintptr_t)p & (OTI_CHUNK - 1)) >> OTI_BLOCK_BITS;
+}
+
+static inline size_t heap_line_index(const void* p) {
+  return ((uintptr_t)p & (OTI_BLOCK - 1)) >> OTI_LINE_BITS;
+}
+
+static inline oti_block_info* heap_block_info(const void* p) {
+  return &heap_chunk_of(p)->blocks[heap_block_index(p)];
+}
+
+static inline uint8_t* heap_block_lines(const void* p) { return heap_chunk_of(p)->lines[heap_block_index(p)]; }
+
+static inline unsigned char* heap_block_at(oti_chunk* c, size_t i) {
+  return (unsigned char*)c + (i << OTI_BLOCK_BITS);
+}
+
+static inline oti_object_header* heap_header(ot_value v) { return (oti_object_header*)v; }
+
+static inline ot_value heap_large_object(oti_large* l) { return (ot_value)(l + 1); }
+
+static inline oti_large* heap_large_link(ot_value v) { return (oti_large*)v - 1; }
+
+/* --- Memory ------------------------------------------------------------------ */
+
+static oti_chunk* heap_map_chunk(void) {
+#ifndef OTIUM_FREESTANDING
+  /* Map twice the size and trim to an aligned chunk. Fresh pages are zero,
+   * which is what line marks and block states start as. */
+  size_t span = 2 * OTI_CHUNK;
+  unsigned char* p = mmap(NULL, span, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  if (p == MAP_FAILED) return NULL;
+  uintptr_t start = ((uintptr_t)p + OTI_CHUNK - 1) & ~(uintptr_t)(OTI_CHUNK - 1);
+  if (start > (uintptr_t)p) munmap(p, start - (uintptr_t)p);
+  uintptr_t end = (uintptr_t)p + span;
+  if (end > start + OTI_CHUNK) munmap((void*)(start + OTI_CHUNK), end - (start + OTI_CHUNK));
+  return (oti_chunk*)start;
+#else
+  oti_chunk* c = aligned_alloc(OTI_CHUNK, OTI_CHUNK);
+  if (c) memset(c, 0, sizeof(*c));
+  return c;
+#endif
+}
+
+static void heap_unmap_chunk(oti_chunk* c) {
+#ifndef OTIUM_FREESTANDING
+  munmap(c, OTI_CHUNK);
+#else
+  free(c);
+#endif
+}
+
+static bool heap_reserve(oti_block_list* list, size_t count) {
+  if (count <= list->capacity) return true;
+  size_t capacity = list->capacity ? list->capacity : 64;
+  while (capacity < count) capacity *= 2;
+  unsigned char** items = realloc(list->items, capacity * sizeof(*items));
+  if (!items) return false;
+  list->items = items;
+  list->capacity = capacity;
+  return true;
+}
+
+static size_t heap_chunk_count(const oti_heap* h) {
+  size_t n = 0;
+  for (oti_chunk* c = h->chunks; c; c = c->next) n++;
+  return n;
+}
+
+/* Map a chunk and put its blocks on the free list, lowest address last so
+ * it is taken first. */
+static bool heap_add_chunk(oti_heap* h) {
+  size_t blocks = (heap_chunk_count(h) + 1) * USABLE_BLOCKS;
+  if (!heap_reserve(&h->free_blocks, blocks) || !heap_reserve(&h->recyclable, blocks)) return false;
+  oti_chunk* c = heap_map_chunk();
+  if (!c) return false;
+  c->next = h->chunks;
+  h->chunks = c;
+  for (size_t i = OTI_BLOCKS_PER_CHUNK; i-- > META_BLOCKS;)
+    h->free_blocks.items[h->free_blocks.count++] = heap_block_at(c, i);
+  return true;
+}
+
+/* Whether the heap may hold bytes more without passing its capacity, which
+ * counts object bytes as semispaces did. Fragmentation can make the blocks
+ * holding them add up to more. */
+static bool heap_affordable(const oti_heap* h, size_t bytes) {
+  size_t used = oti_heap_used(h);
+  return used <= h->capacity && bytes <= h->capacity - used;
+}
+
+/* Blocks may add up to twice the limit, the memory two semispaces took, and a
+ * few more so that a tiny heap still has a block for small objects and one for
+ * overflow. */
+#define OTI_SLACK_BLOCKS 4
+
+static unsigned char* heap_take_free_block(oti_heap* h) {
+  if ((h->blocks_used + 1) * OTI_BLOCK > 2 * h->limit + OTI_SLACK_BLOCKS * OTI_BLOCK) return NULL;
+  if (!h->free_blocks.count && !heap_add_chunk(h)) return NULL;
+  unsigned char* block = h->free_blocks.items[--h->free_blocks.count];
+  heap_block_info(block)->state = BLOCK_USED;
+  h->blocks_used++;
+  return block;
+}
+
+/* --- Allocation -------------------------------------------------------------- */
+
+/* Fill the next chunk past used with nil so inline allocation can skip it.
+ * Inline allocation stops where the heap would pass its capacity. */
+void oti_heap_fill(oti_heap* h) {
+  if (!h->start) return;
+  unsigned char* cursor = h->start + h->used;
+  if (h->filled < cursor) h->filled = cursor;
+  size_t left = (size_t)(h->hole_end - h->filled);
+  unsigned char* end = h->filled + (left > OTI_FILL_CHUNK ? OTI_FILL_CHUNK : left);
+  for (ot_value* slot = (ot_value*)h->filled; slot < (ot_value*)end; slot++) *slot = OT_NIL;
+  h->filled = end;
+  size_t used = oti_heap_used(h);
+  size_t room = used < h->capacity ? (h->capacity - used) & ~(size_t)7 : 0;
+  if ((size_t)(end - cursor) > room) end = cursor + room;
+  oti_heap_set_ready(h, (size_t)(end - h->start));
+}
+
+static void heap_end_hole(oti_heap* h) {
+  if (h->start) h->allocated_bytes += h->used;
+  h->start = h->hole_start = h->hole_end = h->filled = NULL;
+  h->used = 0;
+  oti_heap_set_ready(h, 0);
+}
+
+static void heap_begin_hole(oti_heap* h, unsigned char* from, unsigned char* to) {
+  heap_end_hole(h);
+  h->start = h->hole_start = h->filled = from;
+  h->hole_end = to;
+  oti_heap_fill(h);
+}
+
+/* Find the next hole in the current block. A line is free when it isn't
+ * marked; small objects mark only their first line, so the line after a
+ * marked one may hold the end of one and is skipped. */
+static bool heap_next_hole_in_block(oti_heap* h) {
+  if (!h->block) return false;
+  const uint8_t* lines = heap_block_lines(h->block);
+  uint8_t epoch = (uint8_t)h->epoch;
+  for (size_t i = h->line; i < OTI_LINES_PER_BLOCK; i++) {
+    if (lines[i] == epoch || (i && lines[i - 1] == epoch)) continue;
+    size_t j = i + 1;
+    while (j < OTI_LINES_PER_BLOCK && lines[j] != epoch) j++;
+    h->line = j;
+    heap_begin_hole(h, h->block + i * OTI_LINE, h->block + j * OTI_LINE);
+    return true;
+  }
+  h->line = OTI_LINES_PER_BLOCK;
+  return false;
+}
+
+static bool heap_next_hole(oti_heap* h) {
+  if (heap_next_hole_in_block(h)) return true;
+  while (h->recyclable.count) {
+    h->block = h->recyclable.items[--h->recyclable.count];
+    h->line = 0;
+    if (heap_next_hole_in_block(h)) return true;
+  }
+  h->block = heap_take_free_block(h);
+  h->line = 0;
+  return heap_next_hole_in_block(h);
+}
+
+#ifdef OTIUM_CHECK_KINDS
+/* Allocation must never land on a line where a marked object starts. The
+ * first line may hold the end of the previous object. */
+static void heap_check_free(const oti_heap* h, const unsigned char* p, size_t size) {
+  const uint8_t* lines = heap_block_lines(p);
+  size_t first = heap_line_index(p), last = heap_line_index(p + size - 1);
+  if (heap_block_index(p) < META_BLOCKS || heap_block_info(p)->state != BLOCK_USED ||
+      heap_block_index(p + size - 1) != heap_block_index(p)) {
+    fprintf(stderr, "otium: allocation outside a block in use at %p\n", (void*)p);
     abort();
   }
+  for (size_t i = first + 1; i <= last; i++)
+    if (lines[i] == h->epoch) {
+      fprintf(stderr, "otium: allocation at %p over marked line %zu\n", (void*)p, i);
+      abort();
+    }
+}
+#else
+#define heap_check_free(h, p, size) ((void)0)
+#endif
+
+static unsigned char* heap_bump(oti_heap* h, size_t size) {
+  if (!h->start) return NULL;
+  unsigned char* cursor = h->start + h->used;
+  if (size > (size_t)(h->hole_end - cursor)) return NULL;
+  h->used += size;
+  heap_check_free(h, cursor, size);
+  return cursor;
+}
+
+static unsigned char* heap_bump_overflow(oti_heap* h, size_t size) {
+  if (!h->overflow || size > (size_t)(h->overflow_end - h->overflow)) {
+    unsigned char* block = heap_take_free_block(h);
+    if (!block) return NULL;
+    h->overflow = block;
+    h->overflow_end = block + OTI_BLOCK;
+  }
+  unsigned char* p = h->overflow;
+  heap_check_free(h, p, size);
+  h->overflow += size;
+  h->allocated_bytes += size;
   return p;
 }
 
-static void retire_space(oti_heap* h, unsigned char* space, size_t bytes) {
-  oti_retired_space* slot = &h->retired[h->retired_next++ % OTI_RETIRED_SPACES];
-  if (slot->space) munmap(slot->space, slot->bytes);
-  mprotect(space, bytes, PROT_NONE);
-  *slot = (oti_retired_space){space, bytes};
+static unsigned char* heap_alloc_large(oti_heap* h, size_t size) {
+  if (!heap_affordable(h, size)) return NULL;
+  oti_large* l = malloc(sizeof(oti_large) + size);
+  if (!l) return NULL;
+  *l = (oti_large){NULL, h->large};
+  if (h->large) h->large->previous = l;
+  h->large = l;
+  h->large_bytes += size;
+  h->allocated_bytes += size;
+  return (unsigned char*)heap_large_object(l);
 }
+
+static unsigned char* heap_place(oti_heap* h, size_t size) {
+  if (!heap_affordable(h, size)) return NULL;
+  if (size >= OTI_LARGE_MIN) return heap_alloc_large(h, size);
+  unsigned char* p = heap_bump(h, size);
+  if (p) return p;
+  if (size > OTI_LINE && (p = heap_bump_overflow(h, size))) return p;
+  while (heap_next_hole(h))
+    if ((p = heap_bump(h, size))) return p;
+  return NULL;
+}
+
+/* --- Collection -------------------------------------------------------------- */
+
+static void heap_push(oti_heap* h, ot_value v) {
+  if (h->stack_count == h->stack_capacity) {
+    size_t capacity = h->stack_capacity ? h->stack_capacity * 2 : 1024;
+    ot_value* stack = realloc(h->stack, capacity * sizeof(*stack));
+    if (!stack) {
+      fputs("otium: out of memory while collecting\n", stderr);
+      abort();
+    }
+    h->stack = stack;
+    h->stack_capacity = capacity;
+  }
+  h->stack[h->stack_count++] = v;
+}
+
+/* Mark the object v, the lines it covers and its block, and queue it to have
+ * its fields traced. Small objects mark only their first line. */
+static void heap_mark(oti_heap* h, ot_value v) {
+  oti_object_header* o = heap_header(v);
+  uint8_t epoch = (uint8_t)h->epoch;
+  o->gc = (o->gc & ~(OTI_GC_EPOCH | OTI_GC_RECLAIM)) | epoch | OTI_GC_UNLOGGED;
+  size_t size = o->size;
+  h->marked_bytes += size;
+  if (size < OTI_LARGE_MIN) {
+    oti_chunk* c = heap_chunk_of(o);
+    size_t b = heap_block_index(o);
+    c->blocks[b].mark = epoch;
+    uint8_t* lines = c->lines[b];
+    size_t first = heap_line_index(o);
+    if (size <= OTI_LINE) lines[first] = epoch;
+    else
+      for (size_t i = first, last = heap_line_index((unsigned char*)o + size - 1); i <= last; i++)
+        lines[i] = epoch;
+  }
+  if (o->fields) heap_push(h, v);
+}
+
+static inline void heap_trace(oti_heap* h, ot_value* slot) {
+  ot_value v = *slot;
+  if (!value_is_ptr(v)) return;
+  if ((heap_header(v)->gc & OTI_GC_EPOCH) != h->epoch) heap_mark(h, v);
+}
+
+static void heap_trace_root(void* context, ot_value* slot) { heap_trace(context, slot); }
+
+static void heap_drain(oti_heap* h) {
+  while (h->stack_count) {
+    ot_value v = h->stack[--h->stack_count];
+    ot_value* fields = object_fields(v);
+    for (uint32_t i = 0, n = heap_header(v)->fields; i < n; i++) heap_trace(h, &fields[i]);
+  }
+}
+
+/* Poison memory that is free after a sweep, so a pointer that missed a
+ * collection reads garbage. */
+static void heap_poison(unsigned char* p, size_t bytes) {
+#ifdef OTIUM_CHECK_ROOTS
+  memset(p, 0xfb, bytes);
+#else
+  (void)p;
+  (void)bytes;
 #endif
+}
+
+/* Classify every block from its line marks: free, recyclable (with holes) or
+ * full. Unmarked lines are cleared, so lines and blocks only ever hold the
+ * current epoch or zero, and an old mark can't come round again. */
+static void heap_sweep(oti_heap* h) {
+  uint8_t epoch = (uint8_t)h->epoch;
+  size_t live_lines = 0;
+  h->free_blocks.count = h->recyclable.count = 0;
+  h->blocks_used = 0;
+  for (oti_chunk* c = h->chunks; c; c = c->next) {
+    for (size_t b = OTI_BLOCKS_PER_CHUNK; b-- > META_BLOCKS;) {
+      oti_block_info* info = &c->blocks[b];
+      unsigned char* block = heap_block_at(c, b);
+      uint8_t* lines = c->lines[b];
+      if (info->state == BLOCK_FREE) {
+        h->free_blocks.items[h->free_blocks.count++] = block;
+        continue;
+      }
+      /* The allocator keeps going in the blocks it was using, so they stay
+       * off the lists and their free lines keep their nil. */
+      bool current = block == h->block || (h->overflow_end && block == h->overflow_end - OTI_BLOCK);
+      if (info->mark != epoch && !current) {
+        memset(lines, 0, OTI_LINES_PER_BLOCK);
+        *info = (oti_block_info){BLOCK_FREE, 0, 0};
+        heap_poison(block, OTI_BLOCK);
+        h->free_blocks.items[h->free_blocks.count++] = block;
+        continue;
+      }
+      size_t live = 0, usable = 0;
+      bool previous = false;
+      for (size_t i = 0; i < OTI_LINES_PER_BLOCK; i++) {
+        bool marked = lines[i] == epoch;
+        if (marked) live++;
+        else {
+          lines[i] = 0;
+          if (!previous && !current) {
+            usable++;
+            heap_poison(block + i * OTI_LINE, OTI_LINE);
+          }
+        }
+        previous = marked;
+      }
+      info->live_lines = (uint16_t)live;
+      live_lines += live;
+      h->blocks_used++;
+      if (usable) h->recyclable.items[h->recyclable.count++] = block;
+    }
+  }
+  for (oti_large *l = h->large, *next; l; l = next) {
+    next = l->next;
+    oti_object_header* o = heap_header(heap_large_object(l));
+    if ((o->gc & OTI_GC_EPOCH) == epoch) continue;
+    if (l->previous) l->previous->next = next;
+    else h->large = next;
+    if (next) next->previous = l->previous;
+    h->large_bytes -= o->size;
+    free(l);
+  }
+  h->live_lines = live_lines;
+}
+
+size_t oti_heap_used(const oti_heap* h) {
+  return h->live_bytes + (h->allocated_bytes - h->allocated_at_collection) +
+         (h->start ? h->used : 0);
+}
+
+/* The allocator's hole and overflow block survive a collection: nothing past
+ * the cursor was allocated, so it is still free. */
+static void heap_collect(oti_heap* h) {
+  unsigned char *cursor = h->start ? h->start + h->used : NULL, *hole_end = h->hole_end;
+  heap_end_hole(h);
+  size_t used = oti_heap_used(h);
+  if (used > h->peak_used) h->peak_used = used;
+  h->epoch = h->epoch % 3 + 1;
+  h->marked_bytes = 0;
+  for (oti_roots* r = h->roots; r; r = r->previous)
+    for (size_t i = 0; i < r->count; i++) heap_trace(h, &r->slots[i]);
+  if (h->hook) h->hook(h->hook_data, heap_trace_root, h);
+  heap_drain(h);
+  if (h->weak) h->weak(h->hook_data);
+  heap_sweep(h);
+  h->live_bytes = h->marked_bytes;
+  if (used > h->live_bytes) h->reclaimed_bytes += used - h->live_bytes;
+  h->allocated_at_collection = h->allocated_bytes;
+  h->collections++;
+  if (cursor) heap_begin_hole(h, cursor, hole_end);
+}
+
+void oti_heap_collect(oti_heap* h) { heap_collect(h); }
+
+void oti_heap_collect_full(oti_heap* h) { heap_collect(h); }
+
+ot_value oti_heap_survivor(oti_heap* h, ot_value v) {
+  oti_object_header* o = heap_header(v);
+  if (o->gc & OTI_GC_FORWARDED) {
+    ot_value forwarded;
+    memcpy(&forwarded, &o->fields, sizeof(forwarded));
+    return forwarded;
+  }
+  return (o->gc & OTI_GC_EPOCH) == h->epoch ? v : 0;
+}
+
+bool oti_heap_contains(const oti_heap* h, ot_value v) {
+  for (const oti_chunk* c = h->chunks; c; c = c->next)
+    if (heap_chunk_of((void*)v) == c && heap_block_index((void*)v) >= META_BLOCKS) return true;
+  for (oti_large* l = h->large; l; l = l->next) {
+    ot_value o = heap_large_object(l);
+    if (v >= o && v - o < heap_header(o)->size) return true;
+  }
+  return false;
+}
+
+/* --- Interface --------------------------------------------------------------- */
+
+static size_t heap_round_capacity(size_t bytes) { return bytes & ~(size_t)7; }
 
 bool oti_heap_init(oti_heap* h, size_t capacity) {
-  *h = (oti_heap){0};
-  if (capacity < sizeof(oti_object_header) || capacity > SIZE_MAX / 2) return false;
-  capacity &= ~(size_t)7;
-#ifdef OTIUM_CHECK_ROOTS
-  h->space[0] = fresh_space(capacity);
-#else
-  h->space[0] = malloc(capacity);
-  h->space[1] = malloc(capacity);
-  if (!h->space[0] || !h->space[1]) {
-    oti_heap_destroy(h);
-    return false;
-  }
-#endif
-  h->capacity = h->limit = capacity;
-  h->start = h->space[0];
-  h->end = h->start;
+  *h = (oti_heap){.epoch = 1};
+  if (capacity > SIZE_MAX / 2) return false;
+  h->capacity = h->limit = heap_round_capacity(capacity);
   return true;
 }
 
 bool oti_heap_set_limit(oti_heap* h, size_t limit) {
   if (limit > SIZE_MAX / 2) return false;
-  limit &= ~(size_t)7;
+  limit = heap_round_capacity(limit);
   if (limit < h->capacity) return false;
   h->limit = limit;
   return true;
 }
 
 void oti_heap_destroy(oti_heap* h) {
-#ifdef OTIUM_CHECK_ROOTS
-  if (h->space[h->active]) munmap(h->space[h->active], h->capacity);
-  for (size_t i = 0; i < OTI_RETIRED_SPACES; i++)
-    if (h->retired[i].space) munmap(h->retired[i].space, h->retired[i].bytes);
-#else
-  free(h->space[0]);
-  free(h->space[1]);
-#endif
+  for (oti_chunk *c = h->chunks, *next; c; c = next) {
+    next = c->next;
+    heap_unmap_chunk(c);
+  }
+  for (oti_large *l = h->large, *next; l; l = next) {
+    next = l->next;
+    free(l);
+  }
+  free(h->free_blocks.items);
+  free(h->recyclable.items);
+  free(h->stack);
   *h = (oti_heap){0};
 }
 
-static ot_value evacuate(oti_heap* h, ot_value v, const unsigned char* from, unsigned char* to,
-                         size_t* used) {
-  if (!value_is_ptr(v)) return v;
-  assert(v >= (uintptr_t)from);
-  assert(v < (uintptr_t)from + h->used);
-  oti_object_header* old = (oti_object_header*)v;
-  /* A zero size marks forwarding; the remaining header holds the address. */
-  if (!old->size) {
-    ot_value forwarded;
-    memcpy(&forwarded, &old->fields, sizeof(forwarded));
-    return forwarded;
-  }
-  size_t size = old->size;
-  assert(size <= h->capacity - *used);
-  oti_object_header* copy = (oti_object_header*)(to + *used);
-  /* Most objects are a few words, where calling memcpy costs more than the
-   * copy. Fixed 8-byte copies keep clang from turning this back into a call. */
-  if (size <= 64) {
-    for (size_t i = 0; i < size; i += 8) __builtin_memcpy((char*)copy + i, (char*)old + i, 8);
-  } else {
-    memcpy(copy, old, size);
-  }
-  *used += size;
-  copy->gc &= ~OTI_GC_RECLAIM;
-  ot_value forwarded = (ot_value)copy;
-  old->size = 0;
-  memcpy(&old->fields, &forwarded, sizeof(forwarded));
-  return forwarded;
-}
-
-typedef struct {
-  oti_heap* heap;
-  const unsigned char* from;
-  unsigned char* to;
-  size_t used;
-} oti_copy;
-
-static void evacuate_root(void* context, ot_value* slot) {
-  oti_copy* c = context;
-  *slot = evacuate(c->heap, *slot, c->from, c->to, &c->used);
-}
-
-static void copy_live(oti_heap* h, const unsigned char* from, unsigned char* to) {
-  size_t used = 0;
-  for (oti_roots* r = h->roots; r; r = r->previous)
-    for (size_t i = 0; i < r->count; i++) r->slots[i] = evacuate(h, r->slots[i], from, to, &used);
-  if (h->hook) {
-    oti_copy c = {h, from, to, used};
-    h->hook(h->hook_data, evacuate_root, &c);
-    used = c.used;
-  }
-  for (size_t scan = 0; scan < used;) {
-    oti_object_header* o = (oti_object_header*)(to + scan);
-    ot_value* fields = object_fields((ot_value)o);
-    for (uint32_t i = 0; i < o->fields; i++) fields[i] = evacuate(h, fields[i], from, to, &used);
-    scan += o->size;
-  }
-  if (h->weak) h->weak(h->hook_data);
-  h->allocated_bytes += h->used - h->live_bytes;
-  h->reclaimed_bytes += h->used - used;
-  if (h->used > h->peak_used) h->peak_used = h->used;
-  h->live_bytes = used;
-  h->used = h->filled = used;
-  h->start = to;
-  oti_heap_set_ready(h, used);
-  h->collections++;
-  h->copied_bytes += used;
-}
-
-#ifdef OTIUM_CHECK_ROOTS
-/* Copy into a fresh space of the current capacity and retire the old one. */
-static void relocate(oti_heap* h, size_t old_capacity) {
-  unsigned char* from = h->space[h->active];
-  h->space[h->active] = fresh_space(h->capacity);
-  copy_live(h, from, h->space[h->active]);
-  retire_space(h, from, old_capacity);
-}
-#endif
-
-void oti_heap_collect(oti_heap* h) {
-#ifdef OTIUM_CHECK_ROOTS
-  relocate(h, h->capacity);
-#else
-  copy_live(h, h->space[h->active], h->space[h->active ^ 1]);
-  h->active ^= 1;
-#endif
-}
-
-void oti_heap_collect_full(oti_heap* h) { oti_heap_collect(h); }
-
-ot_value oti_heap_survivor(oti_heap* h, ot_value v) {
-  (void)h;
-  oti_object_header* o = (oti_object_header*)v;
-  if (o->size) return 0;
-  ot_value forwarded;
-  memcpy(&forwarded, &o->fields, sizeof(forwarded));
-  return forwarded;
-}
-
-bool oti_heap_contains(const oti_heap* h, ot_value v) {
-  uintptr_t start = (uintptr_t)h->start;
-  return v >= start && v - start < h->used;
-}
-
-static bool grow(oti_heap* h, size_t needed) {
-  if (needed > h->limit) return false;
-  size_t capacity = h->capacity;
-  while (capacity < needed) capacity = capacity > h->limit / 2 ? h->limit : capacity * 2;
-#ifdef OTIUM_CHECK_ROOTS
-  size_t old_capacity = h->capacity;
-  h->capacity = capacity;
-  relocate(h, old_capacity);
-  return true;
-#endif
-  unsigned char *to = malloc(capacity), *spare = malloc(capacity);
-  if (!to || !spare) {
-    free(to);
-    free(spare);
-    return false;
-  }
-  unsigned char *old_from = h->space[h->active], *old_spare = h->space[h->active ^ 1];
-  h->space[h->active ^ 1] = to;
-  h->capacity = capacity;
-  oti_heap_collect(h);
-  h->space[h->active ^ 1] = spare;
-  free(old_from);
-  free(old_spare);
-  return true;
+static void heap_grow(oti_heap* h, size_t capacity) {
+  capacity = heap_round_capacity(capacity);
+  if (capacity > h->limit) capacity = h->limit;
+  if (capacity > h->capacity) h->capacity = capacity;
 }
 
 ot_value oti_heap_alloc(oti_heap* h, uint32_t kind, uint32_t fields, size_t bytes) {
@@ -212,34 +508,30 @@ ot_value oti_heap_alloc(oti_heap* h, uint32_t kind, uint32_t fields, size_t byte
   if (bytes > SIZE_MAX - base - 7) return 0;
   size_t size = (base + bytes + 7) & ~(size_t)7;
   if (size > h->limit || size > UINT32_MAX) return 0;
-  if (size > h->capacity - h->used) {
-    oti_heap_collect(h);
-    /* As more of the space stays live, each collection frees less and they
-     * come closer together, so grow back to OTI_HEAP_LIVE_PERCENT. A failed
-     * grow is fine while the allocation still fits. */
-    size_t needed = h->used + size;
+  unsigned char* p = heap_place(h, size);
+  if (!p) {
+    heap_collect(h);
+    /* As more of the heap stays live, each collection frees less and they
+     * come closer together, so grow back to OTI_HEAP_LIVE_PERCENT. */
+    size_t needed = h->live_bytes + size;
     if (needed > h->capacity / 100 * OTI_HEAP_LIVE_PERCENT && h->capacity < h->limit)
-      grow(h, needed > h->limit / 100 * OTI_HEAP_LIVE_PERCENT
+      heap_grow(h, needed > h->limit / 100 * OTI_HEAP_LIVE_PERCENT
                   ? h->limit
                   : needed / OTI_HEAP_LIVE_PERCENT * 100);
+    p = heap_place(h, size);
+    /* Holes may be too small for the object, and the budget too small for a
+     * fresh block, while the limit still has room. */
+    if (!p && h->capacity < h->limit) {
+      heap_grow(h, h->live_bytes + size);
+      p = heap_place(h, size);
+    }
+    if (!p) return 0;
   }
-  if (size > h->capacity - h->used) return 0;
-  oti_object_header* o = (oti_object_header*)(h->start + h->used);
-  h->used += size;
-  *o = (oti_object_header){.size = size, .fields = fields, .kind = kind & 255};
+  oti_object_header* o = (oti_object_header*)p;
+  *o = (oti_object_header){.size = (uint32_t)size, .fields = fields, .kind = kind & 255};
   ot_value* slots = object_fields((ot_value)o);
   for (uint32_t i = 0; i < fields; i++) slots[i] = OT_NIL;
   memset((unsigned char*)o + base, 0, size - base);
   oti_heap_fill(h);
   return (ot_value)o;
-}
-
-/* Fill the next chunk past used with nil so inline allocation can skip it. */
-void oti_heap_fill(oti_heap* h) {
-  if (h->filled < h->used) h->filled = h->used;
-  size_t end = h->capacity - h->filled > OTI_FILL_CHUNK ? h->filled + OTI_FILL_CHUNK : h->capacity;
-  ot_value* slot = (ot_value*)(h->start + h->filled);
-  for (size_t i = 0, n = (end - h->filled) / sizeof(ot_value); i < n; i++) slot[i] = OT_NIL;
-  h->filled = end;
-  oti_heap_set_ready(h, end);
 }

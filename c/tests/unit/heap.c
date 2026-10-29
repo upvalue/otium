@@ -21,9 +21,8 @@ TEST(collection_keeps_roots_and_exhaustion_recovers) {
   object_fields(live[0])[0] = live[0];
   object_fields(live[0])[1] = live[1];
   live[2] = live[0];
-  ot_value old = live[0];
   oti_heap_collect(&h);
-  CHECK(live[0] != old);
+  CHECK(oti_heap_contains(&h, live[0]) && oti_heap_contains(&h, live[1]));
   for (int i = 0; i < 100000; i++) {
     CHECK(oti_heap_alloc(&h, 3, 3, 17));
     CHECK(live[0] == live[2]);
@@ -42,7 +41,7 @@ TEST(collection_keeps_roots_and_exhaustion_recovers) {
   CHECK(oti_heap_alloc(&h, 4, 0, 128));
   oti_roots_pop(&h, &roots);
   oti_heap_collect(&h);
-  CHECK_EQ_INT(h.used, 0);
+  CHECK_EQ_INT(oti_heap_used(&h), 0);
   oti_heap_destroy(&h);
 }
 

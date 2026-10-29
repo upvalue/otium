@@ -48,6 +48,8 @@
 (def offset-array-length 24)
 (def offset-float 16)
 (def header-bytes 16)
+;; OTI_LARGE_MIN in c/src/heap.h, for the 64-bit hosts native code runs on.
+(def large-object-bytes 8192)
 (def offset-kind 12)
 (def offset-car 16)
 (def offset-cdr 24)
@@ -275,8 +277,15 @@
 ;; Allocate an object of kind with fields traced words and bytes more, inline:
 ;; bump the allocation pointer, check it against the heap's end, write the
 ;; header. Past the end, C allocates (collecting if it must) and writes the
-;; header itself.
+;; header itself. Large objects always go to C, which keeps them apart.
 (def (allocate fc kind fields bytes offset)
+  (if (>= (+ header-bytes (* 8 fields) bytes) large-object-bytes)
+      (let ((p (vreg! fc)))
+        (ccall! fc h-alloc [[:imm kind] [:imm fields] [:imm bytes]] p offset)
+        p)
+      (allocate-inline fc kind fields bytes offset)))
+
+(def (allocate-inline fc kind fields bytes offset)
   (let ((size (+ header-bytes (* 8 fields) bytes))
         (p (vreg! fc)) (top (raw! fc))
         (slow (label! fc)) (join (label! fc)))

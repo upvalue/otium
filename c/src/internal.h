@@ -943,13 +943,14 @@ ot_value oti_alloc_slow(ot_state* rt, uint32_t kind, uint32_t fields, size_t byt
 
 /* Allocate by bumping the heap pointer into space the heap has already filled
  * with nil. Running out of filled space, collection, interrupts, stress GC and
- * host IO all go through oti_alloc_slow. */
+ * host IO all go through oti_alloc_slow, as do large objects, which the heap
+ * keeps apart. */
 static inline ot_value oti_alloc(ot_state* rt, uint32_t kind, uint32_t fields, size_t bytes) {
   oti_heap* h = &rt->heap;
   if (__builtin_expect(fields < 65536 && bytes < UINT32_MAX / 2, 1)) {
     size_t base = sizeof(oti_object_header) + (size_t)fields * sizeof(ot_value);
     size_t size = (base + bytes + 7) & ~(size_t)7;
-    if (__builtin_expect(size <= h->ready - h->used, 1)) {
+    if (__builtin_expect(size <= h->ready - h->used && size < OTI_LARGE_MIN, 1)) {
       oti_object_header* o = (oti_object_header*)(h->start + h->used);
       h->used += size;
       *o = (oti_object_header){.size = size, .fields = fields, .kind = kind & 255};

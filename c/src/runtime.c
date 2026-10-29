@@ -1184,11 +1184,12 @@ ot_stats ot_get_stats(const ot_state* rt) {
                     .max_frames = rt->max_frames,
                     .heap_capacity = h->capacity,
                     .heap_limit = h->limit,
-                    .heap_allocated_bytes = h->allocated_bytes + (h->used - h->live_bytes),
+                    .heap_allocated_bytes = h->allocated_bytes + (h->start ? h->used : 0),
                     .heap_copied_bytes = h->copied_bytes,
                     .heap_reclaimed_bytes = h->reclaimed_bytes,
-                    .heap_used = h->used,
-                    .heap_peak_used = h->used > h->peak_used ? h->used : h->peak_used};
+                    .heap_used = oti_heap_used(h),
+                    .heap_peak_used = oti_heap_used(h) > h->peak_used ? oti_heap_used(h)
+                                                                     : h->peak_used};
   oti_foreign_stats(rt, &stats);
   return stats;
 }

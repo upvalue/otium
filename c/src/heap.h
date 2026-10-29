@@ -66,44 +66,89 @@ typedef void (*oti_root_hook)(void* data, oti_root_visitor visit, void* context)
  * any memory is reused. It may call oti_heap_survivor and nothing else. */
 typedef void (*oti_weak_hook)(void* data);
 
-#ifdef OTIUM_CHECK_ROOTS
-#define OTI_RETIRED_SPACES 16
-
-typedef struct {
-  unsigned char* space;
-  size_t bytes;
-} oti_retired_space;
+/* Sizes come from a profile: large for 64-bit hosts, small for 32-bit and
+ * embedded targets, unless the build picks one. Objects never cross a block;
+ * lines are what marking and reuse track. Chunks are aligned to their size,
+ * hold their own metadata, and are handed out a block at a time. Objects of
+ * OTI_LARGE_MIN bytes or more are allocated one by one and never move. */
+#if !defined(OTIUM_GC_SMALL) && !defined(OTIUM_GC_LARGE)
+#if SIZE_MAX == UINT32_MAX
+#define OTIUM_GC_SMALL
+#else
+#define OTIUM_GC_LARGE
 #endif
+#endif
+#ifdef OTIUM_GC_SMALL
+#define OTI_LINE_BITS 6
+#define OTI_BLOCK_BITS 12
+#define OTI_CHUNK_BITS 19
+#define OTI_LARGE_MIN 2048
+#else
+#define OTI_LINE_BITS 7
+#define OTI_BLOCK_BITS 15
+#define OTI_CHUNK_BITS 22
+#define OTI_LARGE_MIN 8192
+#endif
+#define OTI_LINE ((size_t)1 << OTI_LINE_BITS)
+#define OTI_BLOCK ((size_t)1 << OTI_BLOCK_BITS)
+#define OTI_CHUNK ((size_t)1 << OTI_CHUNK_BITS)
+#define OTI_LINES_PER_BLOCK (OTI_BLOCK / OTI_LINE)
+#define OTI_BLOCKS_PER_CHUNK (OTI_CHUNK / OTI_BLOCK)
+
+typedef struct oti_chunk oti_chunk;
+typedef struct oti_large oti_large;
 
 typedef struct {
-  unsigned char* space[2];
-  /* space[active], kept here so allocation needs one load to find it. */
+  unsigned char** items;
+  size_t count, capacity;
+} oti_block_list;
+
+typedef struct {
+  /* The allocation cursor is start + used, and inline allocation may bump it
+   * to end, which is start + ready. Native code keeps the cursor in a
+   * register and compares with end. Lowering ready to used sends every
+   * allocation to the slow path. start is the beginning of the current hole,
+   * which runs to hole_end; it holds nil up to filled. */
   unsigned char* start;
-  size_t capacity, limit, used, collections, copied_bytes;
-  /* Space from used to filled already holds nil. Allocation bumps used up to
-   * ready, which is filled normally and used when every allocation must take
-   * the slow path. */
-  size_t filled, ready;
-  /* start + ready, for native code, which bumps an absolute pointer. Set
-   * with oti_heap_set_ready. */
+  size_t used, ready;
   unsigned char* end;
-  /* Statistics, updated only by collections. live_bytes is the size after the
-   * last collection, so used - live_bytes is what has been allocated since. */
-  size_t allocated_bytes, reclaimed_bytes, peak_used, live_bytes;
-  unsigned active;
+  unsigned char *hole_end, *filled;
+  /* The block holding the hole, and the line to look for the next hole from. */
+  unsigned char* block;
+  size_t line;
+  /* Objects bigger than a line that don't fit the current hole go here, in a
+   * block of their own, instead of making the cursor give up its hole. */
+  unsigned char *overflow, *overflow_end;
+  oti_chunk* chunks;
+  oti_large* large;
+  oti_block_list free_blocks, recyclable;
+  /* Blocks not on the free list, bytes in large objects, and lines marked by
+   * the last collection. Capacity limits object bytes, not these. */
+  size_t blocks_used, large_bytes, live_lines;
+  size_t capacity, limit;
+  /* The current mark: 1, 2 or 3. An object or line is marked when it holds
+   * the current value. */
+  uint32_t epoch;
+  ot_value* stack;
+  size_t stack_count, stack_capacity;
+  /* Statistics. allocated_bytes counts finished holes, overflow and large
+   * objects; the current hole's share is start + used - hole_start. */
+  unsigned char* hole_start;
+  size_t allocated_at_collection;
+  size_t collections, copied_bytes, allocated_bytes, reclaimed_bytes, peak_used, live_bytes,
+      marked_bytes;
   oti_roots* roots;
   oti_root_hook hook;
   oti_weak_hook weak;
   void* hook_data;
-#ifdef OTIUM_CHECK_ROOTS
-  oti_retired_space retired[OTI_RETIRED_SPACES];
-  size_t retired_next;
-#endif
 } oti_heap;
 
-bool oti_heap_init(oti_heap* h, size_t semispace_bytes);
+/* Capacity and limit cover the whole heap: blocks in use and large objects. */
+bool oti_heap_init(oti_heap* h, size_t capacity);
 void oti_heap_destroy(oti_heap* h);
-bool oti_heap_set_limit(oti_heap* h, size_t semispace_bytes);
+bool oti_heap_set_limit(oti_heap* h, size_t limit);
+/* Bytes the heap holds: live after the last collection plus allocated since. */
+size_t oti_heap_used(const oti_heap* h);
 
 static inline void oti_roots_push(oti_heap* h, oti_roots* r, ot_value* slots, size_t count) {
   *r = (oti_roots){h->roots, slots, count};
@@ -142,8 +187,14 @@ typedef struct {
   uint32_t fields, kind;
 } oti_object_header;
 
-/* Bits of the gc word. Reclaim marks what oti_reclaim reached; the collection
- * that follows clears it on every object it keeps. */
+/* Bits of the gc word. The low two hold the mark, zero for an object
+ * allocated since the last collection. Forwarded objects hold their new
+ * address over fields and kind. Reclaim marks what oti_reclaim reached; the
+ * collection that follows clears it on every object it keeps. */
+#define OTI_GC_EPOCH 3u
+#define OTI_GC_UNLOGGED 4u
+#define OTI_GC_PINNED 8u
+#define OTI_GC_FORWARDED 16u
 #define OTI_GC_RECLAIM 32u
 
 /* Closures keep their code, a word the collector skips, ahead of their

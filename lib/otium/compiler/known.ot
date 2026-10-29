@@ -103,21 +103,24 @@
 
 ;; --- Numbers -----------------------------------------------------------------------
 
-(defknown + (number number) number :flags (:foldable :flushable-if-typed :fast-path))
+;; Arithmetic and comparisons take any number of numbers; lower's fast paths
+;; are for two.
 
-(defknown - (number number) number :flags (:foldable :flushable-if-typed :fast-path))
+(defknown + rest number :flags (:foldable :flushable-if-typed :fast-path))
 
-(defknown * (number number) number :flags (:foldable :flushable-if-typed :fast-path))
+(defknown - rest number :flags (:foldable :flushable-if-typed :fast-path))
 
-(defknown < (number number) boolean :flags (:foldable :flushable-if-typed :fast-path))
+(defknown * rest number :flags (:foldable :flushable-if-typed :fast-path))
 
-(defknown <= (number number) boolean :flags (:foldable :flushable-if-typed :fast-path))
+(defknown < rest boolean :flags (:foldable :flushable-if-typed :fast-path))
 
-(defknown > (number number) boolean :flags (:foldable :flushable-if-typed :fast-path))
+(defknown <= rest boolean :flags (:foldable :flushable-if-typed :fast-path))
 
-(defknown >= (number number) boolean :flags (:foldable :flushable-if-typed :fast-path))
+(defknown > rest boolean :flags (:foldable :flushable-if-typed :fast-path))
 
-(defknown = (number number) boolean :flags (:foldable :flushable-if-typed :fast-path))
+(defknown >= rest boolean :flags (:foldable :flushable-if-typed :fast-path))
+
+(defknown = rest boolean :flags (:foldable :flushable-if-typed :fast-path))
 
 (defknown quotient (number number) number :flags (:foldable :direct))
 
@@ -169,7 +172,7 @@
 
 (defknown array rest array :flags (:flushable :allocates :direct))
 
-(defknown push! (array any) array :flags (:allocates :direct))
+(defknown push! rest array :flags (:allocates :direct))
 
 (defknown pop! (array) any :flags (:direct))
 
@@ -201,7 +204,7 @@
 
 (defknown str rest string :flags (:allocates :direct))
 
-(defknown string<? (string string) boolean :flags (:foldable :direct))
+(defknown string<? rest boolean :flags (:foldable :direct))
 
 (defknown string->symbol (string) symbol :flags (:foldable :allocates :direct))
 

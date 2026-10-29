@@ -1,0 +1,36 @@
+;; Every entry of the known-function table names a bound cell of otium.core;
+;; entries with a fast path or a direct call name a builtin of that name; and
+;; a fixed argument list matches the arity the function accepts.
+
+(require otium.compiler.known :as known)
+
+(def failures 0)
+
+(def (fail! name problem)
+  (set! failures (+ failures 1))
+  (println "known " name ": " problem))
+
+(def (arity-error? f args)
+  (try
+    (apply f args)
+    #f
+    (catch e (string-contains? (condition-message e) "wrong number of"))))
+
+(for ((name :in (sort-by symbol->string (keys known/known))))
+  (let ((e (known/entry name))
+        (cell (%native-cell (string->symbol (str "otium.core/" name)))))
+    (cond
+      ((not (%native-core-cell? cell)) (fail! name "not a core cell"))
+      ((not (%native-cell-bound? cell)) (fail! name "unbound"))
+      (else (when (and (or (known/flag? name :direct) (known/flag? name :fast-path))
+                       (not (eq? (%native-cell-builtin cell) name)))
+              (fail! name "doesn't hold the builtin of that name"))
+            (let ((args (e :args))
+                  (f (eval (string->symbol (str "otium.core/" name)))))
+              (when (list? args)
+                (let ((n (length args)))
+                  (when (arity-error? f (map (fn (a) nil) args)) (fail! name (str "doesn't accept " n " arguments")))
+                  (unless (arity-error? f (map (fn (a) nil) (cons nil args)))
+                    (fail! name (str "accepts " (+ n 1) " arguments"))))))))))
+
+(println "known table: " (length (keys known/known)) " entries, " failures " failures")

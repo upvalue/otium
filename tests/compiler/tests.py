@@ -73,3 +73,10 @@ def verify_mode(t):
         verified = t.expect(t.otium(program, env=env), status=plain.status)
         t.check(verified.stdout == plain.stdout and verified.stderr == plain.stderr,
                 f'{program.name}: output differs with verifying')
+
+
+@test('compiler known table')
+def known_table(t):
+    """Every known-function entry names a core cell with the stated arity."""
+    t.expect(t.otium('--no-project', '-L', LIB, ROOT / 'tests/compiler/known-check.ot'),
+             contains=[' 0  failures'])

@@ -16,7 +16,7 @@
 (ns otium.compiler.alloc
   (:require (otium.compiler.lower :refer (fc-closure fc-code fc-cold fc-next fc-optional-regs fc-params
                                           fc-rest-reg fc-u set-fc-cold! set-fc-live! set-fc-location!
-                                          set-fc-ranges! set-fc-spills!))))
+                                          set-fc-ranges! set-fc-spills! unit-labels))))
 
 ;; sljit registers R0-R10, except R6, which emit keeps as a scratch register.
 ;; R7 and up are pushed by the prologue of a function that uses them.
@@ -151,7 +151,7 @@
   (let ((code (fc-code fc)))
     (for ((ins :in (fc-cold fc))) (push! code ins))
     (set-fc-cold! fc [])
-    (let ((n (length code)) (labels (filled ((fc-u fc) :labels) nil)) (words (+ 1 (quotient (fc-next fc) bits))))
+    (let ((n (length code)) (labels (filled (unit-labels (fc-u fc)) nil)) (words (+ 1 (quotient (fc-next fc) bits))))
       (dotimes (i n)
         (when (eq? (get (get code i) 0) :label) (put! labels (get (get code i) 1) i)))
       ;; Blocks: starts and ends.

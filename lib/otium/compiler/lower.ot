@@ -128,21 +128,25 @@
 
 ;; --- Units ------------------------------------------------------------------
 
-;; A unit is a table: :labels counts labels, :literals and :cells are the
-;; unit's tables, :functions every function in index order, :statics the
-;; [function literal] pairs of closures without captures, :pending
-;; functions still to lower, :namespace the current namespace's name.
-(def (make-unit)
-  {:labels 0 :literals [] :cells [] :cell-map {} :functions [] :statics [] :pending []
-   :namespace (current-ns)})
+;; A unit: labels counts labels, literals and cells are the unit's tables,
+;; cell-map each cell's index in cells, functions every function in index
+;; order, statics the [function literal] pairs of closures without
+;; captures, pending functions still to lower, namespace the current
+;; namespace's name. emit fills in descriptors, and max-args is the most
+;; arguments a direct builtin call passes.
+(defrecord Unit (labels literals cells cell-map functions statics pending namespace descriptors max-args))
+
+(def (new-unit)
+  (make-unit :labels 0 :literals [] :cells [] :cell-map {} :functions [] :statics [] :pending []
+             :namespace (current-ns)))
 
 (def (unit-label! u)
-  (let ((n (u :labels)))
-    (put! u :labels (+ n 1))
+  (let ((n (unit-labels u)))
+    (set-unit-labels! u (+ n 1))
     n))
 
 (def (literal! u value)
-  (let ((literals (u :literals)))
+  (let ((literals (unit-literals u)))
     (let find-it ((i 0))
       (cond ((= i (length literals))
              (push! literals value)
@@ -152,30 +156,30 @@
 
 ;; A literal no other use shares, for a static closure.
 (def (fresh-literal! u)
-  (let ((literals (u :literals)))
+  (let ((literals (unit-literals u)))
     (push! literals nil)
     (- (length literals) 1)))
 
 (def (cell! u cell)
-  (let ((index (get (u :cell-map) cell)))
+  (let ((index (get (unit-cell-map u) cell)))
     (or index
-        (let ((i (length (u :cells))))
-          (push! (u :cells) cell)
-          (put! (u :cell-map) cell i)
+        (let ((i (length (unit-cells u))))
+          (push! (unit-cells u) cell)
+          (put! (unit-cell-map u) cell i)
           i))))
 
 ;; Give a function its index and entry label, queueing it for lowering.
 (def (function! u info)
   (or (info :index)
-      (let ((i (length (u :functions))))
+      (let ((i (length (unit-functions u))))
         (put! info :index i)
         (put! info :xep (unit-label! u))
-        (push! (u :functions) info)
-        (push! (u :pending) info)
+        (push! (unit-functions u) info)
+        (push! (unit-pending u) info)
         (when (= (length (info :captures)) 0)
           (let ((k (fresh-literal! u)))
             (put! info :static k)
-            (push! (u :statics) [i k])))
+            (push! (unit-statics u) [i k])))
         i)))
 
 ;; --- Function contexts --------------------------------------------------------
@@ -383,7 +387,7 @@
          r))
       ((:evaluator)
        (let ((r (vreg! fc)))
-         (ccall! fc h-evaluator [(constant fc ((fc-u fc) :namespace))] r offset)
+         (ccall! fc h-evaluator [(constant fc (unit-namespace (fc-u fc)))] r offset)
          r))
       ((:class-object) (constant fc (%native-object-class)))
       ((:call :gcall :bcall)
@@ -1067,7 +1071,7 @@
 
 (def (builtin-ccall! fc name ops r offset)
   (let ((u (fc-u fc)))
-    (when (> (length ops) (or (u :max-args) 0)) (put! u :max-args (length ops)))
+    (when (> (length ops) (or (unit-max-args u) 0)) (set-unit-max-args! u (length ops)))
     (store-args fc ops)
     (ccall! fc h-builtin [[:imm (builtin-id (symbol->string name))] [:imm (length ops)]] r offset)))
 
@@ -1267,12 +1271,12 @@
 ;; Lower a converted top-level form and every function inside it. Returns
 ;; the unit and the function contexts in index order.
 (def (lower-top info)
-  (let ((u (make-unit)) (contexts []))
+  (let ((u (new-unit)) (contexts []))
     (function! u info)
     (let loop ()
-      (unless (= (length (u :pending)) 0)
-        (let ((next (get (u :pending) 0)))
-          (put! u :pending (list-to-array (cdr (array-to-list (u :pending)))))
+      (unless (= (length (unit-pending u)) 0)
+        (let ((next (get (unit-pending u) 0)))
+          (set-unit-pending! u (list-to-array (cdr (array-to-list (unit-pending u)))))
           (push! contexts (lower-function u next))
           (loop))))
     [u contexts]))

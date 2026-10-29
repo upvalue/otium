@@ -3,8 +3,8 @@
 #include <stdlib.h>
 #include <string.h>
 
-ot_state* new_runtime(size_t semispace_bytes, size_t stack_limit) {
-  ot_state* rt = ot_create(semispace_bytes, stack_limit);
+ot_state* new_runtime(size_t heap_bytes, size_t stack_limit) {
+  ot_state* rt = ot_create(heap_bytes, stack_limit);
   CHECK(rt);
   return rt;
 }

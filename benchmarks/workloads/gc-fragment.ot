@@ -1,0 +1,22 @@
+;; Builds lists of short strings and keeps one in ten, so the heap is left
+;; sparse, then checks that what was kept is intact. Exercises hole reuse and
+;; evacuation.
+
+(def (build n)
+  (let loop ((i 0) (acc '()))
+    (if (= i n) acc (loop (+ i 1) (cons (string-repeat "x" (remainder i 40)) acc)))))
+
+(def (every-tenth xs)
+  (let loop ((xs xs) (i 0) (acc '()))
+    (if (null? xs)
+        acc
+        (loop (cdr xs) (+ i 1) (if (= 0 (remainder i 10)) (cons (car xs) acc) acc)))))
+
+(def kept
+  (let loop ((r 0) (kept '()))
+    (if (= r 30) kept (loop (+ r 1) (append (every-tenth (build 200000)) kept)))))
+
+(def total (reduce + 0 (map string-length kept)))
+(unless (= (length kept) 600000) (error "lost objects" (length kept)))
+(unless (= total 14400000) (error "corrupt strings" total))
+(print (length kept) total)

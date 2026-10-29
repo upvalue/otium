@@ -119,6 +119,10 @@ typedef struct {
   /* Objects bigger than a line that don't fit the current hole go here, in a
    * block of their own, instead of making the cursor give up its hole. */
   unsigned char *overflow, *overflow_end;
+  /* Collection copies objects out of sparse blocks into these, while
+   * evacuating; defragment says the next full collection should. */
+  unsigned char *evacuation, *evacuation_end;
+  bool evacuating, defragment;
   oti_chunk* chunks;
   oti_large* large;
   oti_block_list free_blocks, recyclable;
@@ -141,6 +145,11 @@ typedef struct {
   oti_root_hook hook;
   oti_weak_hook weak;
   void* hook_data;
+#ifdef OTIUM_CHECK_ROOTS
+#define OTI_QUARANTINE 16
+  oti_block_list quarantine[OTI_QUARANTINE];
+  size_t quarantine_next;
+#endif
 } oti_heap;
 
 /* Capacity and limit cover the whole heap: blocks in use and large objects. */
@@ -225,6 +234,11 @@ static inline uint32_t object_identity(ot_value object) {
     o->kind |= identity << 8;
   }
   return identity;
+}
+
+/* A pinned object stays where it is. Large objects never move anyway. */
+static inline void object_pin(ot_value object) {
+  ((oti_object_header*)object)->gc |= OTI_GC_PINNED;
 }
 
 static inline bool object_frozen(ot_value object) {

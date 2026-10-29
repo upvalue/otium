@@ -13,8 +13,8 @@
 /* A shared library the build made, named without its platform extension. */
 #define TEST_SHARED_LIBRARY(name) TEST_FIXTURE(name "." OTIUM_TEST_LIBRARY_EXTENSION)
 
-ot_state* new_runtime(size_t semispace_bytes, size_t stack_limit);
-/* A runtime with a 1 MiB semispace, 128 KiB stack and the core library. */
+ot_state* new_runtime(size_t heap_bytes, size_t stack_limit);
+/* A runtime with a 1 MiB heap, 128 KiB stack and the core library. */
 ot_state* new_core_runtime(void);
 
 ot_value eval(ot_state* rt, const char* source);

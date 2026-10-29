@@ -123,7 +123,7 @@ static ot_value memory_allocated(ot_state* rt, size_t first, size_t count) {
   (void)first;
   if (!process_metadata(rt, count)) return 0;
   const oti_heap* h = &rt->heap;
-  return ot_int((intptr_t)(h->allocated_bytes + (h->used - h->live_bytes)));
+  return ot_int((intptr_t)(h->allocated_bytes + (h->start ? h->used : 0)));
 }
 
 static ot_value memory_collections(ot_state* rt, size_t first, size_t count) {

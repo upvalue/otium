@@ -52,10 +52,10 @@ static inline intptr_t ot_to_int(ot_value v) {
  * The pointer is invalidated by the next call into the runtime. */
 const char* ot_string_data(ot_value v, size_t* length);
 
-/* Creation and configuration. Heaps are fixed until a larger per-semispace
- * limit is explicitly supplied; growth only happens after collection cannot
- * satisfy an allocation. */
-ot_state* ot_create(size_t semispace_bytes, size_t stack_limit);
+/* Creation and configuration. A heap holds up to heap_bytes of objects and
+ * stays that size until a larger limit is explicitly supplied; it grows
+ * after a collection leaves it too full. */
+ot_state* ot_create(size_t heap_bytes, size_t stack_limit);
 /* Run native code instead of the VM: everything is compiled to machine code,
  * starting from the boot file the build makes. Call it right after
  * ot_create. False, with the runtime unchanged, where native code isn't
@@ -64,7 +64,7 @@ ot_state* ot_create(size_t semispace_bytes, size_t stack_limit);
  * SA_ONSTACK). */
 bool ot_use_native(ot_state* rt);
 void ot_destroy(ot_state* rt);
-bool ot_set_heap_limit(ot_state* rt, size_t semispace_bytes);
+bool ot_set_heap_limit(ot_state* rt, size_t heap_bytes);
 /* Limit how many VM frames can be live at once. There is no limit by default
  * beyond the stack limit. Zero, or fewer frames than are live, is refused. */
 bool ot_set_frame_limit(ot_state* rt, size_t frames);
@@ -218,9 +218,9 @@ ot_value ot_make_host_object(ot_state* rt, const ot_host_type* type, const void*
 /* The object's data, or NULL when v is not a host object of this type. */
 void* ot_host_object_data(ot_value v, const ot_host_type* type);
 
-/* Diagnostics. The heap fields describe the copying collector: capacity and
- * limit are per semispace, copied bytes are what collections moved, and
- * reclaimed bytes are what they freed. Foreign record counts include cached
+/* Diagnostics. The heap fields describe the mark-region collector: capacity
+ * and limit count object bytes, copied bytes are what collections moved out of
+ * sparse blocks, and reclaimed bytes are what they freed. Foreign record counts include cached
  * signatures and retained library handles. allocations/bytes describe
  * explicitly owned native buffers, not process RSS. */
 typedef struct {

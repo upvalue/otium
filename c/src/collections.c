@@ -210,15 +210,18 @@ static ot_value collection_length(ot_state* rt, size_t first, size_t count) {
   if (oti_kind(a, K_BUFFER)) return ot_int((intptr_t)oti_as_buffer(a)->characters);
   if (oti_kind(a, K_STRING)) return oti_string_length_builtin(rt, first, count);
   if (oti_kind(a, K_PAIR)) {
+    /* Count with one pointer and check for a cycle with another at half
+     * its speed: they meet only in a cycle. */
     size_t length = 0;
-    ot_value slow = a, fast = a;
+    ot_value slow = a;
     while (oti_kind(a, K_PAIR)) {
-      length++;
       a = oti_cdr(a);
-      if (oti_kind(slow, K_PAIR)) slow = oti_cdr(slow);
-      for (unsigned i = 0; i < 2 && oti_kind(fast, K_PAIR); i++) fast = oti_cdr(fast);
-      if (oti_kind(fast, K_PAIR) && fast == slow)
-        return oti_fail(rt, "length needs an acyclic list");
+      length++;
+      if (!oti_kind(a, K_PAIR)) break;
+      a = oti_cdr(a);
+      length++;
+      slow = oti_cdr(slow);
+      if (a == slow) return oti_fail(rt, "length needs an acyclic list");
     }
     if (a != OT_EMPTY) return oti_fail(rt, "length needs a proper list");
     return ot_int((intptr_t)length);

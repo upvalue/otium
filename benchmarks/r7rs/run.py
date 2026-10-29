@@ -20,6 +20,7 @@ sys.path[:0] = [str(Path(__file__).resolve().parents[2] / part)
                 for part in ('', 'tools', 'benchmarks')]
 from otium_tools import command, metadata, run_directory
 import common
+from common import progress
 
 
 # Maximum heap for ports without a manifest heap_max. The heap grows with
@@ -219,7 +220,7 @@ def main():
                     rows.append(
                         result_row(meta, "port", entry["parity"], sample, status, wall, reported, reason, rss)
                     )
-                    print(f"{name} {mode} sample {sample}: {status}")
+                    progress(selection_index, len(selected), f"{name} {mode} sample {sample}", status, wall)
                     had_failure |= status != "ok"
 
             if args.reference:
@@ -271,7 +272,7 @@ def main():
                     rows.append(
                         result_row(meta, "upstream", "A", sample, status, wall, reported, reason, rss)
                     )
-                    print(f"{name} upstream sample {sample}: {status}")
+                    progress(selection_index, len(selected), f"{name} guile sample {sample}", status, wall)
 
     fields = [
         "implementation",

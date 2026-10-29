@@ -169,7 +169,7 @@ def main():
         temp = Path(temp_dir)
         inputs_dir = temp / 'inputs'
         inputs_dir.mkdir()
-        for name in selected:
+        for index, name in enumerate(selected):
             entry = manifest['benchmarks'][name]
             algorithm = VENDOR / 'algorithm' / name
             work = temp / name
@@ -256,7 +256,7 @@ def main():
                             status = 'ok' if ok else 'incorrect'
                         row(language, implementation, name, entry, variant, source, args.size, text,
                             sample, status, wall, rss, reason, against, digest, flags)
-                        print(f'{name} {text} {implementation} sample {sample}: {status}')
+                        common.progress(index, len(selected), f'{name} {text} {implementation} sample {sample}', status, wall)
                         had_failure |= status not in ('ok',)
 
     with (output_dir / 'results.csv').open('w', newline='') as output:

@@ -17,6 +17,12 @@ MAXRSS_SOURCE = Path(__file__).resolve().parent / 'maxrss.c'
 MAXRSS = BUILD / 'bench-maxrss'
 
 
+def progress(index, total, what, status, wall):
+    """Print one sample's outcome as it finishes, even when output is a file."""
+    took = f' {wall:.2f}s' if isinstance(wall, float) else ''
+    print(f'[{index + 1}/{total}] {what}: {status}{took}', flush=True)
+
+
 def choose_cpu(option):
     """The CPU for --cpu: 'none', 'auto' (the last allowed CPU) or a number."""
     if option == 'none':

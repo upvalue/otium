@@ -181,6 +181,11 @@ bool oti_core_locked_error(ot_state* rt, uint32_t global) {
                           rt->global_info[global].name);
 }
 
+bool oti_accessor_locked_error(ot_state* rt, uint32_t global) {
+  return oti_coded_errorf(rt, "E0210", "`%s` was defined by defrecord; change the defrecord instead",
+                          rt->global_info[global].name);
+}
+
 /* Reports. Values under construction live on the VM stack above sp, which is
  * rooted, and are named by their slot. */
 

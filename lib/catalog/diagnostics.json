@@ -255,6 +255,14 @@
     "example": "(set! map (fn (f xs) xs))",
     "fixed": "(def (map f xs) xs)"
   },
+  "E0210": {
+    "title": "record functions are fixed",
+    "type": "namespace-error",
+    "message": "`{name}` was defined by defrecord; change the defrecord instead",
+    "explanation": "`defrecord` defines functions to make, test, read and write its records, such as `make-point`, `point?`, `point-x` and `set-point-x!`. They can't be replaced with `def` or `set!`, so the compiler can turn a call of one into a direct field access. Running the same `defrecord` again is fine. To name the functions differently, give `defrecord` a `:prefix`; to change them for a test, run with `--c.unlock-core`.",
+    "example": "(defrecord Point (x y)) (def (point-x p) 0)",
+    "fixed": "(defrecord Point (x y) :prefix pt) (def (point-x p) 0)"
+  },
   "E0301": {
     "title": "wrong number of arguments",
     "type": "arity-error",

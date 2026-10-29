@@ -1253,19 +1253,119 @@ Includes runtime builtins, special forms, and the Otium prelude."
           (put! record-declarations key [(map identity fields) immutable? descriptor])
           descriptor))))
 
+;; The readers and writers defrecord defines, by cell: [type-cell index
+;; writer?]. The native compiler reads and writes fields in place for calls
+;; of them. A boot build clears it and fills it again as it expands each
+;; defrecord, since it doesn't run what it compiles.
+(def %record-accessors {})
+
+;; LayoutStyle as layout-style.
+(def- (record-prefix name)
+  (let ((out (buffer)) (text (symbol->string name)) (lower #f))
+    (let loop ((i 0))
+      (when (< i (string-length text))
+        (let ((c (string-ref text i)))
+          (let ((down (char-downcase c)))
+            (when (and lower (not (eq? c down))) (buffer-push! out #\-))
+            (buffer-push! out down)
+            (set! lower (eq? c down))))
+        (loop (+ i 1))))
+    (string->symbol (buffer->string out))))
+
+;; Call f with each field and its index. Core is loaded before for.
+(def- (each-field fields f)
+  (let loop ((rest fields) (i 0))
+    (unless (null? rest)
+      (f (car rest) i)
+      (loop (cdr rest) (+ i 1)))))
+
+;; Note the cells of a record's readers and writers in %record-accessors,
+;; in the current namespace.
+(def- (note-record-accessors! name prefix fields immutable?)
+  (let ((type-cell (%native-cell-define name)))
+    (each-field fields
+                (fn (field i)
+                  (put! %record-accessors (%native-cell-define (string->symbol (str prefix "-" field)))
+                        [type-cell i #f])
+                  (unless immutable?
+                    (put! %record-accessors (%native-cell-define (string->symbol (str "set-" prefix "-" field "!")))
+                          [type-cell i #t]))))))
+
+;; Field keywords to their indexes, for a constructor.
+(def- (record-slots fields)
+  (let ((slots {}))
+    (each-field fields (fn (field i) (put! slots (keyword (symbol->string field)) i)))
+    slots))
+
+;; A record of type from a constructor's arguments, field keywords and
+;; values; fields not given are nil.
+(def- (record-from-keys type slots who args)
+  (let ((values []))
+    (let fill ((n (length slots)))
+      (when (> n 0)
+        (push! values nil)
+        (fill (- n 1))))
+    (let loop ((rest args))
+      (unless (null? rest)
+        (let ((i (get slots (car rest))))
+          (when (or (nil? i) (null? (cdr rest)))
+            (error (str who ": expected a field keyword and a value") (car rest)))
+          (put! values i (car (cdr rest)))
+          (loop (cdr (cdr rest))))))
+    (apply record-new type (array-to-list values))))
+
+;; The definitions of a record's functions, which only defrecord can change.
+;; Each is a local def, so it has its name.
+;; lint: allow(rest-arguments) the constructor takes any number of field keywords and values
+(def- (record-functions name prefix fields immutable?)
+  (let ((make (string->symbol (str "make-" prefix))) (test (string->symbol (str prefix "?")))
+        (out '()))
+    (each-field fields
+                (fn (field i)
+                  (let ((reader (string->symbol (str prefix "-" field))))
+                    (set! out (cons #`(let ((cell# (%native-cell-define ',reader)))
+                                        (%define-accessor! cell#
+                                                           (let () (def (,reader r#) (%record-get r# ,name ,i cell#)) ,reader)))
+                                    out)))
+                  (unless immutable?
+                    (let ((writer (string->symbol (str "set-" prefix "-" field "!"))))
+                      (set! out (cons #`(let ((cell# (%native-cell-define ',writer)))
+                                          (%define-accessor! cell#
+                                                             (let ()
+                                                               (def (,writer r# v#) (%record-set! r# ,name ,i cell# v#))
+                                                               ,writer)))
+                                      out))))))
+    (cons #`(let ((slots# (record-slots ',fields)))
+              (%define-accessor! (%native-cell-define ',make)
+                                 (let () (def (,make . args#) (record-from-keys ,name slots# ',make args#)) ,make)))
+          (cons #`(%define-accessor! (%native-cell-define ',test)
+                                     (let () (def (,test x#) (and (record? x#) (eq? (record-type x#) ,name))) ,test))
+                (reverse out)))))
+
 (defmacro defrecord (name fields . options)
-  "(defrecord Name (field ...) [:immutable boolean])\nDeclare a fixed-layout record type in the current namespace. Fields are mutable by default. An identical declaration reuses its type; changing fields or mutability is an error."
+  "(defrecord Name (field ...) [:immutable boolean] [:prefix name])
+Declare a fixed-layout record type in the current namespace, with functions
+to make, test, read and write its records. For (defrecord LayoutStyle (width
+height)) they are (make-layout-style :width 1 :height 2), with fields not
+given nil; (layout-style? x); (layout-style-width s); and (set-layout-style-width!
+s 3), for mutable records only. :prefix replaces layout-style in those names.
+Only defrecord can redefine them. Fields are mutable by default. An identical
+declaration reuses its type; changing fields or mutability is an error."
   (unless (and (symbol? name) (list? fields)) (error "defrecord: expected name and parenthesized fields"))
-  (unless (or (null? options)
-              (and (= (length options) 2) (eq? (car options) :immutable) (boolean? (car (cdr options)))))
-    (error "defrecord: expected optional :immutable boolean"))
-  #`(def ,name
-      (declare-record! (current-ns)
-                       ',name
-                       ',fields
-                       ,(if (null? options)
-                            #f
-                            (car (cdr options))))))
+  (let ((immutable? #f) (prefix (record-prefix name)))
+    (let loop ((rest options))
+      (unless (null? rest)
+        (cond ((and (eq? (car rest) :immutable) (pair? (cdr rest)) (boolean? (car (cdr rest))))
+               (set! immutable? (car (cdr rest))))
+              ((and (eq? (car rest) :prefix) (pair? (cdr rest)) (symbol? (car (cdr rest))))
+               (set! prefix (car (cdr rest))))
+              (else (error "defrecord: expected optional :immutable boolean and :prefix name")))
+        (loop (cdr (cdr rest)))))
+    (note-record-accessors! name prefix fields immutable?)
+    #`(begin
+        (def ,name (declare-record! (current-ns) ',name ',fields ,immutable?))
+        (note-record-accessors! ',name ',prefix ',fields ,immutable?)
+        ,@(record-functions name prefix fields immutable?))))
 
 ;; --- loops ------------------------------------------------------------------
 

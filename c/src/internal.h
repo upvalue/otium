@@ -215,6 +215,9 @@ enum {
   B_RECORD_TYPE,
   B_RECORD_REF,
   B_RECORD_SET,
+  B_RECORD_GET_AT,
+  B_RECORD_SET_AT,
+  B_DEFINE_ACCESSOR,
   B_QUOTIENT,
   B_ABS,
   B_MIN,
@@ -635,7 +638,8 @@ typedef struct {
   char* name;
   oti_documentation doc;
   uint32_t space;
-  bool defined, is_private, macro;
+  /* accessor: defined by defrecord, so only defrecord may change it. */
+  bool defined, is_private, macro, accessor;
 } oti_global_info;
 
 /* A builtin reads its arguments from rt->stack[first, first + count). It
@@ -941,10 +945,17 @@ bool oti_callable_error(ot_state* rt, ot_value value);
 bool oti_unbound_error(ot_state* rt, uint32_t global);
 /* Record E0209 for an attempt to define or assign a cell of locked core. */
 bool oti_core_locked_error(ot_state* rt, uint32_t global);
+/* Record E0210 for an attempt to define or assign a record accessor. */
+bool oti_accessor_locked_error(ot_state* rt, uint32_t global);
 
-/* True, with E0209, when the cell belongs to otium.core and core is locked.
- * Checked wherever code defines or assigns a global. */
-static inline bool oti_core_cell_locked(ot_state* rt, uint32_t global) {
+/* True, with E0209 or E0210, when the cell belongs to otium.core and core is
+ * locked, or holds a record accessor and core wasn't unlocked. Checked
+ * wherever code defines or assigns a global. */
+static inline bool oti_cell_locked(ot_state* rt, uint32_t global) {
+  if (rt->global_info[global].accessor && !rt->core_unlocked) {
+    oti_accessor_locked_error(rt, global);
+    return true;
+  }
   if (!rt->core_locked || rt->global_info[global].space != 0) return false;
   oti_core_locked_error(rt, global);
   return true;
@@ -1063,6 +1074,7 @@ ot_value oti_dispatch_type(ot_state* rt, ot_value value);
 ot_value oti_instance_call(ot_state* rt, ot_value instance, size_t first, size_t count);
 ot_value oti_instance_copy(ot_state* rt, ot_value instance);
 ot_value oti_record_call(ot_state* rt, ot_value record, size_t first, size_t count);
+ot_value oti_record_copy(ot_state* rt, ot_value record);
 
 ot_value oti_equal(ot_state* rt, ot_value a, ot_value b, bool keys);
 ot_value oti_table_set(ot_state* rt, ot_value table, ot_value key, ot_value value);

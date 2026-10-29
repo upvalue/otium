@@ -1,4 +1,5 @@
 #include "internal.h"
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -125,6 +126,73 @@ static ot_value record_set(ot_state* rt, size_t first, size_t count) {
   return oti_as_record(record)->values[index] = rt->stack[first + 2];
 }
 
+/* The record at first, when it has the type at first + 1, checked for the
+ * accessor whose cell is at first + 3, and the field index at first + 2.
+ * The accessors defrecord defines call these. */
+static bool accessor_args(ot_state* rt, size_t first, size_t count, size_t wanted, size_t* index) {
+  if (count != wanted) return oti_error(rt, "wrong number of record arguments");
+  ot_value record = rt->stack[first], type = rt->stack[first + 1], at = rt->stack[first + 2],
+           cell = rt->stack[first + 3];
+  if (!oti_kind(type, K_RECORD_TYPE) || !ot_is_int(at) || ot_to_int(at) < 0 ||
+      (size_t)ot_to_int(at) >= oti_record_type_fields(type) || !ot_is_int(cell) ||
+      ot_to_int(cell) < 0 || (size_t)ot_to_int(cell) >= rt->global_count)
+    return oti_error(rt, "invalid record accessor");
+  if (!oti_kind(record, K_RECORD) || oti_as_record(record)->type != type) {
+    ot_value name = oti_as_record_type(type)->name;
+    size_t length = oti_bytes_length(name);
+    char what[160];
+    snprintf(what, sizeof(what), "a %.*s record", (int)(length > 140 ? 140 : length),
+             (const char*)oti_bytes_data(name));
+    return oti_type_error(rt, rt->global_info[ot_to_int(cell)].name, what, record);
+  }
+  *index = (size_t)ot_to_int(at);
+  return true;
+}
+
+static ot_value record_get_at(ot_state* rt, size_t first, size_t count) {
+  size_t index;
+  if (!accessor_args(rt, first, count, 4, &index)) return 0;
+  return oti_as_record(rt->stack[first])->values[index];
+}
+
+static ot_value record_set_at(ot_state* rt, size_t first, size_t count) {
+  size_t index;
+  if (!accessor_args(rt, first, count, 5, &index)) return 0;
+  return oti_as_record(rt->stack[first])->values[index] = rt->stack[first + 4];
+}
+
+/* Define the global cell at first as a record accessor, which only another
+ * call of this can change. */
+static ot_value record_define_accessor(ot_state* rt, size_t first, size_t count) {
+  if (count != 2) return oti_fail(rt, "wrong number of arguments");
+  ot_value cell = rt->stack[first];
+  if (!ot_is_int(cell) || ot_to_int(cell) < 0 || (size_t)ot_to_int(cell) >= rt->global_count)
+    return oti_fail(rt, "expected a global cell number");
+  uint32_t global = (uint32_t)ot_to_int(cell);
+  if (rt->core_locked && rt->global_info[global].space == 0) {
+    oti_core_locked_error(rt, global);
+    return 0;
+  }
+  rt->global_info[global].defined = rt->global_info[global].accessor = true;
+  rt->global_info[global].macro = false;
+  oti_set_global(rt, global, rt->stack[first + 1]);
+  return OT_NIL;
+}
+
+ot_value oti_record_copy(ot_state* rt, ot_value record) {
+  size_t n = oti_record_type_fields(oti_as_record(record)->type);
+  ot_value live[] = {record};
+  oti_roots roots;
+  oti_roots_push(&rt->heap, &roots, live, 1);
+  ot_value copy = oti_alloc(rt, K_RECORD, (uint32_t)n + 1, 0);
+  if (copy) {
+    oti_as_record(copy)->type = oti_as_record(live[0])->type;
+    memcpy(oti_as_record(copy)->values, oti_as_record(live[0])->values, n * sizeof(ot_value));
+  }
+  oti_roots_pop(&rt->heap, &roots);
+  return copy;
+}
+
 const oti_builtin_def oti_record_builtins[] = {
     {B_MAKE_RECORD_TYPE, "%make-record-type", record_make_type},
     {B_RECORD_NEW, "record-new", record_new},
@@ -133,5 +201,8 @@ const oti_builtin_def oti_record_builtins[] = {
     {B_RECORD_TYPE, "record-type", record_type},
     {B_RECORD_REF, "record-ref", record_ref},
     {B_RECORD_SET, "record-set!", record_set},
+    {B_RECORD_GET_AT, "%record-get", record_get_at},
+    {B_RECORD_SET_AT, "%record-set!", record_set_at},
+    {B_DEFINE_ACCESSOR, "%define-accessor!", record_define_accessor},
     {0, NULL, NULL},
 };

@@ -109,6 +109,8 @@
   ;; from a boot file already.
   (for ((name :in (keys %inline-bodies)))
     (put! %inline-bodies name nil))
+  (for ((cell :in (keys %record-accessors)))
+    (put! %record-accessors cell nil))
   (let ((w (fasl/make-writer)))
     (boot! w library primitives modules)
     (let ((port (open-binary-output-file out)))

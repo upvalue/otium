@@ -492,14 +492,14 @@ next:
       oti_coded_error(rt, "E0201", "cannot set an unbound global");
       FAIL();
     }
-    if (VM_UNLIKELY(vm_inlined_builtin(rt, index) || oti_core_cell_locked(rt, index))) FAIL();
+    if (VM_UNLIKELY(vm_inlined_builtin(rt, index) || oti_cell_locked(rt, index))) FAIL();
     rt->global_info[index].macro = oti_kind(R[ins.a], K_MACRO);
     oti_set_global(rt, index, R[ins.a]);
     NEXT();
   }
   CASE(OP_DEFINE_GLOBAL) {
     uint32_t index = oti_instruction_bc(ins);
-    if (VM_UNLIKELY(vm_inlined_builtin(rt, index) || oti_core_cell_locked(rt, index))) FAIL();
+    if (VM_UNLIKELY(vm_inlined_builtin(rt, index) || oti_cell_locked(rt, index))) FAIL();
     rt->global_info[index].defined = 1;
     rt->global_info[index].macro = oti_kind(R[ins.a], K_MACRO);
     oti_set_global(rt, index, R[ins.a]);

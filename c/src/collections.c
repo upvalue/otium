@@ -285,6 +285,7 @@ static ot_value collection_copy(ot_state* rt, size_t first, size_t count) {
   if (!collection_arity(rt, count, 1, 1)) return 0;
   ot_value a = rt->stack[first];
   if (oti_kind(a, K_INSTANCE)) return oti_instance_copy(rt, a);
+  if (oti_kind(a, K_RECORD)) return oti_record_copy(rt, a);
   if (a == OT_NIL) return OT_NIL;
   if (oti_kind(a, K_BYTEVECTOR)) return oti_bytes_copy_builtin(rt, first, count);
   if (!oti_kind(a, K_ARRAY)) return oti_fail(rt, "expected an array");

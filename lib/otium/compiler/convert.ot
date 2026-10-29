@@ -587,6 +587,9 @@
                        ((transform? "append" (= cell (%native-cell 'otium.core/append)) cell
                                     (= (length nodes) 2) off)
                         [:gcall off (%native-cell 'otium.core/%append2) nodes (site :tail) #f])
+                       ;; A field of a record, read or written in place.
+                       ((and (record-access cell (length nodes)) (options/rewrite? "records" off))
+                        [:gprim off (record-access cell (length nodes)) cell nodes])
                        ;; Collection access, inline on arrays while the global
                        ;; still holds the builtin.
                        ((and builtin (= (or (get guarded-arities builtin) -1) (length nodes)))
@@ -618,6 +621,14 @@
 (def (transform? name names-it cell suits off)
   (and names-it suits (%native-core-cell? cell) (%core-locked?)
        (options/enabled? (str "transform:" name)) (options/rewrite? (str "transform:" name) off)))
+
+;; record-get or record-set! for a call of a reader or writer defrecord
+;; defined, with its number of arguments, or nil. Only defrecord can change
+;; those, unless core is unlocked.
+(def (record-access cell argc)
+  (let ((entry (get otium.core/%record-accessors cell)))
+    (when (and entry (%core-locked?) (= argc (if (get entry 2) 2 1)) (options/enabled? "records"))
+      (if (get entry 2) 'record-set! 'record-get))))
 
 ;; Builtins whose globals can be redefined, inlined behind a check that the
 ;; global still holds them.

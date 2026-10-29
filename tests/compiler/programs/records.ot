@@ -1,0 +1,54 @@
+;; Records and the functions defrecord defines, whose reads and writes are
+;; compiled in place.
+
+(def (show label x)
+  (display label)
+  (display " ")
+  (write x)
+  (newline))
+
+(def (attempt label thunk)
+  (show label (try (thunk) (catch e (list :error (condition-message e))))))
+
+(defrecord Point (x y))
+(defrecord Other (x y))
+(defrecord Tag (name) :immutable #t :prefix tag)
+
+(def p (make-point :x 1 :y 2))
+(show "read" (list (point-x p) (point-y p)))
+(show "write returns" (set-point-x! p 10))
+(show "after write" (list (point-x p) (p :x) (record-ref p :x)))
+(show "unset field" (point-y (make-point :x 1)))
+(show "predicate" (list (point? p) (point? (make-other)) (point? nil)))
+(show "first class" (map point-x (list p (make-point :x 3))))
+(show "copy" (let ((q (copy p))) (set-point-y! q 5) (list (point-y p) (point-y q))))
+(show "immutable" (tag-name (make-tag :name 'a)))
+
+;; In a loop, and in tail position.
+(def (sum-x points)
+  (let loop ((ps points) (total 0))
+    (if (null? ps)
+        total
+        (loop (cdr ps) (+ total (point-x (car ps)))))))
+(show "loop" (sum-x (list (make-point :x 1) (make-point :x 2) (make-point :x 3))))
+(def (y-of q) (point-y q))
+(show "tail" (y-of p))
+(def (bump! q) (set-point-y! q (+ (point-y q) 1)))
+(show "tail write" (list (bump! p) (point-y p)))
+
+;; Wrong arguments go to the accessor, which fails.
+(attempt "other type" (fn () (point-x (make-other :x 1))))
+(attempt "table" (fn () (point-x {:x 1})))
+(attempt "fixnum" (fn () (point-x 3)))
+(attempt "nil" (fn () (point-x nil)))
+(attempt "tail other type" (fn () (y-of (make-other))))
+(attempt "write other type" (fn () (set-point-x! (make-other) 1)))
+(attempt "arity" (fn () (point-x p p)))
+(attempt "bad field" (fn () (make-point :z 1)))
+(attempt "odd arguments" (fn () (make-point :x)))
+(attempt "redefine" (fn () (eval '(def (point-x q) 0))))
+(attempt "assign" (fn () (eval '(set! point-x car))))
+
+;; The same declaration again keeps the functions working.
+(defrecord Point (x y))
+(show "again" (list (point-x p) (y-of p)))

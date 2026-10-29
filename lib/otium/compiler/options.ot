@@ -23,3 +23,24 @@
 ;; Whether the component named name, a string, is switched on.
 (def (enabled? name)
   (and (not (equal? setting "none")) (not (get off name))))
+
+;; OTIUM_OPT_FUEL=n allows only the first n rewrites in the process; after
+;; that every pass acts as if switched off. The nth rewrite is reported on
+;; stderr, so tools/opt-bisect can name the one that breaks a test.
+(def- fuel
+  (let ((value (otium.process/getenv "OTIUM_OPT_FUEL")))
+    (and value (string->number value))))
+
+(def- rewrites 0)
+
+;; Whether the pass may make a rewrite: what names it, such as
+;; "transform:list", at source offset off. Spends one unit of fuel.
+(def (rewrite? what off)
+  (cond ((nil? fuel) #t)
+        ((>= rewrites fuel) #f)
+        (else
+         (set! rewrites (+ rewrites 1))
+         (when (= rewrites fuel)
+           (display-to (current-error-port)
+                       (str "optimizer: rewrite " rewrites ": " what " at offset " off "\n")))
+         #t)))

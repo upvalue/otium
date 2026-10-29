@@ -581,17 +581,17 @@
                      (nodes (list-to-array (map (fn (a) (expression a (non-tail site) off)) args))))
                  (cond ((eq? builtin 'eval)
                         [:call off [:evaluator off] nodes (site :tail)])
-                       ((transform? "list" (eq? builtin 'list) cell (<= 1 (length nodes) 6))
+                       ((transform? "list" (eq? builtin 'list) cell (<= 1 (length nodes) 6) off)
                         (fold-right (fn (n tail) [:prim off 'cons [n tail]]) (literal '() off)
                                     (array-to-list nodes)))
                        ((transform? "append" (= cell (%native-cell 'otium.core/append)) cell
-                                    (= (length nodes) 2))
+                                    (= (length nodes) 2) off)
                         [:gcall off (%native-cell 'otium.core/%append2) nodes (site :tail) #f])
                        ;; Collection access, inline on arrays while the global
                        ;; still holds the builtin.
                        ((and builtin (= (or (get guarded-arities builtin) -1) (length nodes)))
                         [:gprim off builtin cell nodes])
-                       ((and builtin (direct-builtin? builtin cell))
+                       ((and builtin (direct-builtin? builtin cell off))
                         [:known off builtin cell nodes (site :tail)])
                        ;; A builtin of core in tail position runs in its caller's frame, as in
                        ;; the VM, so errors point at the call. apply stays a tail call.
@@ -608,15 +608,16 @@
 
 ;; A call to a core builtin that compiled code may call without going
 ;; through its cell, since locked core can't change.
-(def (direct-builtin? builtin cell)
-  (and (known/direct? builtin) (%native-core-cell? cell) (%core-locked?) (options/enabled? "direct")))
+(def (direct-builtin? builtin cell off)
+  (and (known/direct? builtin) (%native-core-cell? cell) (%core-locked?) (options/enabled? "direct")
+       (options/rewrite? (str "direct " builtin) off)))
 
 ;; Whether a transform from the known-function table (section 6.4 of the
 ;; design) applies: it's switched on, the call is to the cell of locked core
 ;; it names, and its arguments suit.
-(def (transform? name names-it cell suits)
+(def (transform? name names-it cell suits off)
   (and names-it suits (%native-core-cell? cell) (%core-locked?)
-       (options/enabled? (str "transform:" name))))
+       (options/enabled? (str "transform:" name)) (options/rewrite? (str "transform:" name) off)))
 
 ;; Builtins whose globals can be redefined, inlined behind a check that the
 ;; global still holds them.

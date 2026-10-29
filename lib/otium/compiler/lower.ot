@@ -56,6 +56,9 @@
 (def offset-kind 12)
 (def offset-car 16)
 (def offset-cdr 24)
+(def offset-bytes-length 16)
+(def offset-bytes-data 24)
+(def kind-bytevector 22)
 (def offset-record-type 16)
 (def offset-record-values 24)
 (def offset-box 16)
@@ -483,6 +486,10 @@
      (let ((nodes (get node 2)))
        (for ((i :range (- (length nodes) 1))) (effect fc (get nodes i)))
        (test fc (get nodes (- (length nodes) 1)) otherwise)))
+    ((:known)
+     (if (inline-test? node)
+         (inline-test fc node otherwise)
+         (falsy-jump fc (value fc node) otherwise)))
     (else (falsy-jump fc (value fc node) otherwise))))
 
 ;; nil (2) and #f (6) differ only in bit 2.
@@ -835,11 +842,140 @@
 ;; a helper runs the builtin, skipping the call_other stub and dispatch. The
 ;; call keeps its caller's frame, so errors point at the call.
 (def (direct-builtin fc node offset)
-  (let ((ops (map (fn (op) (in-vreg-or-imm fc op)) (arguments fc (get node 4)))) (r (vreg! fc))
-        (name (get node 2)))
-    (if (and (memq name '(set-car! set-cdr!)) (= (length ops) 2))
-        (pair-store fc name ops r offset)
-        (builtin-ccall! fc name ops r offset))
+  (let ((name (get node 2)) (n (length (get node 4))))
+    (cond ((inline-test? node) (boolean fc (fn (otherwise) (inline-test fc node otherwise))))
+          ((or (and (memq name '(bitwise-and bitwise-ior bitwise-xor bitwise-arithmetic-shift)) (= n 2))
+               (and (eq? name 'bitwise-not) (= n 1)))
+           (bitwise fc node offset))
+          ((= n (or (get bytevector-arities name) -1)) (bytevector-access fc node offset))
+          (else
+           (let ((ops (map (fn (op) (in-vreg-or-imm fc op)) (arguments fc (get node 4)))) (r (vreg! fc)))
+             (if (and (memq name '(set-car! set-cdr!)) (= (length ops) 2))
+                 (pair-store fc name ops r offset)
+                 (builtin-ccall! fc name ops r offset))
+             r)))))
+
+;; Type predicates of locked core, tested inline: the kind of object each
+;; is true for, or a keyword for one that tests the word itself.
+(def- inline-tests
+  {'nil? :nil 'int? :int 'char? :char 'number? :number 'string? 5 'symbol? 6 'keyword? 7
+   'array? kind-array 'table? 13 'bytevector? kind-bytevector 'float? kind-float 'record? kind-record})
+
+(def (inline-test? node)
+  (and (eq? (get node 0) :known) (get inline-tests (get node 2)) (= (length (get node 4)) 1)))
+
+;; Jump to otherwise unless the predicate of a :known node holds.
+(def (inline-test fc node otherwise)
+  (let ((x (in-vreg fc (value fc (get (get node 4) 0)))) (test (get inline-tests (get node 2))))
+    (case test
+      ((:nil) (emit! fc [:cmpj :ne x [:imm word-nil] otherwise]))
+      ((:int)
+       (emit! fc [:op2u :and :zero x [:imm 1]])
+       (emit! fc [:jcond :zero otherwise]))
+      ((:char)
+       (let ((t (raw! fc)))
+         (emit! fc [:op2 :and 0 t x [:imm 255]])
+         (emit! fc [:cmpj :ne t [:imm 22] otherwise])))
+      ((:number)
+       (let ((yes (label! fc)))
+         (emit! fc [:op2u :and :zero x [:imm 1]])
+         (emit! fc [:jcond :nonzero yes])
+         (float-check fc x otherwise)
+         (emit! fc [:label yes])))
+      (else
+       (let ((k (raw! fc)))
+         (emit! fc [:op2u :and :zero x [:imm 7]])
+         (emit! fc [:jcond :nonzero otherwise])
+         (emit! fc [:load8 k [:mem x offset-kind]])
+         (emit! fc [:cmpj :ne k [:imm test] otherwise]))))))
+
+;; bytevector-length, -u8-ref and -u8-set! on a bytevector, inline, with the
+;; builtin for anything it would fail on.
+(def- bytevector-arities {'bytevector-length 1 'bytevector-u8-ref 2 'bytevector-u8-set! 3})
+
+(def (bytevector-access fc node offset)
+  (let ((name (get node 2))
+        (ops (map (fn (op) (in-vreg fc op)) (arguments fc (get node 4))))
+        (r (vreg! fc)) (join (label! fc)) (slow (label! fc)))
+    (let ((x (get ops 0)) (k (raw! fc)))
+      (emit! fc [:op2u :and :zero x [:imm 7]])
+      (emit! fc [:jcond :nonzero slow])
+      (emit! fc [:load8 k [:mem x offset-kind]])
+      (emit! fc [:cmpj :ne k [:imm kind-bytevector] slow])
+      (if (eq? name 'bytevector-length)
+          (let ((n (raw! fc)))
+            (emit! fc [:mov n [:mem x offset-bytes-length]])
+            (emit! fc [:op2 :shl 0 n n [:imm 1]])
+            (emit! fc [:op2 :or 0 r n [:imm 1]]))
+          (let ((i (get ops 1)) (index (raw! fc)) (at (raw! fc)))
+            (emit! fc [:op2u :and :zero i [:imm 1]])
+            (emit! fc [:jcond :zero slow])
+            (emit! fc [:op2 :ashr 0 index i [:imm 1]])
+            ;; Unsigned, so a negative index fails too.
+            (emit! fc [:cmpj :ge index [:mem x offset-bytes-length] slow])
+            (emit! fc [:op2 :add 0 at x index])
+            (if (eq? name 'bytevector-u8-ref)
+                (let ((b (raw! fc)))
+                  (emit! fc [:load8 b [:mem at offset-bytes-data]])
+                  (emit! fc [:op2 :shl 0 b b [:imm 1]])
+                  (emit! fc [:op2 :or 0 r b [:imm 1]]))
+                (let ((v (get ops 2)) (b (raw! fc)))
+                  (emit! fc [:op2u :and :zero v [:imm 1]])
+                  (emit! fc [:jcond :zero slow])
+                  (emit! fc [:op2 :ashr 0 b v [:imm 1]])
+                  (emit! fc [:cmpj :ge b [:imm 256] slow])
+                  (emit! fc [:store8 [:mem at offset-bytes-data] b])
+                  (emit! fc [:mov r [:imm word-nil]]))))))
+    (emit! fc [:label join])
+    (in-cold fc (fn ()
+                  (emit! fc [:label slow])
+                  (builtin-ccall! fc name ops r offset)
+                  (emit! fc [:jump join])))
+    r))
+
+;; bitwise-and, -ior, -xor, -not and -arithmetic-shift of fixnums, inline. A
+;; fixnum n is the word 2n+1, so and and or of words are the words of the
+;; results. A shift left that would overflow, a shift by 62 or more either
+;; way, or anything not a fixnum calls the builtin.
+(def (bitwise fc node offset)
+  (let ((name (get node 2))
+        (ops (map (fn (op) (in-vreg fc op)) (arguments fc (get node 4))))
+        (r (vreg! fc)) (join (label! fc)) (slow (label! fc)))
+    (let ((a (get ops 0)) (b (if (= (length ops) 2) (get ops 1) nil)))
+      (if b
+          (both-fixnums fc a b slow)
+          (begin
+            (emit! fc [:op2u :and :zero a [:imm 1]])
+            (emit! fc [:jcond :zero slow])))
+      (case name
+        ((bitwise-and) (emit! fc [:op2 :and 0 r a b]))
+        ((bitwise-ior) (emit! fc [:op2 :or 0 r a b]))
+        ((bitwise-xor)
+         (emit! fc [:op2 :xor 0 r a b])
+         (emit! fc [:op2 :or 0 r r [:imm 1]]))
+        ((bitwise-not) (emit! fc [:op2 :xor 0 r a [:imm -2]]))
+        (else
+         (let ((k (raw! fc)) (t (raw! fc)) (u (raw! fc)) (right (label! fc)))
+           (emit! fc [:op2 :ashr 0 k b [:imm 1]])
+           (emit! fc [:cmpj :slt k [:imm 0] right])
+           ;; Left: shift 2n, and back again to see that nothing was lost.
+           (emit! fc [:cmpj :sge k [:imm 62] slow])
+           (emit! fc [:op2 :sub 0 t a [:imm 1]])
+           (emit! fc [:op2 :shl 0 u t k])
+           (emit! fc [:op2 :ashr 0 k u k])
+           (emit! fc [:cmpj :ne k t slow])
+           (emit! fc [:op2 :or 0 r u [:imm 1]])
+           (emit! fc [:jump join])
+           (emit! fc [:label right])
+           (emit! fc [:cmpj :sle k [:imm -62] slow])
+           (emit! fc [:op2 :sub 0 k [:imm 0] k])
+           (emit! fc [:op2 :ashr 0 t a k])
+           (emit! fc [:op2 :or 0 r t [:imm 1]])))))
+    (emit! fc [:label join])
+    (in-cold fc (fn ()
+                  (emit! fc [:label slow])
+                  (builtin-ccall! fc name ops r offset)
+                  (emit! fc [:jump join])))
     r))
 
 ;; set-car! and set-cdr! of a pair, inline: one store, and the pair back.

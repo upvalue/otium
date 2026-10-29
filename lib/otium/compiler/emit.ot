@@ -349,6 +349,7 @@
   (let ((fc (e :fc)))
     (case (get ins 0)
       ((:mov) (let ((src (physical e (get ins 2)))) (mov! e (physical e (get ins 1)) src)))
+      ((:store8) (op! e ns-mov 1 (physical e (get ins 1)) (physical e (get ins 2))))
       ((:load8)
        ;; A byte load into memory would write only a byte, so a spilled
        ;; destination is filled through the scratch register.

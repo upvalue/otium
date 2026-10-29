@@ -76,6 +76,7 @@
        (operand-uses (get ins 2) out)
        (unless (vreg? (get ins 1)) (operand-uses (get ins 1) out)))
       ((:load8) (operand-uses (get ins 2) out))
+      ((:store8) (operand-uses (get ins 1) out) (operand-uses (get ins 2) out))
       ((:op2)
        (operand-uses (get ins 4) out)
        (operand-uses (get ins 5) out)

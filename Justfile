@@ -22,7 +22,7 @@ test *args: build
 test-opt *args: build
     #!/bin/sh
     set -eu
-    for opt in none -direct -transform:list -transform:append -inline -inline-core -types -records; do
+    for opt in none -direct -transform:list -transform:append -transform:equal -inline -inline-core -types -records; do
         echo "== OTIUM_OPT=$opt"
         if [ "$opt" = none ]; then boot="$OTIUM_BUILD/otium-noopt.boot"; else boot="$OTIUM_BUILD/otium.boot"; fi
         OTIUM_OPT=$opt OTIUM_BOOT=$boot tools/meson-test default "${@:-lang}"

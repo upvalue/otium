@@ -584,6 +584,10 @@
                        ((transform? "list" (eq? builtin 'list) cell (<= 1 (length nodes) 6) off)
                         (fold-right (fn (n tail) [:prim off 'cons [n tail]]) (literal '() off)
                                     (array-to-list nodes)))
+                       ((transform? "equal" (eq? builtin 'equal?) cell
+                                    (and (= (length nodes) 2) (or (eq-constant? (get nodes 0)) (eq-constant? (get nodes 1))))
+                                    off)
+                        [:prim off 'eq? nodes])
                        ((transform? "append" (= cell (%native-cell 'otium.core/append)) cell
                                     (= (length nodes) 2) off)
                         [:gcall off (%native-cell 'otium.core/%append2) nodes (site :tail) #f])
@@ -629,6 +633,14 @@
   (let ((entry (get otium.core/%record-accessors cell)))
     (when (and entry (%core-locked?) (= argc (if (get entry 2) 2 1)) (options/enabled? "records"))
       (if (get entry 2) 'record-set! 'record-get))))
+
+;; A constant that equal? compares as eq? does: a keyword, which is always
+;; interned, or an immediate. A symbol isn't, since a gensym can have the
+;; same name.
+(def (eq-constant? node)
+  (and (eq? (get node 0) :const)
+       (let ((v (get node 2)))
+         (or (keyword? v) (int? v) (char? v) (boolean? v) (nil? v) (null? v)))))
 
 ;; Builtins whose globals can be redefined, inlined behind a check that the
 ;; global still holds them.

@@ -104,6 +104,11 @@
     (for ((name :in modules)) (module! w name library))))
 
 (def (build out library primitives modules)
+  ;; Core functions' bodies are kept as their definitions compile, so a
+  ;; build inlines the same calls whether or not this process loaded them
+  ;; from a boot file already.
+  (for ((name :in (keys %inline-bodies)))
+    (put! %inline-bodies name nil))
   (let ((w (fasl/make-writer)))
     (boot! w library primitives modules)
     (let ((port (open-binary-output-file out)))

@@ -28,7 +28,10 @@
 ;; to themselves or take optional or rest parameters aren't inlined.
 
 (ns otium.compiler.inline
-  (:require (otium.compiler.convert :as cv) (otium.compiler.ir :as ir) (otium.compiler.known :as known)))
+  (:require (otium.compiler.convert :as cv)
+            (otium.compiler.ir :as ir)
+            (otium.compiler.known :as known)
+            (otium.compiler.options :as options)))
 
 ;; --- State -------------------------------------------------------------------
 
@@ -244,9 +247,10 @@
          (or (fold off (get node 2) args) (result [:known off (get node 2) (get node 3) args (get node 5)] ctx))))
       ((:gprim) [:gprim off (get node 2) (get node 3) (simplify-all s (get node 4))])
       ((:gcall :bcall)
-       (let ((new (copy node)))
-         (put! new 3 (simplify-all s (get node 3)))
-         new))
+       (or (inline-core s node ctx)
+           (let ((new (copy node)))
+             (put! new 3 (simplify-all s (get node 3)))
+             new)))
       ((:loop) [:loop off (get node 2) (simplify-all s (get node 3)) (simplify s (get node 4) :value)])
       ((:recur) [:recur off (get node 2) (simplify-all s (get node 3))])
       ((:while) [:while off (simplify s (get node 2) :test) (simplify s (get node 3) :effect)])
@@ -520,9 +524,58 @@
       (let ((cs (children node)))
         (let loop ((i 0)) (and (< i (length cs)) (or (mentions? (get cs i) var) (loop (+ i 1))))))))
 
+;; --- Core functions ------------------------------------------------------------
+
+;; Calls of core functions whose bodies the boot file keeps, in
+;; %inline-bodies (known.ot's inline candidates), are inlined like calls of
+;; local functions. Core is locked, so the body can't change. Design,
+;; step 3.
+
+(def- inline-core? (options/enabled? "inline-core"))
+
+;; Parsed bodies by name, each [text function], parsed once.
+(def- core-functions {})
+
+;; The function record of the core function a :gcall calls, or nil.
+(def (core-function node)
+  (when (and inline-core? (eq? (get node 0) :gcall) (%native-core-cell? (get node 2)) (%core-locked?))
+    (let ((name (string->symbol (cdr (%native-cell-name (get node 2))))))
+      (let ((text (get otium.core/%inline-bodies name)) (parsed (get core-functions name)))
+        (cond ((nil? text) nil)
+              ((and parsed (eq? (get parsed 0) text)) (get parsed 1))
+              (else
+               (let ((info (ir/text->tree text (get node 1))))
+                 (put! core-functions name [text info])
+                 info)))))))
+
+;; A call of a core function inlined, or nil, as simplify-call does for local
+;; functions.
+(def (inline-core s node ctx)
+  (let ((info (core-function node)) (args (get node 3)))
+    (when (and info (inlinable? s info args))
+      (let ((ready (list-to-array (map (fn (a) (not (or (eq? (get a 0) :fn) (copyable? a)))) (array-to-list args)))))
+        (let ((prepared (map (fn (i)
+                               (if (get ready i)
+                                   (simplify s (get args i) :value)
+                                   (get args i)))
+                             (range (length args)))))
+          (or (try-inline s node info prepared ready ctx)
+              (let ((new (copy node)))
+                (put! new 3 (map (fn (i)
+                                   (if (get ready i)
+                                       (get prepared i)
+                                       (simplify s (get args i) :value)))
+                                 (range (length args))))
+                new)))))))
+
 ;; (f a ...) as (let ((x a) ...) body), simplified, with a copy of f's body
-;; in the calling function. nil when it grows past the size limit.
+;; in the calling function. nil when it grows past the size limit, or the
+;; fuel (OTIUM_OPT_FUEL) has run out.
 (def (try-inline s node info args ready ctx)
+  (when (options/rewrite? (str "inline " (info :name)) (get node 1))
+    (try-inline-now s node info args ready ctx)))
+
+(def (try-inline-now s node info args ready ctx)
   (let ((owner (s :fn))
         (renames {})
         (params []))

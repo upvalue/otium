@@ -63,7 +63,8 @@ if native_enabled
   boot_sources = files('lib/otium/expander.ot', 'lib/otium/core.ot', 'lib/otium/loop.ot',
     'c/src/primitives.ot', 'lib/otium/compiler.ot', 'lib/otium/compiler/convert.ot',
     'lib/otium/compiler/lower.ot', 'lib/otium/compiler/alloc.ot', 'lib/otium/compiler/emit.ot',
-    'lib/otium/compiler/fasl.ot', 'lib/otium/compiler/boot.ot')
+    'lib/otium/compiler/fasl.ot', 'lib/otium/compiler/boot.ot',
+    'lib/otium/compiler/rescope.ot', 'lib/otium/compiler/ir.ot')
   custom_target('otium.boot', output: 'otium.boot', depend_files: boot_sources,
     command: [otium, '--c.vm', '--no-project', '-L', source_root / 'lib', '-e',
       '(require otium.compiler.boot :as boot) (boot/build-standard "@OUTPUT@" "@0@" "@1@") (exit 0)'.format(

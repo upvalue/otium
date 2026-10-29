@@ -1,0 +1,153 @@
+;; rescope.ot -- recompute what lower needs to know about variables.
+;;
+;; convert records, as it goes, which variables each function captures and
+;; which variables are captured, assigned, or captured before they are
+;; initialized; lower decides boxes from that. Passes that move code around
+;; make those facts stale, so this walks the final tree and works them out
+;; again. On convert's own output it must give exactly what convert decided,
+;; including the order of :captures, which lower indexes.
+;;
+;; The walk visits nodes in the order convert converted them, which is the
+;; tree's order except in two places: an escaping named let, a call of a
+;; function with a self variable, had its arguments converted before the
+;; function; and %call-with-cleanup, a cleanup node with an outcome, had its
+;; body converted before the cleanup function.
+
+(ns otium.compiler.rescope)
+
+;; The walk's state: :uninit holds the ids of variables not yet initialized,
+;; :lsets counts assignments by id, :defs the ids of variables bound by a body's
+;; definitions, which their first definition initializes.
+(def (rescope info)
+  (let ((r {:uninit {} :lsets {} :defs {}}))
+    (walk-function r info)
+    info))
+
+(def (bind! var)
+  (put! var :captured nil)
+  (put! var :assigned nil)
+  (put! var :early nil))
+
+;; A use of var in f: captured by f and every function up to its owner.
+(def (use! r var f)
+  (unless (or (var :loop) (eq? (var :owner) f))
+    (put! var :captured #t)
+    (when (get (r :uninit) (var :id)) (put! var :early #t))
+    (let up ((g f))
+      (when (and g (not (eq? g (var :owner))))
+        (let ((captures (g :captures))) (unless (find (fn (v) (eq? v var)) captures) (push! captures var)))
+        (up (g :parent))))))
+
+;; An assignment. A definition's variable has one assignment for its
+;; definition; any other makes it assigned.
+(def (assign! r var f)
+  (let ((id (var :id)))
+    (let ((n (+ (get (r :lsets) id 0) 1)))
+      (put! (r :lsets) id n)
+      (when (> n
+               (if (get (r :defs) id)
+                   1
+                   0))
+        (put! var :assigned #t))))
+  (use! r var f))
+
+(def (walk-function r info)
+  (put! info :captures [])
+  (when (info :self) (bind! (info :self)))
+  (for ((v :in (info :params)))
+    (bind! v))
+  (for ((pair :in (info :optionals)))
+    (bind! (get pair 0))
+    (walk r (get pair 1) info))
+  (when (info :rest) (bind! (info :rest)))
+  (walk r (info :body) info))
+
+(def (walk-all r nodes f)
+  (for ((n :in nodes))
+    (walk r n f)))
+
+(def (walk r node f)
+  (case (get node 0)
+    ((:const :gref :unbound :evaluator :class-object) nil)
+    ((:lref) (use! r (get node 2) f))
+    ((:lset) (walk r (get node 3) f) (assign! r (get node 2) f))
+    ((:gset :gdef) (walk r (get node 3) f))
+    ((:if) (walk r (get node 2) f) (walk r (get node 3) f) (walk r (get node 4) f))
+    ((:seq) (walk-all r (get node 2) f))
+    ((:let) (walk-let r node f))
+    ((:fn) (walk-function r (get node 2)))
+    ((:call)
+     (let ((callee (get node 2)))
+       (if (and (eq? (get callee 0) :fn) ((get callee 2) :self))
+           (begin
+             (walk-all r (get node 3) f)
+             (walk r callee f))
+           (begin
+             (walk r callee f)
+             (walk-all r (get node 3) f)))))
+    ((:gcall :bcall :prim) (walk-all r (get node 3) f))
+    ((:gprim :known) (walk-all r (get node 4) f))
+    ((:loop)
+     (walk-all r (get node 3) f)
+     (let ((loop (get node 2)))
+       (for ((v :in (loop :vars)))
+         (bind! v))
+       (bind! (loop :var)))
+     (walk r (get node 4) f))
+    ((:recur) (walk-all r (get node 3) f))
+    ((:while) (walk r (get node 2) f) (walk r (get node 3) f))
+    ((:try)
+     (walk r (get node 2) f)
+     (bind! (get node 3))
+     (for ((clause :in (get node 4)))
+       (when (get clause 0) (walk r (get clause 0) f))
+       (bind! (get clause 1))
+       (walk r (get clause 2) f)))
+    ((:cleanup)
+     (if (get node 3)
+         (begin
+           (walk r (get node 4) f)
+           (walk r (get node 2) f))
+         (begin
+           (walk r (get node 2) f)
+           (walk r (get node 4) f))))
+    ((:handlers :params)
+     (for ((pair :in (get node 2)))
+       (walk-all r pair f))
+     (walk r (get node 3) f))
+    ((:restarts)
+     (for ((clause :in (get node 2)))
+       (walk-all r clause f))
+     (walk r (get node 3) f))
+    ((:make-param) (walk r (get node 2) f) (walk r (get node 3) f))
+    (else (error "rescope: unknown node" (get node 0)))))
+
+;; A let's variable is uninitialized during its own initializer, which only a
+;; function referring to itself sees. A body's definitions bind variables to
+;; [:unbound], and stay uninitialized until their definitions, the
+;; assignments directly in the body, have run.
+(def (walk-let r node f)
+  (let ((vars (get node 2))
+        (inits (get node 3))
+        (uninit (r :uninit))
+        (defs []))
+    (dotimes (i (length vars))
+      (let ((var (get vars i))
+            (init (get inits i)))
+        (bind! var)
+        (put! uninit (var :id) #t)
+        (walk r init f)
+        (if (eq? (get init 0) :unbound)
+            (begin
+              (put! (r :defs) (var :id) #t)
+              (push! defs var))
+            (put! uninit (var :id) nil))))
+    (let ((body (get node 4)))
+      (if (= (length defs) 0)
+          (walk r body f)
+          (for ((n :in (if (eq? (get body 0) :seq)
+                           (get body 2)
+                           [body])))
+            (walk r n f)
+            (when (and (eq? (get n 0) :lset) (find (fn (v) (eq? v (get n 2))) defs))
+              (put! uninit ((get n 2) :id) nil)))))))

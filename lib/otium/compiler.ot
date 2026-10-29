@@ -8,12 +8,27 @@
 
 (ns otium.compiler
   (:require (otium.compiler.convert :as convert)
+            (otium.compiler.ir :as ir)
+            (otium.compiler.rescope :as rescope)
             (otium.compiler.lower :as lower)
             (otium.compiler.alloc :as alloc)
-            (otium.compiler.emit :as emit)))
+            (otium.compiler.emit :as emit)
+            (otium.process :as process)))
+
+;; OTIUM_OPT_VERIFY=1 checks the tree IR after convert, and recomputes
+;; scopes and checks it again, for testing.
+(def- verify? (equal? (process/getenv "OTIUM_OPT_VERIFY") "1"))
+
+(def (convert form)
+  (let ((info (convert/convert-top form)))
+    (when verify?
+      (ir/verify info)
+      (rescope/rescope info)
+      (ir/verify info))
+    info))
 
 (def (compile-top form)
-  (let ((info (convert/convert-top form)))
+  (let ((info (convert form)))
     (let ((lowered (lower/lower-top info)))
       (let ((u (get lowered 0)) (contexts (get lowered 1)))
         (for ((fc :in contexts)) (alloc/allocate fc))

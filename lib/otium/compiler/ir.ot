@@ -1,0 +1,761 @@
+;; ir.ot -- the tree IR's text form, its verifier, and copying.
+;;
+;; The text form is an s-expression per node. Locals print as name.n, n
+;; counting the variables in the order the printer meets them, and globals
+;; qualified, as otium.core/map. Offsets are left out; the parser gives
+;; every node one offset.
+;;
+;;   x.1  (checked x.1)            [:lref off var check?]
+;;   (set! x.1 e)                  [:lset off var e]
+;;   otium.core/map                [:gref off cell]
+;;   (set-global! ns/x e)          [:gset off cell e]
+;;   (define ns/x e)               [:gdef off cell e]
+;;   (if test then else)  (begin e ...)  (let ((x.1 init) ...) body)
+;;   (call [:tail] f a ...)        [:call off f args tail?]
+;;   (gcall [:tail] [:check] [:tail-position] ns/f a ...)
+;;   (bcall [:tail] [:check] [:tail-position] "name" a ...)
+;;                                 [:gcall off cell args tail? check? tail-position?],
+;;                                 and :bcall with a builtin for the cell
+;;   (prim name a ...)  (gprim name ns/f a ...)  (known [:tail] name ns/f a ...)
+;;   (loop name.1 ((i.2 init) ...) body)  (recur name.1 a ...)  (while test body)
+;;   (try body condition.1 (catch x.2 body) (catch-if pred x.3 body) ...)
+;;   (cleanup [:outcome] f body)   (handlers ((pred handler) ...) body)
+;;   (with-params ((param value) ...) body)  (restarts ((name doc f) ...) body)
+;;   (make-param name init)  (evaluator)  (unbound)  (class-object)
+;;
+;; Constants that evaluate to themselves (numbers, strings, characters,
+;; keywords, booleans, nil) print as they are, others quoted. A function,
+;; as a [:fn] node or a record convert-top returns, is
+;;
+;;   (fn name [:self f.1] (a.2 b.3 &optional (c.4 default) . rest.5) body)
+;;
+;; with the parameter list as source writes it.
+
+(ns otium.compiler.ir (:require (otium.compiler.convert :as cv) (otium.compiler.rescope :as rescope)))
+
+;; --- Printing ----------------------------------------------------------------
+
+;; A function record or node in text form.
+(def (tree->text x)
+  (let ((p {:names {} :count 0}))
+    (if (array? x)
+        (node->text p x)
+        (function->text p x))))
+
+(def (local p var)
+  (let ((names (p :names))
+        (id (var :id)))
+    (or (get names id)
+        (let ((n (+ (p :count) 1)))
+          (put! p :count n)
+          (let ((s (string->symbol (str (symbol->string (var :name)) "." n))))
+            (put! names id s)
+            s)))))
+
+(def (global cell)
+  (let ((name (%native-cell-name cell))) (string->symbol (str (car name) "/" (cdr name)))))
+
+(def (plain-constant? value)
+  (or (nil? value) (boolean? value) (number? value) (string? value) (char? value) (keyword? value)))
+
+(def (constant value)
+  (if (plain-constant? value)
+      value
+      (list 'quote value)))
+
+;; Flag keywords for the true flags at node's indexes.
+(def (flags node indexes names)
+  (let loop ((i 0)
+             (out '()))
+    (if (= i (length indexes))
+        (reverse out)
+        (loop (+ i 1)
+              (if (get node (get indexes i))
+                  (cons (get names i) out)
+                  out)))))
+
+(def- call-flags [:tail :check :tail-position])
+
+(def (texts p nodes)
+  (map (fn (n) (node->text p n)) (array-to-list nodes)))
+
+;; A node after flags: a keyword there would read as a flag, so it is quoted.
+(def (operand p node)
+  (if (and (eq? (get node 0) :const) (keyword? (get node 2)))
+      (list 'quote (get node 2))
+      (node->text p node)))
+
+(def (node->text p node)
+  (case (get node 0)
+    ((:const) (constant (get node 2)))
+    ((:lref)
+     (if (get node 3)
+         (list 'checked (local p (get node 2)))
+         (local p (get node 2))))
+    ((:lset) (let ((var (local p (get node 2)))) (list 'set! var (node->text p (get node 3)))))
+    ((:gref) (global (get node 2)))
+    ((:gset) (list 'set-global! (global (get node 2)) (node->text p (get node 3))))
+    ((:gdef) (list 'define (global (get node 2)) (node->text p (get node 3))))
+    ((:if) (list 'if (node->text p (get node 2)) (node->text p (get node 3)) (node->text p (get node 4))))
+    ((:seq) (cons 'begin (texts p (get node 2))))
+    ((:let)
+     (let ((vars (get node 2))
+           (inits (get node 3))
+           (bindings []))
+       (dotimes (i (length vars))
+         (let ((var (local p (get vars i)))) (push! bindings (list var (node->text p (get inits i))))))
+       (list 'let (array-to-list bindings) (node->text p (get node 4)))))
+    ((:fn) (function->text p (get node 2)))
+    ((:call) (append (list 'call) (flags node [4] [:tail]) (list (operand p (get node 2))) (texts p (get node 3))))
+    ((:gcall)
+     (append (list 'gcall) (flags node [4 5 6] call-flags) (list (global (get node 2))) (texts p (get node 3))))
+    ((:bcall)
+     (append (list 'bcall) (flags node [4 5 6] call-flags) (list (builtin-name (get node 2))) (texts p (get node 3))))
+    ((:prim) (cons 'prim (cons (get node 2) (texts p (get node 3)))))
+    ((:gprim) (append (list 'gprim (get node 2) (global (get node 3))) (texts p (get node 4))))
+    ((:known)
+     (append (list 'known) (flags node [5] [:tail]) (list (get node 2) (global (get node 3))) (texts p (get node 4))))
+    ((:loop)
+     (let ((loop (get node 2))
+           (inits (get node 3))
+           (bindings []))
+       (let ((name (local p (loop :var))))
+         (dotimes (i (length inits))
+           (let ((var (local p (get (loop :vars) i)))) (push! bindings (list var (node->text p (get inits i))))))
+         (list 'loop name (array-to-list bindings) (node->text p (get node 4))))))
+    ((:recur) (cons 'recur (cons (local p ((get node 2) :var)) (texts p (get node 3)))))
+    ((:while) (list 'while (node->text p (get node 2)) (node->text p (get node 3))))
+    ((:try)
+     (let ((body (node->text p (get node 2)))
+           (var (local p (get node 3))))
+       (append (list 'try body var)
+               (map (fn (clause)
+                      (let ((pred (and (get clause 0) (node->text p (get clause 0)))))
+                        (let ((bound (local p (get clause 1))))
+                          (if pred
+                              (list 'catch-if pred bound (node->text p (get clause 2)))
+                              (list 'catch bound (node->text p (get clause 2)))))))
+                    (array-to-list (get node 4))))))
+    ((:cleanup)
+     (append (list 'cleanup) (flags node [3] [:outcome]) (list (operand p (get node 2)) (node->text p (get node 4)))))
+    ((:handlers :params)
+     (list (if (eq? (get node 0) :handlers)
+               'handlers
+               'with-params)
+           (map (fn (pair) (texts p pair)) (array-to-list (get node 2)))
+           (node->text p (get node 3))))
+    ((:restarts)
+     (list 'restarts (map (fn (clause) (texts p clause)) (array-to-list (get node 2))) (node->text p (get node 3))))
+    ((:make-param) (list 'make-param (node->text p (get node 2)) (node->text p (get node 3))))
+    ((:evaluator) (list 'evaluator))
+    ((:unbound) (list 'unbound))
+    ((:class-object) (list 'class-object))
+    (else (error "tree IR: unknown node" (get node 0)))))
+
+(def (function->text p info)
+  (let ((self (and (info :self) (local p (info :self)))))
+    (let ((params (map (fn (v) (local p v)) (array-to-list (info :params)))))
+      (let ((optionals (map (fn (pair) (let ((var (local p (get pair 0)))) (list var (node->text p (get pair 1)))))
+                            (array-to-list (info :optionals)))))
+        (let ((rest (if (info :rest)
+                        (local p (info :rest))
+                        '())))
+          (let ((items (if (null? optionals)
+                           params
+                           (append params (cons '&optional optionals)))))
+            (append (list 'fn (info :name))
+                    (if self
+                        (list :self self)
+                        '())
+                    (list (fold-right cons rest items) (node->text p (info :body))))))))))
+
+;; Builtins the compiler calls by value print by name.
+(def- builtin-names '("qq-append" "%define-class" "%define-method" "%define-generic" "array" "list"))
+
+(def (builtin-name value)
+  (or (find (fn (name) (eq? (%native-builtin name) value)) builtin-names) value))
+
+;; --- Parsing -----------------------------------------------------------------
+
+;; A function record from its text form, with fresh variables and functions,
+;; and the facts convert would record about them.
+(def (text->tree text &optional (offset 0))
+  (let ((p {:scope {} :offset offset :loops 0}))
+    (let ((info (parse-function p text nil)))
+      (rescope/rescope info)
+      info)))
+
+(def (parse-fail message x)
+  (error (str "tree IR text: " message) x))
+
+;; The name of a local's text, nil when it isn't name.n.
+(def (local-name sym)
+  (let ((s (symbol->string sym)))
+    (let scan ((i (- (string-length s) 1)))
+      (cond
+        ((< i 1) nil)
+        ((char=? (string-ref s i) #\.) (and (< i (- (string-length s) 1)) (substring s 0 i)))
+        ((char-numeric? (string-ref s i)) (scan (- i 1)))
+        (else nil)))))
+
+(def (bind-local! p sym owner)
+  (let ((name (and (symbol? sym) (local-name sym))))
+    (unless name (parse-fail "expected a local name.n" sym))
+    (when (get (p :scope) sym) (parse-fail "local bound twice" sym))
+    (let ((var (cv/make-var (string->symbol name) owner #t)))
+      (put! (p :scope) sym var)
+      var)))
+
+(def (local-of p sym)
+  (or (and (symbol? sym) (get (p :scope) sym)) (parse-fail "unknown local" sym)))
+
+(def (cell-of sym)
+  (let ((s (and (symbol? sym) (symbol->string sym))))
+    (unless (and s (string-index s "/") (> (string-index s "/") 0)) (parse-fail "expected a qualified global" sym))
+    (%native-cell sym)))
+
+(def (proper-list? x)
+  (cond
+    ((null? x) #t)
+    ((pair? x) (proper-list? (cdr x)))
+    (else #f)))
+
+(def (expect x n)
+  (unless (and (proper-list? x) (= (length x) n)) (parse-fail "malformed form" x)))
+
+;; Leading flag keywords of items: [flags rest], flags a table.
+(def (take-flags items allowed)
+  (let ((found {}))
+    (let loop ((xs items))
+      (if (and (pair? xs) (keyword? (car xs)) (memq (car xs) allowed))
+          (begin
+            (put! found (car xs) #t)
+            (loop (cdr xs)))
+          [found xs]))))
+
+(def (flag found key)
+  (if (get found key)
+      #t
+      #f))
+
+(def (parse-nodes p xs f)
+  (unless (proper-list? xs) (parse-fail "malformed operands" xs))
+  (list-to-array (map (fn (x) (parse-node p x f)) xs)))
+
+(def (parse-node p x f)
+  (let ((off (p :offset)))
+    (cond
+      ((symbol? x)
+       (let ((var (get (p :scope) x)))
+         (cond
+           (var [:lref off var #f])
+           ((local-name x) (parse-fail "unknown local" x))
+           (else [:gref off (cell-of x)]))))
+      ((not (pair? x))
+       (if (plain-constant? x)
+           [:const off x]
+           (parse-fail "unquoted constant" x)))
+      ((not (proper-list? x)) (parse-fail "malformed form" x))
+      (else (parse-compound p x f off)))))
+
+(def (parse-compound p x f off)
+  (let ((args (cdr x)))
+    (case (car x)
+      ((quote) (expect x 2) [:const off (car args)])
+      ((checked) (expect x 2) [:lref off (local-of p (car args)) #t])
+      ((set!) (expect x 3) (let ((var (local-of p (car args)))) [:lset off var (parse-node p (car (cdr args)) f)]))
+      ((set-global! define)
+       (expect x 3)
+       [(if (eq? (car x) 'define)
+            :gdef
+            :gset)
+        off
+        (cell-of (car args))
+        (parse-node p (car (cdr args)) f)])
+      ((if) (expect x 4) (let ((nodes (parse-nodes p args f))) [:if off (get nodes 0) (get nodes 1) (get nodes 2)]))
+      ((begin) (when (null? args) (parse-fail "empty begin" x)) [:seq off (parse-nodes p args f)])
+      ((let)
+       (expect x 3)
+       (let ((vars [])
+             (inits []))
+         (unless (proper-list? (car args)) (parse-fail "malformed bindings" x))
+         (for ((b :in (car args)))
+           (expect b 2)
+           ;; A function may refer to the variable it initializes.
+           (if (and (pair? (car (cdr b))) (eq? (car (car (cdr b))) 'fn))
+               (let ((var (bind-local! p (car b) f)))
+                 (push! vars var)
+                 (push! inits (parse-node p (car (cdr b)) f)))
+               (let ((init (parse-node p (car (cdr b)) f)))
+                 (push! inits init)
+                 (push! vars (bind-local! p (car b) f)))))
+         [:let off vars inits (parse-node p (car (cdr args)) f)]))
+      ((fn) [:fn off (parse-function p x f)])
+      ((call)
+       (let ((split (take-flags args '(:tail))))
+         (let ((rest (get split 1)))
+           (unless (pair? rest) (parse-fail "call needs a function" x))
+           [:call off (parse-node p (car rest) f) (parse-nodes p (cdr rest) f) (flag (get split 0) :tail)])))
+      ((gcall bcall)
+       (let ((split (take-flags args '(:tail :check :tail-position))))
+         (let ((found (get split 0))
+               (rest (get split 1)))
+           (unless (pair? rest) (parse-fail "call needs a callee" x))
+           (let ((callee (if (eq? (car x) 'gcall)
+                             (cell-of (car rest))
+                             (builtin-value (car rest)))))
+             [(if (eq? (car x) 'gcall)
+                  :gcall
+                  :bcall)
+              off
+              callee
+              (parse-nodes p (cdr rest) f)
+              (flag found :tail)
+              (flag found :check)
+              (flag found :tail-position)]))))
+      ((prim)
+       (unless (and (pair? args) (symbol? (car args))) (parse-fail "prim needs a name" x))
+       [:prim off (car args) (parse-nodes p (cdr args) f)])
+      ((gprim)
+       (unless (and (pair? args) (symbol? (car args)) (pair? (cdr args)))
+         (parse-fail "gprim needs a name and global" x))
+       [:gprim off (car args) (cell-of (car (cdr args))) (parse-nodes p (cdr (cdr args)) f)])
+      ((known)
+       (let ((split (take-flags args '(:tail))))
+         (let ((rest (get split 1)))
+           (unless (and (pair? rest) (symbol? (car rest)) (pair? (cdr rest)))
+             (parse-fail "known needs a name and global" x))
+           [:known off
+            (car rest)
+            (cell-of (car (cdr rest)))
+            (parse-nodes p (cdr (cdr rest)) f)
+            (flag (get split 0) :tail)])))
+      ((loop) (parse-loop p x f off))
+      ((recur)
+       (unless (pair? args) (parse-fail "recur needs a loop" x))
+       (let ((loop ((local-of p (car args)) :loop)))
+         (unless loop (parse-fail "recur of a variable that names no loop" x))
+         [:recur off loop (parse-nodes p (cdr args) f)]))
+      ((while) (expect x 3) [:while off (parse-node p (car args) f) (parse-node p (car (cdr args)) f)])
+      ((try) (parse-try p x f off))
+      ((cleanup)
+       (let ((split (take-flags args '(:outcome))))
+         (let ((rest (get split 1)))
+           (expect rest 2)
+           [:cleanup off (parse-node p (car rest) f) (flag (get split 0) :outcome) (parse-node p (car (cdr rest)) f)])))
+      ((handlers with-params restarts)
+       (expect x 3)
+       (unless (proper-list? (car args)) (parse-fail "malformed clauses" x))
+       (let ((clauses (list-to-array (map (fn (c)
+                                            (expect c
+                                                    (if (eq? (car x) 'restarts)
+                                                        3
+                                                        2))
+                                            (parse-nodes p c f))
+                                          (car args)))))
+         [(get {'handlers :handlers 'with-params :params 'restarts :restarts} (car x))
+          off
+          clauses
+          (parse-node p (car (cdr args)) f)]))
+      ((make-param) (expect x 3) [:make-param off (parse-node p (car args) f) (parse-node p (car (cdr args)) f)])
+      ((evaluator unbound class-object)
+       (expect x 1)
+       [(get {'evaluator :evaluator 'unbound :unbound 'class-object :class-object} (car x)) off])
+      (else (parse-fail "unknown form" x)))))
+
+(def (builtin-value x)
+  (cond
+    ((int? x) x)
+    ((string? x) (%native-builtin x))
+    (else (parse-fail "expected a builtin name" x))))
+
+(def (parse-loop p x f off)
+  (expect x 4)
+  (let ((bindings (car (cdr (cdr x)))))
+    (unless (proper-list? bindings) (parse-fail "malformed loop bindings" x))
+    (let ((inits (list-to-array (map (fn (b)
+                                       (expect b 2)
+                                       (parse-node p (car (cdr b)) f))
+                                     bindings)))
+          (index (p :loops)))
+      (put! p :loops (+ index 1))
+      (let ((loop {:fn f :vars [] :index index}))
+        (let ((lv (bind-local! p (car (cdr x)) f)))
+          (put! lv :loop loop)
+          (put! loop :var lv))
+        (for ((b :in bindings))
+          (push! (loop :vars) (bind-local! p (car b) f)))
+        [:loop off loop inits (parse-node p (car (cdr (cdr (cdr x)))) f)]))))
+
+(def (parse-try p x f off)
+  (unless (>= (length x) 3) (parse-fail "malformed try" x))
+  (let ((body (parse-node p (car (cdr x)) f))
+        (var (bind-local! p (car (cdr (cdr x))) f)))
+    [:try off
+     body
+     var
+     (list-to-array (map (fn (c)
+                           (case (and (pair? c) (car c))
+                             ((catch)
+                              (expect c 3)
+                              (let ((bound (bind-local! p (car (cdr c)) f)))
+                                [nil bound (parse-node p (car (cdr (cdr c))) f)]))
+                             ((catch-if)
+                              (expect c 4)
+                              (let ((pred (parse-node p (car (cdr c)) f)))
+                                (let ((bound (bind-local! p (car (cdr (cdr c))) f)))
+                                  [pred bound (parse-node p (car (cdr (cdr (cdr c)))) f)])))
+                             (else (parse-fail "malformed catch clause" c))))
+                         (cdr (cdr (cdr x)))))]))
+
+(def (parse-function p x parent)
+  (unless (and (proper-list? x) (eq? (car x) 'fn) (pair? (cdr x))) (parse-fail "malformed fn" x))
+  (let ((info (cv/make-fn (car (cdr x)) parent (p :offset)))
+        (rest (cdr (cdr x))))
+    (when (and (pair? rest) (eq? (car rest) :self))
+      (unless (pair? (cdr rest)) (parse-fail "malformed fn" x))
+      (let ((self (bind-local! p (car (cdr rest)) info)))
+        (put! self :self #t)
+        (put! info :self self))
+      (set! rest (cdr (cdr rest))))
+    (expect rest 2)
+    (let walk ((ps (car rest))
+               (optional #f))
+      (cond
+        ((null? ps) nil)
+        ((symbol? ps) (put! info :rest (bind-local! p ps info)))
+        ((not (pair? ps)) (parse-fail "malformed parameters" x))
+        ((eq? (car ps) '&optional) (walk (cdr ps) #t))
+        (optional (expect (car ps) 2)
+                  (let ((default (parse-node p (car (cdr (car ps))) info)))
+                    (push! (info :optionals) [(bind-local! p (car (car ps)) info) default]))
+                  (walk (cdr ps) #t))
+        (else (push! (info :params) (bind-local! p (car ps) info)) (walk (cdr ps) #f))))
+    (put! info :body (parse-node p (car (cdr rest)) info))
+    info))
+
+;; --- Verifying ---------------------------------------------------------------
+
+;; Check a function record convert-top returned, or a pass rewrote: every
+;; node has its shape, every local reference is in scope of its binding and
+;; owned by an enclosing function, no variable is bound twice, recur is only
+;; in tail position of its loop with its loop's number of arguments, and each
+;; function's :captures are its free variables. Raises an error describing
+;; the first problem; returns info.
+(def (verify info)
+  ;; :bound and :scope hold variable ids; :frames is a list of [function free],
+  ;; innermost first, free a table of the variables it uses from outside.
+  (let ((v {:bound {} :scope {} :frames '()}))
+    (unless (table? info) (verify-fail "expected a function record" info nil))
+    (verify-function v info nil)
+    info))
+
+(def (verify-fail message node detail)
+  (error (str "tree IR: "
+              message
+              (if (and (array? node) (> (length node) 1))
+                  (str " in " (get node 0) " at " (get node 1))
+                  "")
+              (if (nil? detail)
+                  ""
+                  (str ": " detail)))))
+
+(def (var? x)
+  (and (table? x) (int? (x :id)) (symbol? (x :name))))
+
+(def (bind-var! v var node f)
+  (unless (var? var) (verify-fail "expected a variable" node var))
+  (when (get (v :bound) (var :id)) (verify-fail "variable bound twice" node (var :name)))
+  (unless (eq? (var :owner) f) (verify-fail "variable owned by another function" node (var :name)))
+  (put! (v :bound) (var :id) #t)
+  (put! (v :scope) (var :id) #t))
+
+(def (unbind! v var)
+  (put! (v :scope) (var :id) nil))
+
+;; A use of var in f: in scope, and free in each function up to its owner.
+(def (use-var! v var node)
+  (unless (var? var) (verify-fail "expected a variable" node var))
+  (unless (get (v :scope) (var :id)) (verify-fail "variable out of scope" node (var :name)))
+  (let up ((frames (v :frames)))
+    (cond
+      ((null? frames) (verify-fail "variable owned by no enclosing function" node (var :name)))
+      ((eq? (get (car frames) 0) (var :owner)) nil)
+      (else (put! (get (car frames) 1) (var :id) var) (up (cdr frames))))))
+
+(def (shape node n)
+  (unless (= (length node) n) (verify-fail "wrong number of fields" node (length node))))
+
+(def (check-flag node i)
+  (unless (boolean? (get node i)) (verify-fail "expected a boolean flag" node i)))
+
+(def (check-cell node i)
+  (unless (int? (get node i)) (verify-fail "expected a global cell" node i)))
+
+(def (check-nodes v nodes node f)
+  (unless (array? nodes) (verify-fail "expected an array of nodes" node nil))
+  (for ((n :in nodes))
+    (check v n f '())))
+
+(def (verify-function v info parent)
+  (unless (and (table? info) (array? (info :params)) (array? (info :optionals)) (array? (info :captures)))
+    (verify-fail "malformed function record" nil (info :name)))
+  (unless (eq? (info :parent) parent) (verify-fail "function's parent is not its enclosing function" nil (info :name)))
+  (let ((free {})
+        (bound []))
+    (put! v :frames (cons [info free] (v :frames)))
+    (when (info :self)
+      (bind-var! v (info :self) nil info)
+      (push! bound (info :self)))
+    (for ((var :in (info :params)))
+      (bind-var! v var nil info)
+      (push! bound var))
+    (for ((pair :in (info :optionals)))
+      (unless (and (array? pair) (= (length pair) 2)) (verify-fail "malformed optional" nil (info :name)))
+      (check v (get pair 1) info '())
+      (bind-var! v (get pair 0) nil info)
+      (push! bound (get pair 0)))
+    (when (info :rest)
+      (bind-var! v (info :rest) nil info)
+      (push! bound (info :rest)))
+    (check v (info :body) info '())
+    (for ((var :in bound))
+      (unbind! v var))
+    (put! v :frames (cdr (v :frames)))
+    (let ((captures (info :captures))
+          (seen {}))
+      (for ((var :in captures))
+        (unless (var? var) (verify-fail "capture is not a variable" nil (info :name)))
+        (when (get seen (var :id)) (verify-fail "variable captured twice" nil (var :name)))
+        (unless (get free (var :id)) (verify-fail "capture of a variable the function doesn't use" nil (var :name)))
+        (put! seen (var :id) #t))
+      (for ((id var :in free))
+        (unless (get seen id) (verify-fail "free variable missing from captures" nil (var :name)))))))
+
+;; Check node in f. loops are the loops node is in tail position of.
+(def (check v node f loops)
+  (unless (and (array? node) (> (length node) 1) (keyword? (get node 0)) (int? (get node 1)))
+    (verify-fail "expected a node" nil node))
+  (case (get node 0)
+    ((:const) (shape node 3))
+    ((:unbound :evaluator :class-object) (shape node 2))
+    ((:lref) (shape node 4) (check-flag node 3) (use-var! v (get node 2) node))
+    ((:lset) (shape node 4) (check v (get node 3) f '()) (use-var! v (get node 2) node))
+    ((:gref) (shape node 3) (check-cell node 2))
+    ((:gset :gdef) (shape node 4) (check-cell node 2) (check v (get node 3) f '()))
+    ((:if) (shape node 5) (check v (get node 2) f '()) (check v (get node 3) f loops) (check v (get node 4) f loops))
+    ((:seq)
+     (shape node 3)
+     (let ((nodes (get node 2)))
+       (unless (and (array? nodes) (> (length nodes) 0)) (verify-fail "expected nodes" node nil))
+       (dotimes (i (length nodes))
+         (check v
+                (get nodes i)
+                f
+                (if (= i (- (length nodes) 1))
+                    loops
+                    '())))))
+    ((:let)
+     (shape node 5)
+     (let ((vars (get node 2))
+           (inits (get node 3)))
+       (unless (and (array? vars) (array? inits) (= (length vars) (length inits)))
+         (verify-fail "let needs as many initializers as variables" node nil))
+       (dotimes (i (length vars))
+         ;; A function may refer to the variable it initializes.
+         (if (eq? (get (get inits i) 0) :fn)
+             (begin
+               (bind-var! v (get vars i) node f)
+               (check v (get inits i) f '()))
+             (begin
+               (check v (get inits i) f '())
+               (bind-var! v (get vars i) node f))))
+       (check v (get node 4) f loops)
+       (for ((var :in vars))
+         (unbind! v var))))
+    ((:fn) (shape node 3) (verify-function v (get node 2) f))
+    ((:call) (shape node 5) (check-flag node 4) (check v (get node 2) f '()) (check-nodes v (get node 3) node f))
+    ;; convert leaves out a :gcall's last flag when it is false.
+    ((:gcall :bcall)
+     (unless (or (= (length node) 7) (and (eq? (get node 0) :gcall) (= (length node) 6)))
+       (verify-fail "wrong number of fields" node (length node)))
+     (check-cell node 2)
+     (check-flag node 4)
+     (check-flag node 5)
+     (when (= (length node) 7) (check-flag node 6))
+     (check-nodes v (get node 3) node f))
+    ((:prim)
+     (shape node 4)
+     (unless (symbol? (get node 2)) (verify-fail "expected a primitive's name" node nil))
+     (check-nodes v (get node 3) node f))
+    ((:gprim :known)
+     (shape node
+            (if (eq? (get node 0) :known)
+                6
+                5))
+     (unless (symbol? (get node 2)) (verify-fail "expected a name" node nil))
+     (check-cell node 3)
+     (when (eq? (get node 0) :known) (check-flag node 5))
+     (check-nodes v (get node 4) node f))
+    ((:loop)
+     (shape node 5)
+     (let ((loop (get node 2))
+           (inits (get node 3)))
+       (unless (and (table? loop) (array? (loop :vars)) (array? inits) (= (length (loop :vars)) (length inits)))
+         (verify-fail "loop needs as many initializers as variables" node nil))
+       (unless (eq? (loop :fn) f) (verify-fail "loop of another function" node nil))
+       (unless (and (var? (loop :var)) (eq? ((loop :var) :loop) loop))
+         (verify-fail "loop's variable doesn't name it" node nil))
+       (check-nodes v inits node f)
+       (bind-var! v (loop :var) node f)
+       (for ((var :in (loop :vars)))
+         (bind-var! v var node f))
+       (check v (get node 4) f (cons loop loops))
+       (unbind! v (loop :var))
+       (for ((var :in (loop :vars)))
+         (unbind! v var))))
+    ((:recur)
+     (shape node 4)
+     (let ((loop (get node 2)))
+       (unless (memq loop loops) (verify-fail "recur not in tail position of its loop" node nil))
+       (unless (and (array? (get node 3)) (= (length (get node 3)) (length (loop :vars))))
+         (verify-fail "recur needs one argument per loop variable" node nil))
+       (check-nodes v (get node 3) node f)))
+    ((:while) (shape node 4) (check v (get node 2) f '()) (check v (get node 3) f '()))
+    ((:try)
+     (shape node 5)
+     (check v (get node 2) f '())
+     (bind-var! v (get node 3) node f)
+     (unless (array? (get node 4)) (verify-fail "expected catch clauses" node nil))
+     (for ((clause :in (get node 4)))
+       (unless (and (array? clause) (= (length clause) 3)) (verify-fail "malformed catch clause" node nil))
+       (when (get clause 0) (check v (get clause 0) f '()))
+       (bind-var! v (get clause 1) node f)
+       (check v (get clause 2) f loops)
+       (unbind! v (get clause 1)))
+     (unbind! v (get node 3)))
+    ((:cleanup) (shape node 5) (check-flag node 3) (check v (get node 2) f '()) (check v (get node 4) f '()))
+    ((:handlers :params :restarts)
+     (shape node 4)
+     (unless (array? (get node 2)) (verify-fail "expected clauses" node nil))
+     (for ((clause :in (get node 2)))
+       (unless (and (array? clause)
+                    (= (length clause)
+                       (if (eq? (get node 0) :restarts)
+                           3
+                           2)))
+         (verify-fail "malformed clause" node nil))
+       (check-nodes v clause node f))
+     (check v (get node 3) f '()))
+    ((:make-param) (shape node 4) (check v (get node 2) f '()) (check v (get node 3) f '()))
+    (else (verify-fail "unknown node" node nil))))
+
+;; --- Copying -----------------------------------------------------------------
+
+;; Copies' loops are numbered down from -1, apart from convert's.
+(def- *copied-loops* 0)
+
+;; A copy of node with fresh variables and functions, to go in function
+;; owner. renames maps the ids of variables free in node to what the copy
+;; uses instead; the rest stay as they are. Run rescope on the result.
+(def (copy-node node owner &optional (renames {}))
+  (copy-tree {:vars (copy renames) :loops {}} node owner))
+
+;; A copy of a function record, to go inside parent.
+(def (copy-function info parent &optional (renames {}))
+  (copy-info {:vars (copy renames) :loops {}} info parent))
+
+(def (renamed c var)
+  (get (c :vars) (var :id) var))
+
+(def (fresh! c var owner)
+  (let ((new (cv/make-var (var :name) owner #t)))
+    (for ((key :in '(:captured :assigned :early :self)))
+      (when (var key) (put! new key (var key))))
+    (put! (c :vars) (var :id) new)
+    new))
+
+(def (copy-array c nodes owner)
+  (list-to-array (map (fn (n) (copy-tree c n owner)) (array-to-list nodes))))
+
+(def (copy-info c info parent)
+  (let ((new (cv/make-fn (info :name) parent (info :offset))))
+    (when (info :self) (put! new :self (fresh! c (info :self) new)))
+    (for ((v :in (info :params)))
+      (push! (new :params) (fresh! c v new)))
+    (for ((pair :in (info :optionals)))
+      (let ((default (copy-tree c (get pair 1) new))) (push! (new :optionals) [(fresh! c (get pair 0) new) default])))
+    (when (info :rest) (put! new :rest (fresh! c (info :rest) new)))
+    (put! new :body (copy-tree c (info :body) new))
+    (put! new :captures (list-to-array (map (fn (v) (renamed c v)) (array-to-list (info :captures)))))
+    new))
+
+(def (copy-tree c node owner)
+  (let ((kind (get node 0))
+        (off (get node 1)))
+    (case kind
+      ((:const :gref :unbound :evaluator :class-object) (copy node))
+      ((:lref) [:lref off (renamed c (get node 2)) (get node 3)])
+      ((:lset) (let ((value (copy-tree c (get node 3) owner))) [:lset off (renamed c (get node 2)) value]))
+      ((:gset :gdef) [kind off (get node 2) (copy-tree c (get node 3) owner)])
+      ((:if)
+       [:if off (copy-tree c (get node 2) owner) (copy-tree c (get node 3) owner) (copy-tree c (get node 4) owner)])
+      ((:seq) [:seq off (copy-array c (get node 2) owner)])
+      ((:let)
+       (let ((vars [])
+             (inits []))
+         (dotimes (i (length (get node 2)))
+           (let ((var (get (get node 2) i))
+                 (init (get (get node 3) i)))
+             (if (eq? (get init 0) :fn)
+                 (let ((new (fresh! c var owner)))
+                   (push! vars new)
+                   (push! inits (copy-tree c init owner)))
+                 (let ((new-init (copy-tree c init owner)))
+                   (push! inits new-init)
+                   (push! vars (fresh! c var owner))))))
+         [:let off vars inits (copy-tree c (get node 4) owner)]))
+      ((:fn) [:fn off (copy-info c (get node 2) owner)])
+      ((:call) [:call off (copy-tree c (get node 2) owner) (copy-array c (get node 3) owner) (get node 4)])
+      ((:gcall :bcall)
+       (let ((new (copy node)))
+         (put! new 3 (copy-array c (get node 3) owner))
+         new))
+      ((:prim) [:prim off (get node 2) (copy-array c (get node 3) owner)])
+      ((:gprim) [:gprim off (get node 2) (get node 3) (copy-array c (get node 4) owner)])
+      ((:known) [:known off (get node 2) (get node 3) (copy-array c (get node 4) owner) (get node 5)])
+      ((:loop)
+       (let ((loop (get node 2))
+             (inits (copy-array c (get node 3) owner)))
+         (set! *copied-loops* (- *copied-loops* 1))
+         (let ((new {:fn owner :vars [] :tail (loop :tail) :index *copied-loops*}))
+           (let ((lv (fresh! c (loop :var) owner)))
+             (put! lv :loop new)
+             (put! new :var lv))
+           (put! (c :loops) ((loop :var) :id) new)
+           (for ((v :in (loop :vars)))
+             (push! (new :vars) (fresh! c v owner)))
+           [:loop off new inits (copy-tree c (get node 4) owner)])))
+      ((:recur)
+       (let ((loop (get node 2)))
+         [:recur off (get (c :loops) ((loop :var) :id) loop) (copy-array c (get node 3) owner)]))
+      ((:while) [:while off (copy-tree c (get node 2) owner) (copy-tree c (get node 3) owner)])
+      ((:try)
+       (let ((body (copy-tree c (get node 2) owner))
+             (var (fresh! c (get node 3) owner)))
+         [:try off
+          body
+          var
+          (list-to-array (map (fn (clause)
+                                (let ((pred (and (get clause 0) (copy-tree c (get clause 0) owner))))
+                                  (let ((bound (fresh! c (get clause 1) owner)))
+                                    [pred bound (copy-tree c (get clause 2) owner)])))
+                              (array-to-list (get node 4))))]))
+      ((:cleanup) [:cleanup off (copy-tree c (get node 2) owner) (get node 3) (copy-tree c (get node 4) owner)])
+      ((:handlers :params :restarts)
+       [kind
+        off
+        (list-to-array (map (fn (clause) (copy-array c clause owner)) (array-to-list (get node 2))))
+        (copy-tree c (get node 3) owner)])
+      ((:make-param) [:make-param off (copy-tree c (get node 2) owner) (copy-tree c (get node 3) owner)])
+      (else (error "tree IR: unknown node" kind)))))

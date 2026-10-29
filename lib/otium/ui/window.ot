@@ -332,7 +332,7 @@ follow the swapchain's vsync rather than the poll interval."
     (set! running? #t)
     (unwind-protect
       (while (pair? (ui/windows))
-        (dev/service!)
+        (unless dev/%threaded (dev/service!))
         (for-each (fn (window)
                     (unless (get window :closed?)
                       (dev/begin!)

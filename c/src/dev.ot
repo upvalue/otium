@@ -13,6 +13,8 @@
 
 (defonce %output-port nil)
 
+(defonce %output-worker nil)
+
 (def (%flush-output!)
   (when %output-port (flush-output-port %output-port))
   (unless (equal? %output "")
@@ -48,6 +50,22 @@
                       (f form start))
                     (loop)))))))
 
+(def- (run-form space form)
+  (cond
+    ((not %threaded) (%eval-in space form))
+    ((and (pair? form) (eq? (car form) 'begin))
+     (let ((result nil))
+       (for ((child :in (cdr form)))
+         (set! result (run-form space child))
+         (set! space (current-ns)))
+       result))
+    (else (let ((prepared (%prepare-in space form)))
+            (cond
+              ((= (get prepared 0) 1) ((get prepared 1)))
+              ((= (get prepared 0) 2) (run-form space (get prepared 1)))
+              ((= (get prepared 0) 3) ((get prepared 1)) nil)
+              (else (get prepared 1)))))))
+
 (def (%evaluate code space path)
   "Evaluate each form in code, in the namespace named space, capturing output and any condition."
   (let ((output (open-output-string))
@@ -64,7 +82,8 @@
           (each-form code
                      (fn (form start)
                        (set! line start)
-                       (set! results (cons (%repr (%eval-in space form)) results))
+                       (set! results (cons (%repr (run-form space form)) results))
+                       (when %threaded (set! space (current-ns)))
                        (when (and (pair? form) (eq? (car form) 'ns) (pair? (cdr form)) (symbol? (cadr form)))
                          (set! space (cadr form)))))
           (catch c
@@ -85,7 +104,7 @@
   "The interrupt handler while serving: a signal interrupts, and a timer tick checks for requests and the watchdog."
   (cond
     ((= reason 1) #t)
-    ((or (not %active) %busy) #f)
+    ((or %threaded (not %active) %busy) #f)
     (else (%flush-output!)
           (when (or (> (%transport-poll 0) 0) (and (> %deadline-at 0) (>= (%clock) %deadline-at)))
             (let ((abort? (begin
@@ -98,23 +117,43 @@
               (when abort? (error "evaluation aborted"))))
           #f)))
 
-(def (%start! path timeout)
+(def (%start! path timeout threaded?)
   "Open the development socket and copy output printed outside requests to clients."
   (listen! path timeout)
   (set! %active #t)
+  (set! %threaded threaded?)
   (let ((original (current-output-port)))
+    (when %threaded
+      (set! %output-worker
+            (thread/daemon! (thread/spawn-named :dev-output (fn ()
+                                                              (let loop ()
+                                                                (thread/receive (text (unless (eq? text :stop)
+                                                                                        (write-string text original)
+                                                                                        (flush-output-port original)
+                                                                                        (loop))))))))))
     (set! %output-port
           (make-output-port "dev-output"
                             {:write (fn (bytes start end)
-                                      (write-bytevector bytes original start end)
-                                      (flush-output-port original)
-                                      (set! %output (string-append %output (utf8->string bytes start end)))
+                                      (let ((text (utf8->string bytes start end)))
+                                        (if %threaded
+                                            (thread/send %output-worker text)
+                                            (begin
+                                              (write-bytevector bytes original start end)
+                                              (flush-output-port original)))
+                                        (set! %output (string-append %output text)))
                                       (- end start))}))
-    (%eval-in 'otium.core (list 'defparam 'current-output-port %output-port))))
+    (%eval-in 'otium.core (list 'defparam 'current-output-port %output-port)))
+  (when %threaded (%start-thread!)))
 
-(def (%stop!)
+(def (%stop! &optional (cancel? #f))
   (when %active
     (%flush-output!)
+    (when (and %threaded %server) (thread/kill! %server))
+    (when (and %threaded %output-worker)
+      (if cancel?
+          (thread/kill! %output-worker)
+          (thread/send %output-worker :stop))
+      (thread/join %output-worker))
     (set! %active #f)
     (%close)))
 

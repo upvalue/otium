@@ -1,0 +1,12 @@
+(require otium.thread :as thread :refer (spawn sleep))
+(def target (spawn (fn () (sleep 10) :done)))
+(def handled #f)
+(thread/interrupt! target
+  (fn ()
+    (let ((worker (spawn (fn () (sleep 0.01) :answer))))
+      (set! handled (thread/join worker)))))
+(sleep 0.1)
+(unless (eq? handled :answer) (error "interrupt could not join" handled))
+(thread/kill! target)
+(thread/join target)
+(println "checks passed")

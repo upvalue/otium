@@ -1,0 +1,7 @@
+(require otium.thread :as thread :refer (spawn sleep))
+(def worker (spawn (fn () (sleep 30))))
+(defer
+  (begin
+    (println "ready")
+    (thread/join worker))
+  (println "main cleanup"))

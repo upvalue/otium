@@ -1,0 +1,7 @@
+(require otium.thread :as thread :refer (spawn sleep))
+(def port (current-input-port))
+(def worker (spawn (fn () (sleep 0.01) (close-port port))))
+(try
+  (read-line port)
+  (catch (error? problem) (println (:reason problem))))
+(thread/join worker)

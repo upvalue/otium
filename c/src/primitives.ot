@@ -148,9 +148,11 @@
 (def (write . values) (apply write-to (current-output-port) values))
 (def (newline &optional (port (current-output-port))) (write-char #\newline port))
 (def (println . values)
-  (let ((port (current-output-port)))
-    (apply display-to port values)
-    (write-char #\newline port)))
+  (let ((port (current-output-port))
+        (line (open-output-string)))
+    (apply display-to line values)
+    (write-char #\newline line)
+    (write-string (get-output-string line) port)))
 
 (def (close-input-port port)
   (when (output-port? port) (error "close-input-port: wrong port direction"))
@@ -174,6 +176,7 @@
 ;; rather than in c/src/dev.ot, which only the development server loads.
 (ns otium.dev)
 (defonce %active #f)
+(defonce %threaded #f)
 ;; When the running request or frame should pause, in %clock milliseconds; 0
 ;; means never.
 (defonce %deadline-at 0)

@@ -1,0 +1,21 @@
+(require otium.thread :as thread :refer (spawn sleep))
+(require otium.process :as process)
+
+(def mode (car (process/arguments)))
+
+(def bytes #u8(0 0 0 0 0))
+
+(def observer
+  (spawn (fn ()
+           (sleep 0.02)
+           (write-to (current-error-port) bytes)
+           (write-string "\n" (current-error-port)))))
+
+(cond
+  ((equal? mode "char") (println (read-char)))
+  ((equal? mode "chars") (println (read-string 2)))
+  ((equal? mode "datum") (let ((datum (read))) (println (string-length (car datum)) (cadr datum))))
+  ((equal? mode "bytes") (println (read-bytevector! bytes)) (write bytes) (newline))
+  ((equal? mode "line") (println (read-line)))
+  (else (error "unknown mode")))
+(thread/join observer)

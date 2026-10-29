@@ -1,0 +1,19 @@
+(require otium.thread :as thread)
+
+(def (check expected actual)
+  (unless (equal? expected actual) (error "fd wait mismatch" expected actual)))
+
+(def (fails? f)
+  (try
+    (f)
+    #f
+    (catch (error? _) #t)))
+
+(check :timeout (%wait-fds [] (%thread-deadline 0.001)))
+(check #t (fails? (fn () (%wait-fds [0] nil))))
+(check #t (fails? (fn () (%wait-fds [0 0] nil))))
+(check #t (fails? (fn () (%wait-fds [0 4] nil))))
+(check #t (fails? (fn () (%wait-fds [-1 1] nil))))
+(check [999999 4] (%wait-fds [999999 1] nil))
+(check [1 2] (%wait-fds [1 2] nil))
+(println "checks passed")

@@ -1,0 +1,10 @@
+(require otium.thread :as thread :refer (spawn))
+
+(def writer (spawn (fn () (write-string (string-repeat "x" 100000)))))
+
+(let wait ()
+  (unless (eq? (thread/status writer) :waiting)
+    (thread/yield)
+    (wait)))
+(write-string "ready\n" (current-error-port))
+(read-line)

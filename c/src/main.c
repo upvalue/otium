@@ -353,7 +353,7 @@ static bool load_dev(ot_state* rt) {
   return ot_eval(rt, "(ns user)", 9, &result);
 }
 
-static bool start_dev(ot_state* rt, const options* o) {
+static bool start_dev(ot_state* rt, const options* o, bool native) {
   /* The path is passed as Otium source, so write it as a string literal. */
   size_t length = strlen(o->dev_path);
   char* source = malloc(length * 2 + 64);
@@ -363,7 +363,7 @@ static bool start_dev(ot_state* rt, const options* o) {
     if (*c == '"' || *c == '\\') *p++ = '\\';
     *p++ = *c;
   }
-  sprintf(p, "\" %u)", o->watchdog);
+  sprintf(p, "\" %u %s)", o->watchdog, native ? "#t" : "#f");
   ot_value result;
   bool ok = ot_eval(rt, source, strlen(source), &result);
   free(source);
@@ -371,8 +371,9 @@ static bool start_dev(ot_state* rt, const options* o) {
   if (!ot_set_interrupt_handler(rt, "otium.dev/%interrupt") ||
       !ot_set_load_hook(rt, "otium.dev/record-load!"))
     return false;
-  /* The tick counts process CPU time, so it never interrupts a blocking call
-   * and costs nothing while the program waits. */
+  if (native) return true;
+  /* The VM keeps the legacy service hook. The tick counts process CPU time,
+   * so it never interrupts a blocking call and costs nothing while waiting. */
   struct sigaction action = {0};
   action.sa_handler = tick_handler;
   action.sa_flags = SA_RESTART | SA_ONSTACK;
@@ -387,8 +388,8 @@ static void stop_dev(ot_state* rt) {
   struct itimerval off = {{0, 0}, {0, 0}};
   setitimer(ITIMER_VIRTUAL, &off, NULL);
   if (interrupt_requested == 2) interrupt_requested = 0;
-  ot_value result;
-  ot_call(rt, "otium.dev/%stop!", NULL, 0, &result);
+  ot_value result, cancel = ot_bool(ot_interrupted(rt));
+  ot_call(rt, "otium.dev/%stop!", &cancel, 1, &result);
   ot_set_interrupt_handler(rt, NULL);
   ot_set_load_hook(rt, NULL);
 }
@@ -471,8 +472,8 @@ static ssize_t edited_line(const char* prompt, char** line, size_t* capacity) {
  * requests are served while the REPL waits. Otherwise lines come from the
  * standard input port and evaluation stops at an interrupt. */
 static bool repl(ot_state* rt, bool dev, bool native) {
-  bool terminal = ot_line_interactive(), editing = terminal || dev, ok = true;
-  if (dev) ot_line_set_service(dev_service, rt);
+  bool terminal = ot_line_interactive(), editing = (terminal || dev) && !(dev && native), ok = true;
+  if (dev && !native) ot_line_set_service(dev_service, rt);
 #if defined(__aarch64__)
   const char* machine = "native arm64";
 #elif defined(__x86_64__)
@@ -657,7 +658,7 @@ int main(int argc, char** argv) {
     if (!ok) fprintf(stderr, "cannot load core: %s\n", ot_error(rt));
   }
   if (ok && (dev || o.server) && !(ok = load_dev(rt))) report_error(rt, "<dev>");
-  if (ok && dev && !(ok = start_dev(rt, &o))) {
+  if (ok && dev && !(ok = start_dev(rt, &o, native))) {
     int exit_status;
     if (!ot_interrupted(rt) && !ot_exit_status(rt, &exit_status)) report_error(rt, "<dev>");
     dev = false;

@@ -1,0 +1,19 @@
+(require otium.thread :as thread)
+(require otium.process :as process)
+
+(def worker
+  (thread/spawn (fn ()
+                  (thread/sleep 0.01)
+                  (write-string "ready\n" (current-error-port)))))
+
+(def text (string-repeat "x" 100000))
+
+(if (equal? (car (process/arguments)) "write")
+    (write text)
+    (display text))
+
+(def interrupted #f)
+
+(thread/interrupt! (thread/self) (fn () (set! interrupted #t)))
+(unless interrupted (error "output left a stale wake result"))
+(thread/join worker)

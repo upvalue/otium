@@ -1,0 +1,7 @@
+(require otium.thread :as thread :refer (spawn sleep))
+(def worker
+  (spawn (fn ()
+           (sleep 0.01)
+           (write-string "ready\n" (current-error-port)))))
+(write-string (string-repeat "x" 100000))
+(thread/join worker)

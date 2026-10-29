@@ -1,5 +1,9 @@
 #include "internal.h"
 #include <errno.h>
+#ifndef OTIUM_FREESTANDING
+#include <fcntl.h>
+#include <unistd.h>
+#endif
 #include <inttypes.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -233,7 +237,24 @@ void ot_set_interrupt_flag(ot_state* rt, volatile sig_atomic_t* flag) {
 void ot_request_interrupt(ot_state* rt, int reason) {
   *rt->interrupt_flag = reason;
   /* Every stack check at a function entry or loop head now fails. */
-  rt->native.limit = UINTPTR_MAX;
+  __atomic_store_n(&rt->poll_limit, UINTPTR_MAX, __ATOMIC_RELAXED);
+#ifndef OTIUM_FREESTANDING
+  int saved = errno;
+  if (rt->wake_pipe[1] >= 0) {
+    char byte = 0;
+    (void)write(rt->wake_pipe[1], &byte, 1);
+  }
+  errno = saved;
+#endif
+}
+
+void oti_drain_wake(ot_state* rt) {
+#ifndef OTIUM_FREESTANDING
+  char bytes[128];
+  while (read(rt->wake_pipe[0], bytes, sizeof(bytes)) > 0) {}
+#else
+  (void)rt;
+#endif
 }
 
 bool ot_set_frame_limit(ot_state* rt, size_t frames) {
@@ -317,6 +338,7 @@ void oti_visit_exec(ot_state* rt, oti_exec* x, oti_root_visitor visit, void* con
   for (size_t i = 0; i < x->cleanup_count; i++) visit(context, &x->cleanups[i]);
   for (size_t i = 0; i < 2 * x->param_count; i++) visit(context, &x->params[i]);
   visit(context, &x->condition_values[0]);
+  visit(context, &x->pending_output);
   for (size_t i = 0; i < 4; i++) visit(context, &x->error.slots[i]);
   for (size_t i = 0; i < x->unwind_count; i++) {
     oti_unwind_save* u = &x->unwinds[i];
@@ -546,7 +568,27 @@ static void free_state(ot_state* rt) {
 ot_state* ot_create(size_t bytes, size_t stack_limit) {
   ot_state* rt = allocate_state();
   if (!rt) return NULL;
+  rt->wake_pipe[0] = rt->wake_pipe[1] = -1;
+#ifndef OTIUM_FREESTANDING
+  if (pipe(rt->wake_pipe)) {
+    free_state(rt);
+    return NULL;
+  }
+  for (size_t i = 0; i < 2; i++) {
+    if (fcntl(rt->wake_pipe[i], F_SETFL, O_NONBLOCK) < 0 ||
+        fcntl(rt->wake_pipe[i], F_SETFD, FD_CLOEXEC) < 0) {
+      close(rt->wake_pipe[0]);
+      close(rt->wake_pipe[1]);
+      free_state(rt);
+      return NULL;
+    }
+  }
+#endif
   if (!oti_heap_init(&rt->heap, bytes)) {
+#ifndef OTIUM_FREESTANDING
+    close(rt->wake_pipe[0]);
+    close(rt->wake_pipe[1]);
+#endif
     free_state(rt);
     return NULL;
   }
@@ -570,7 +612,7 @@ ot_state* ot_create(size_t bytes, size_t stack_limit) {
   rt->heap.hook_data = rt;
   oti_roots_push(&rt->heap, &rt->constant_roots, NULL, 0);
   rt->restart_transfer[0] = rt->restart_transfer[1] = OT_NIL;
-  rt->condition_values[0] = rt->condition_types = OT_NIL;
+  rt->condition_values[0] = rt->condition_types = rt->pending_output = OT_NIL;
   oti_clear_error(rt);
   for (size_t i = 0; i < C_COUNT; i++) rt->classes[i] = OT_NIL;
   oti_roots_push(&rt->heap, &rt->class_roots, rt->classes, C_COUNT);
@@ -613,6 +655,10 @@ void ot_destroy(ot_state* rt) {
   oti_modules_destroy(rt);
   oti_natives_destroy(rt);
   oti_threads_destroy(rt);
+#ifndef OTIUM_FREESTANDING
+  close(rt->wake_pipe[0]);
+  close(rt->wake_pipe[1]);
+#endif
 #ifdef OTIUM_NATIVE
   oti_boot_destroy(rt);
   oti_native_destroy(rt);
@@ -671,7 +717,7 @@ static bool document(ot_state* rt, uint32_t index, const oti_ast* doc) {
  * it. */
 static bool load_boot(ot_state* rt);
 
-static bool native_evaluate(ot_state* rt, const oti_ast* form, ot_value* result) {
+static bool native_evaluate(ot_state* rt, const oti_ast* form, ot_value* result, bool prepare) {
   /* The compiler lives in the boot file, which a host that never loaded the
    * core library hasn't loaded either. */
   if (!rt->boot) {
@@ -697,16 +743,27 @@ static bool native_evaluate(ot_state* rt, const oti_ast* form, ot_value* result)
   ot_value thunk = oti_native_invoke(rt, oti_global_value(rt, cell), 1);
   rt->compiling = compiling;
   if (!thunk || oti_failed(rt)) return false;
-  *result = oti_native_invoke(rt, thunk, 0);
+  *result = prepare ? thunk : oti_native_invoke(rt, thunk, 0);
   return *result != 0;
 }
 #endif
 
 /* Top-level begin forms are evaluated in order, so declarations from earlier
  * forms are visible before later forms are compiled. */
+static bool evaluate_raw_mode(ot_state* rt, const oti_ast* form, ot_value* result, int* prepared);
+
 static bool evaluate_raw(ot_state* rt, const oti_ast* form, ot_value* result) {
+  return evaluate_raw_mode(rt, form, result, NULL);
+}
+
+static bool evaluate_raw_mode(ot_state* rt, const oti_ast* form, ot_value* result, int* prepared) {
   if (form->kind == AST_LIST && !form->as.list.tail &&
       oti_ast_symbol(form->as.list.first, "begin") && form->as.list.first->next) {
+    if (prepared) {
+      *result = oti_ast_datum(rt, form, false);
+      *prepared = 2;
+      return *result != 0;
+    }
     size_t base = rt->sp;
     for (const oti_ast* child = form->as.list.first->next; child; child = child->next) {
       rt->sp = base;
@@ -797,7 +854,8 @@ static bool evaluate_raw(ot_state* rt, const oti_ast* form, ot_value* result) {
   }
 #ifdef OTIUM_NATIVE
   if (rt->native_mode) {
-    if (!native_evaluate(rt, form, result)) return false;
+    if (!native_evaluate(rt, form, result, prepared != NULL)) return false;
+    if (prepared) *prepared = 1;
   } else
 #endif
   {
@@ -826,7 +884,10 @@ static bool evaluate_raw(ot_state* rt, const oti_ast* form, ot_value* result) {
       }
     }
   }
-  if (once) *result = OT_NIL;
+  if (once) {
+    if (prepared && *prepared == 1) *prepared = 3;
+    else *result = OT_NIL;
+  }
   return true;
 }
 
@@ -834,23 +895,24 @@ bool oti_evaluate_form(ot_state* rt, const oti_ast* form, ot_value* result) {
   return evaluate_raw(rt, form, result);
 }
 
-static bool evaluate_expanded(ot_state* rt, const oti_ast* form, ot_value* result) {
-  if (!rt->shared_expander) return evaluate_raw(rt, form, result);
+static bool evaluate_expanded_mode(ot_state* rt, const oti_ast* form, ot_value* result,
+                                   int* prepared) {
+  if (!rt->shared_expander) return evaluate_raw_mode(rt, form, result, prepared);
   const oti_ast* head = form->kind == AST_LIST ? form->as.list.first : NULL;
   if (oti_ast_symbol(head, "begin") || oti_ast_symbol(head, "require") ||
       oti_ast_symbol(head, "ns"))
-    return evaluate_raw(rt, form, result);
+    return evaluate_raw_mode(rt, form, result, prepared);
   if (oti_ast_symbol(head, "defonce") && head->next && head->next->kind == AST_SYMBOL) {
     const oti_ast* name = head->next;
     uint32_t global =
         find_global(rt, rt->current_namespace, name->as.text.data, name->as.text.size);
     if (global != UINT32_MAX && rt->global_info[global].defined)
-      return evaluate_raw(rt, form, result);
+      return evaluate_raw_mode(rt, form, result, prepared);
   }
   oti_arena arena;
   oti_arena_init(&arena, OTI_SOURCE_LIMIT);
   oti_ast* expanded = oti_expand_form(rt, form, &arena);
-  bool ok = expanded && evaluate_raw(rt, expanded, result);
+  bool ok = expanded && evaluate_raw_mode(rt, expanded, result, prepared);
   oti_arena_destroy(&arena);
   return ok;
 }
@@ -862,7 +924,7 @@ static bool evaluate_top(ot_state* rt, const oti_ast* form, ot_value* result) {
     return false;
   bool evaluating = rt->evaluating;
   rt->evaluating = true;
-  bool ok = evaluate_expanded(rt, form, result);
+  bool ok = evaluate_expanded_mode(rt, form, result, NULL);
   if (!ok) oti_locate_error(rt, form->offset);
   rt->evaluating = evaluating;
   rt->sp = base;
@@ -870,6 +932,25 @@ static bool evaluate_top(ot_state* rt, const oti_ast* form, ot_value* result) {
   rt->stack[base] = *result;
   rt->sp = base + 1;
   return true;
+}
+
+ot_value oti_prepare_value(ot_state* rt, ot_value value, int* prepared) {
+  *prepared = 0;
+  if (rt->eval_depth >= 128) return oti_fail(rt, "eval nesting limit exceeded");
+  rt->eval_depth++;
+  oti_arena arena;
+  oti_arena_init(&arena, OTI_SOURCE_LIMIT);
+  oti_ast* form = oti_syntax_value(rt, value, &arena);
+  uint32_t source = rt->source;
+  size_t base = rt->sp;
+  rt->source = OTI_NO_SOURCE;
+  ot_value result = 0;
+  if (form && !evaluate_expanded_mode(rt, form, &result, prepared)) result = 0;
+  rt->sp = base;
+  rt->source = source;
+  rt->eval_depth--;
+  oti_arena_destroy(&arena);
+  return result;
 }
 
 ot_value oti_eval_value(ot_state* rt, ot_value value) {

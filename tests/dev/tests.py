@@ -3,6 +3,8 @@ import json
 import os
 from pathlib import Path
 import re
+import select
+import signal
 import socket
 import struct
 import subprocess
@@ -484,3 +486,95 @@ def source_forms(t):
         t.check_in(':line %d}' % line, c.response(ident))
     c.send(5, 'eval', code="(dev/source 'app.forms/fake)")
     t.check_in(':value "nil"', c.response(5))
+
+
+@test('dev concurrent threaded eval')
+def concurrent_threaded_eval(t):
+    if os.environ.get('OTIUM_VM'):
+        raise Skip('threads need native code')
+    server = serve(t, watchdog=0)
+    a, b = server.client, server.connect()
+    a.send(1, 'eval', code='(require otium.thread :as thread) (thread/join (thread/spawn (fn () (thread/sleep 0.2) 42)))')
+    b.send(2, 'eval', code='(+ 1 2)')
+    t.check_in(':value "3"', b.response(2))
+    t.check_in(':value "42"', a.response(1))
+
+
+@test('dev pause leaves peer running')
+def pause_leaves_peer_running(t):
+    if os.environ.get('OTIUM_VM'):
+        raise Skip('threads need native code')
+    server = serve(t, watchdog=0)
+    a, b = server.client, server.connect()
+    a.send(1, 'eval', code='(require otium.thread :as thread) (def ticks 0) (def peer (thread/spawn (fn () (let loop () (set! ticks (+ ticks 1)) (thread/sleep 0.005) (loop))))) (let loop () (loop))')
+    time.sleep(.05)
+    a.send(2, 'interrupt', eval=1)
+    t.check_in(':event :paused', a.read())
+    a.response(2)
+    b.send(3, 'eval', code='ticks')
+    first = b.response(3)
+    time.sleep(.05)
+    b.send(4, 'eval', code='ticks')
+    second = b.response(4)
+    one = int(re.search(r':value "(\d+)"', first).group(1))
+    two = int(re.search(r':value "(\d+)"', second).group(1))
+    t.check(two > one, 'peer stopped while eval paused', first, second)
+    a.send(5, 'abort', eval=1)
+    a.response(5)
+    t.check_in(':ok #f', a.response(1))
+    b.send(6, 'eval', code='(thread/kill! peer)')
+    b.response(6)
+
+
+@test('dev blocked stdout stays responsive')
+def blocked_stdout(t):
+    if os.environ.get('OTIUM_VM'):
+        raise Skip('threads need native code')
+    script = t.scratch / 'output.ot'
+    script.write_text('(require otium.thread :as thread)\n'
+                      '(write-string (string-repeat "x" 100000))\n'
+                      '(let wait () (unless (eq? (thread/status otium.dev/%output-worker) :waiting) (thread/yield) (wait)))\n'
+                      '(write-string "ready\\n" (current-error-port))\n')
+    server = Server(t, 'serve', str(script), watchdog=0)
+    ready, _, _ = select.select([server.process.stderr], [], [], 10)
+    t.check(ready and server.process.stderr.readline() == b'ready\n', 'output did not park')
+    c = server.client
+    c.send(1, 'eval', code='(+ 1 2)')
+    t.check_in(':value "3"', c.response(1))
+    server.process.send_signal(signal.SIGINT)
+    server.process.wait(timeout=2)  # Do not drain its full stdout pipe first.
+    t.check(server.process.returncode == 130, 'SIGINT did not cancel output forwarding')
+
+
+@test('dev prepared top-level forms')
+def prepared_top_level_forms(t):
+    server = serve(t, watchdog=0)
+    c = server.client
+    c.send(1, 'eval', code='(defonce once-value 10)')
+    t.check_in(':value "nil"', c.response(1))
+    c.send(2, 'eval', code='(defonce once-value 20) once-value')
+    t.check_in(':value "10"', c.response(2))
+    if not os.environ.get('OTIUM_VM'):
+        # Native preparation tracks namespaces through nested begin forms.
+        c.send(3, 'eval', code='(begin (ns prepared.forms) (def a 41)) (+ a 1)')
+        t.check_in(':value "42"', c.response(3))
+        c.send(4, 'eval', code='(require otium.thread :as thread) (defmacro wait-and-return (x) `(begin (thread/join (thread/spawn (fn () (thread/sleep 0.01)))) ,x)) (wait-and-return 17)')
+        t.check_in(':value "17"', c.response(4))
+
+
+@test('dev eval targets are per client')
+def eval_targets_per_client(t):
+    if os.environ.get('OTIUM_VM'):
+        raise Skip('threads need native code')
+    server = serve(t, watchdog=0)
+    a, b = server.client, server.connect()
+    for c in (a, b):
+        c.send(1, 'eval', code='(let loop () (loop))')
+        c.send(2, 'status')
+        c.response(2)
+    for c in (a, b):
+        c.send(3, 'interrupt', eval=1)
+        t.check_in(':ok #t', c.response(3))
+        c.send(4, 'abort', eval=1)
+        t.check_in(':ok #t', c.response(4))
+        t.check_in(':ok #f', c.response(1))

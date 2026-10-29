@@ -2,8 +2,9 @@
 ;;
 ;; Many threads of Otium code on one native thread, preempted at function
 ;; entries and loop heads. Waiting for a thread, a lock, a message or a timer
-;; parks only the waiting thread. I/O still blocks the whole process. See
-;; scratch/green-threads.md.
+;; parks only the waiting thread. POSIX fd ports also park on input and
+;; output readiness. Foreign calls and custom port callbacks still block.
+;; See scratch/threaded-io.md.
 ;;
 ;;   (require otium.thread :as thread :refer (spawn self sleep yield send receive))
 ;;

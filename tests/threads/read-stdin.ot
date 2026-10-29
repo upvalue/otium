@@ -1,0 +1,5 @@
+(require otium.thread :as thread :refer (spawn sleep))
+(def worker (spawn (fn () (sleep 0.05) (println "ready"))))
+(def line (read-line))
+(println (length line))
+(thread/join worker)

@@ -53,7 +53,7 @@ enum {
   NS_RET,      /* src */
   NS_ADDR,     /* dst label */
   NS_SPBASE,   /* dst offset */
-  NS_POLL,     /* label: jump there when the stack pointer is below native.limit */
+  NS_POLL,     /* label: jump there when the stack pointer is below poll_limit */
   NS_FMOV,     /* dst src, doubles */
   NS_FOP2,     /* op dst a b: add, sub, mul, div of doubles */
   NS_FCMPJ,    /* cond a b label, comparing doubles */
@@ -241,9 +241,10 @@ void oti_native_offsets(void) {
             "i"(offsetof(ot_state, native.argc)), "i"(offsetof(ot_state, native.segment)),
             "i"(offsetof(ot_state, native.stack_bytes)), "i"(offsetof(ot_state, native.base_limit)),
             "i"(offsetof(ot_state, native_runtime)), "i"(offsetof(oti_native_runtime, frames)),
-            "i"(FRAME_CACHE - 1), "i"(offsetof(oti_segment, prev)), "i"(offsetof(oti_segment, next)),
-            "i"(offsetof(oti_segment, size)), "i"(sizeof(oti_segment) + SEGMENT_MARGIN),
-            "i"(STACK_MAX), "i"(offsetof(ot_state, native.limit)), "i"(STACK_MAX >> 16));
+            "i"(FRAME_CACHE - 1), "i"(offsetof(oti_segment, prev)),
+            "i"(offsetof(oti_segment, next)), "i"(offsetof(oti_segment, size)),
+            "i"(sizeof(oti_segment) + SEGMENT_MARGIN), "i"(STACK_MAX),
+            "i"(offsetof(ot_state, poll_limit)), "i"(STACK_MAX >> 16));
 }
 
 
@@ -349,8 +350,8 @@ static void use_segment(ot_state* rt, oti_segment* s) {
   uintptr_t old = rt->native.base_limit;
   rt->native.segment = s;
   rt->native.base_limit = segment_limit(s);
-  __atomic_compare_exchange_n(&rt->native.limit, &old, rt->native.base_limit, false,
-                              __ATOMIC_RELAXED, __ATOMIC_RELAXED);
+  __atomic_compare_exchange_n(&rt->poll_limit, &old, rt->native.base_limit, false, __ATOMIC_RELAXED,
+                              __ATOMIC_RELAXED);
 }
 
 /* Leave the segment in use for the one under it, which keeps it. */
@@ -366,7 +367,7 @@ bool oti_native_stack_new(ot_state* rt, oti_native_exec* x) {
   x->segment = s;
   x->stack_bytes = s->size;
   x->stack_top = segment_top(s);
-  x->base_limit = x->limit = segment_limit(s);
+  x->base_limit = segment_limit(s);
   return true;
 }
 
@@ -654,7 +655,7 @@ static sljit_sw state_offset(uint64_t field, bool* bad) {
   switch (field) {
     case SF_HEAP_END: return (sljit_sw)offsetof(ot_state, heap.end);
     case SF_HEAP_START: return (sljit_sw)offsetof(ot_state, heap.start);
-    case SF_LIMIT: return (sljit_sw)offsetof(ot_state, native.limit);
+    case SF_LIMIT: return (sljit_sw)offsetof(ot_state, poll_limit);
     case SF_ARGS: return (sljit_sw)offsetof(ot_state, native.args);
     case SF_CALL_OTHER: return (sljit_sw)offsetof(ot_state, native_stubs[STUB_CALL_OTHER]);
     case SF_NATIVE_SP: return (sljit_sw)offsetof(ot_state, native.sp);
@@ -1725,8 +1726,8 @@ static W h_poll(ot_state* rt) {
   /* Past the limit only ever at a function's entry, where its frame can
    * move to a new segment. */
   if (rt->native.sp < rt->native.base_limit && !grow_frame(rt)) oti_native_raise(rt);
-  if (rt->native.limit != rt->native.base_limit) {
-    rt->native.limit = rt->native.base_limit;
+  if (__atomic_exchange_n(&rt->poll_limit, rt->native.base_limit, __ATOMIC_RELAXED) !=
+      rt->native.base_limit) {
     if (!oti_interrupt_point(rt)) oti_native_raise(rt);
     if (rt->threads && !oti_thread_poll(rt)) oti_native_raise(rt);
   }
@@ -2235,6 +2236,9 @@ bool oti_native_init(ot_state* rt) {
     n->perf_map = fopen(path, "w");
   }
   if (!oti_native_stack_new(rt, &rt->native) || !oti_native_args(rt, 16)) return false;
+  uintptr_t initial = 0;
+  __atomic_compare_exchange_n(&rt->poll_limit, &initial, rt->native.base_limit, false,
+                              __ATOMIC_RELAXED, __ATOMIC_RELAXED);
   rt->native.callee = OT_NIL;
   if (!build_stubs(rt)) return oti_error(rt, "cannot build native stubs");
   rt->native_mode = true;

@@ -347,6 +347,7 @@ enum {
   B_DEV_OPEN,
   B_DEV_CLOSE,
   B_DEV_POLL,
+  B_DEV_FDS,
   B_DEV_NEXT,
   B_DEV_CLIENT,
   B_DEV_SEND,
@@ -361,6 +362,7 @@ enum {
   B_DEV_NAMESPACE_NAMES,
   B_DEV_NAMESPACE_BINDINGS,
   B_DEV_EVAL_IN,
+  B_DEV_PREPARE_IN,
   B_NATIVE_INSTALL,
   B_NATIVE_CELL,
   B_NATIVE_CELL_BUILTIN,
@@ -403,6 +405,8 @@ enum {
   B_THREAD_INTERRUPT,
   B_MONITOR,
   B_DEMONITOR,
+  B_WAIT_FDS,
+  B_THREAD_WATCHDOG,
   /* Compiler-only helpers have no name, so they aren't globals. */
   B_QQ_APPEND,
   B_EVAL_IN_NAMESPACE,
@@ -711,9 +715,6 @@ typedef struct {
   uintptr_t sp;
   /* The innermost entry record a trampoline left on the stack, or 0. */
   uintptr_t entry;
-  /* Function entries and loop back edges compare the stack pointer against
-   * this. ot_request_interrupt raises it so every check fails. */
-  uintptr_t limit;
   uintptr_t stack_top;
   /* Arguments past the fifth, and every argument where C hands a call to
    * native code or back. Not a root; see oti_native_visit_roots. */
@@ -765,6 +766,8 @@ typedef struct {
   bool interrupted, signaled, raised;                                                              \
   ot_value* params;                                                                                \
   size_t param_count, param_capacity;                                                              \
+  /* A parked write already appended its bytes to this port. */                                   \
+  ot_value pending_output;                                                                        \
   /* The condition being raised. */                                                                \
   ot_value condition_values[1];                                                                    \
   oti_try_frame* tries;                                                                            \
@@ -785,6 +788,9 @@ typedef struct {
 } oti_exec;
 
 struct ot_state {
+  /* Shared with signals and the ticker; never copied with a thread exec. */
+  uintptr_t poll_limit;
+
   union {
     oti_exec exec;
     struct {
@@ -815,6 +821,7 @@ struct ot_state {
   oti_function** functions;
   size_t function_count, function_capacity;
   size_t max_frames, frame_limit;
+  int wake_pipe[2]; /* Private nonblocking signal wakeup descriptors, or -1. */
   volatile sig_atomic_t* interrupt_flag;
   /* Globals named by ot_set_interrupt_handler and ot_set_load_hook, or UINT32_MAX. */
   uint32_t interrupt_handler, load_hook;
@@ -984,6 +991,9 @@ ot_value oti_text(ot_state* rt, uint32_t kind, const char* text, size_t length);
 ot_value oti_float(ot_state* rt, double number);
 ot_value oti_evaluator(ot_state* rt, uint32_t space);
 ot_value oti_eval_value(ot_state* rt, ot_value value);
+/* Dev evaluation preparation: 0=value, 1=thunk, 2=expanded begin,
+ * 3=thunk whose result is discarded (defonce). */
+ot_value oti_prepare_value(ot_state* rt, ot_value value, int* prepared);
 oti_ast* oti_syntax_value(ot_state* rt, ot_value value, oti_arena* arena);
 ot_value oti_read_string(ot_state* rt, ot_value string);
 /* A form as data. With locate, lists carry their source offsets, as the
@@ -1023,6 +1033,7 @@ ot_value oti_call_list(ot_state* rt, ot_value function, ot_value args);
 /* A point where Otium code may run: the VM between instructions and blocking
  * reads. Calls the interrupt handler, if any, when the flag is set. */
 bool oti_interrupt_point(ot_state* rt);
+void oti_drain_wake(ot_state* rt);
 uint64_t oti_symbol_id(ot_value symbol);
 void oti_symbol_set_id(ot_value symbol, uint64_t id);
 ot_value oti_builtin(ot_state* rt, unsigned id, size_t first, size_t count);
@@ -1051,6 +1062,14 @@ ot_value oti_collection_call(ot_state* rt, size_t callable, size_t first, size_t
 void oti_visit_exec(ot_state* rt, oti_exec* x, oti_root_visitor visit, void* context);
 void oti_visit_threads(ot_state* rt, oti_root_visitor visit, void* context);
 void oti_threads_destroy(ot_state* rt);
+bool oti_thread_can_wait(ot_state* rt);
+ot_value oti_thread_current(ot_state* rt);
+void oti_ports_abandon(ot_state* rt, ot_value owner);
+bool oti_thread_parked(ot_state* rt);
+void oti_thread_io_retry(ot_state* rt);
+ot_value oti_thread_make_waitq(ot_state* rt);
+ot_value oti_thread_io_wait(ot_state* rt, ot_value queue, int fd, bool writing);
+void oti_thread_io_wake(ot_state* rt, ot_value queue);
 /* A poll found the stack limit tripped while threads exist: yield when it's
  * time to. False when the thread must unwind. */
 bool oti_thread_poll(ot_state* rt);

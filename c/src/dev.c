@@ -5,6 +5,7 @@
 /* Angle brackets keep the transport out of the amalgamation. */
 #include <dev/transport.h>
 #include <string.h>
+#include <stdlib.h>
 #ifdef OTIUM_FREESTANDING
 #include <time.h>
 #endif
@@ -59,6 +60,25 @@ static ot_value dev_poll(ot_state* rt, size_t first, size_t count) {
     return 0;
   }
   return ot_int(ot_dev_poll((int)timeout));
+}
+
+static ot_value dev_fds(ot_state* rt, size_t first, size_t count) {
+  (void)first;
+  if (!dev_arity(rt, count, 0)) return 0;
+  size_t n = ot_dev_fds(NULL, 0), base = rt->sp;
+  int* pairs = n ? malloc(n * sizeof(int)) : NULL;
+  if (n && !pairs) return oti_fail(rt, "out of host memory");
+  ot_dev_fds(pairs, n);
+  if (!oti_stack(rt, base + n)) {
+    free(pairs);
+    return 0;
+  }
+  for (size_t i = 0; i < n; i++) rt->stack[base + i] = ot_int(pairs[i]);
+  free(pairs);
+  rt->sp = base + n;
+  ot_value result = oti_array_from(rt, base, n);
+  rt->sp = base;
+  return result;
 }
 
 static ot_value dev_next(ot_state* rt, size_t first, size_t count) {
@@ -241,6 +261,24 @@ static ot_value dev_eval_in(ot_state* rt, size_t first, size_t count) {
   return result;
 }
 
+/* Compile while in C, then let Otium call the resulting thunk so eval can
+ * park. Namespace/import/macro declarations finish during preparation. */
+static ot_value dev_prepare_in(ot_state* rt, size_t first, size_t count) {
+  if (!dev_arity(rt, count, 2)) return 0;
+  if (!oti_kind(rt->stack[first], K_SYMBOL)) return oti_fail(rt, "expected a namespace symbol");
+  size_t length;
+  const char* name = oti_text_bytes(rt->stack[first], &length);
+  uint32_t space = oti_namespace(rt, name, length);
+  if (space == UINT32_MAX) return 0;
+  rt->current_namespace = space;
+  int prepared;
+  ot_value result = oti_prepare_value(rt, rt->stack[first + 1], &prepared);
+  if (!result) return 0;
+  rt->stack[first] = ot_int(prepared);
+  rt->stack[first + 1] = result;
+  return oti_array_from(rt, first, 2);
+}
+
 #ifdef OTIUM_FREESTANDING
 /* Without an operating system there is no socket or file system: the server
  * can't listen, and the rest answer as for a process with nothing to report. */
@@ -250,6 +288,12 @@ int ot_dev_open(const char* path) {
 }
 
 void ot_dev_close(void) {}
+
+size_t ot_dev_fds(int* pairs, size_t capacity) {
+  (void)pairs;
+  (void)capacity;
+  return 0;
+}
 
 int ot_dev_poll(int timeout) {
   (void)timeout;
@@ -300,9 +344,11 @@ int64_t ot_dev_mtime(const char* path) {
 #endif
 
 const oti_builtin_def oti_dev_builtins[] = {
+    {B_DEV_PREPARE_IN, "otium.dev/%prepare-in", dev_prepare_in},
     {B_DEV_EVAL_IN, "otium.dev/%eval-in", dev_eval_in},
     {B_DEV_OPEN, "otium.dev/%open", dev_open},
     {B_DEV_CLOSE, "otium.dev/%close", dev_close},
+    {B_DEV_FDS, "otium.dev/%transport-fds", dev_fds},
     {B_DEV_POLL, "otium.dev/%transport-poll", dev_poll},
     {B_DEV_NEXT, "otium.dev/%next", dev_next},
     {B_DEV_CLIENT, "otium.dev/%client", dev_client},

@@ -22,8 +22,8 @@
  * The run queue is FIFO, timers are sorted by deadline, and a waiting
  * thread is on at most one wait queue and the timer list; waking takes it
  * off both, so a timeout and a wake can't both happen. Preemption is a
- * ticker that trips the native stack limit every millisecond while another
- * thread is runnable or sleeping; the poll it trips yields. With
+ * ticker that trips the poll limit every millisecond; the runtime checks
+ * its queues and deadlines before yielding. With
  * OTIUM_SCHED=seed[:slice] the scheduler is deterministic instead, for
  * tests: every poll counts towards a slice of that many polls (random from
  * the seed when not given), the next thread is chosen at random, and time
@@ -31,6 +31,8 @@
 
 #ifdef OTIUM_NATIVE
 
+#include <errno.h>
+#include <poll.h>
 #include <pthread.h>
 #include <stdlib.h>
 #include <string.h>
@@ -45,6 +47,15 @@ typedef enum { R_BEGIN, R_REDISPATCH, R_RETURN } oti_resume;
 
 typedef struct oti_thread oti_thread;
 
+typedef struct oti_interruption {
+  struct oti_interruption* previous;
+  oti_exec exec;
+  oti_resume resume;
+  ot_value entry, args, wake_value;
+  size_t saved_atomic, cursor;
+  bool woken;
+} oti_interruption;
+
 /* A wait queue: threads parked until something wakes them. */
 typedef struct {
   oti_thread *head, *tail;
@@ -53,10 +64,12 @@ typedef struct {
 struct oti_thread {
   /* Saved while another thread runs. */
   oti_exec exec;
+  oti_interruption* interruptions;
   oti_resume resume;
   ot_value object, entry, args, wake_value, kill_reason;
   /* A thunk thread/interrupt! asked this thread to run, or nil. */
-  ot_value interrupt;
+  ot_value interrupt, watchdog;
+  uint64_t watchdog_at;
   /* Monitors: (watcher . ref) pairs to send an exit message when it ends. */
   ot_value watchers;
   oti_thread_state state;
@@ -71,6 +84,10 @@ struct oti_thread {
   ot_value* mailbox;
   size_t mailbox_count, mailbox_capacity, cursor;
   oti_waitq joiners;
+  /* The fds %wait-fds parked on; fd_waiting while it is parked. */
+  struct pollfd* fds;
+  size_t fd_count, fd_capacity;
+  bool fd_waiting;
 };
 
 struct oti_threads {
@@ -85,9 +102,16 @@ struct oti_threads {
   /* Wait queues made for Otium code, freed with the runtime. */
   oti_waitq** queues;
   size_t queue_count, queue_capacity;
-  volatile sig_atomic_t preempt;
+  /* Descriptor waits from ports and %wait-fds, rebuilt at each switch.
+   * Entries sharing a port queue are coalesced before polling. */
+  size_t fd_waiters;
+  struct pollfd* polled;
+  oti_thread** polled_threads;
+  size_t polled_capacity;
+  int poll_error;
+  _Atomic sig_atomic_t preempt;
   pthread_t ticker;
-  volatile bool stop;
+  _Atomic bool stop;
   bool ticking;
   /* The deterministic test scheduler. */
   bool test;
@@ -215,6 +239,10 @@ static void wake(ot_state* rt, oti_thread* t, ot_value value) {
     t->queue = NULL;
   }
   remove_timer(ts, t);
+  if (t->fd_waiting) {
+    t->fd_waiting = false;
+    ts->fd_waiters--;
+  }
   t->mail_waiting = false;
   t->wake_value = value;
   t->state = T_RUNNABLE;
@@ -247,7 +275,14 @@ static void visit_thread(ot_state* rt, oti_thread* t, oti_root_visitor visit, vo
   visit(context, &t->wake_value);
   visit(context, &t->kill_reason);
   visit(context, &t->interrupt);
+  visit(context, &t->watchdog);
   visit(context, &t->watchers);
+  for (oti_interruption* i = t->interruptions; i; i = i->previous) {
+    oti_visit_exec(rt, &i->exec, visit, context);
+    visit(context, &i->entry);
+    visit(context, &i->args);
+    visit(context, &i->wake_value);
+  }
   for (size_t i = 0; i < t->mailbox_count; i++) visit(context, &t->mailbox[i]);
   if (t != rt->threads->current && t->state < T_DONE) oti_visit_exec(rt, &t->exec, visit, context);
 }
@@ -277,6 +312,7 @@ static void free_exec(ot_state* rt, oti_exec* x) {
 }
 
 static void free_thread(oti_thread* t) {
+  free(t->fds);
   free(t->mailbox);
   free(t);
 }
@@ -291,21 +327,31 @@ static void unregister(oti_threads* ts, oti_thread* t) {
 
 /* --- Preemption ---------------------------------------------------------- */
 
-/* The ticker asks the running thread to yield every millisecond while
- * another is runnable or sleeping, by tripping its stack limit; the poll
- * does the rest, waking sleepers that are due. It only reads and writes
- * words, so it needs no lock. */
+/* The ticker trips the poll limit every millisecond. Only the runtime
+ * thread reads scheduler queues; the pthread touches atomic words only. */
 static void* ticker(void* data) {
   ot_state* rt = data;
   oti_threads* ts = rt->threads;
   while (!ts->stop) {
     pause_for(1000000);
-    if (ts->run.head || ts->timer_count) {
-      ts->preempt = 1;
-      rt->native.limit = UINTPTR_MAX;
-    }
+    ts->preempt = 1;
+    __atomic_store_n(&rt->poll_limit, UINTPTR_MAX, __ATOMIC_RELAXED);
   }
   return NULL;
+}
+
+static bool start_ticker(ot_state* rt) {
+  oti_threads* ts = rt->threads;
+  if (ts->test || ts->ticking) return true;
+  sigset_t all, previous;
+  sigfillset(&all);
+  int error = pthread_sigmask(SIG_BLOCK, &all, &previous);
+  if (error) return oti_error(rt, "cannot block ticker signals");
+  error = pthread_create(&ts->ticker, NULL, ticker, rt);
+  pthread_sigmask(SIG_SETMASK, &previous, NULL);
+  if (error) return oti_error(rt, "cannot start thread ticker");
+  ts->ticking = true;
+  return true;
 }
 
 static uint64_t next_random(oti_threads* ts) {
@@ -345,7 +391,7 @@ static bool setup(ot_state* rt) {
   rt->threads = ts;
   primordial->object = primordial->entry = primordial->args = OT_NIL;
   primordial->wake_value = primordial->kill_reason = OT_NIL;
-  primordial->interrupt = OT_NIL;
+  primordial->interrupt = primordial->watchdog = OT_NIL;
   primordial->watchers = OT_EMPTY;
   primordial->state = T_RUNNING;
   ts->primordial = ts->current = primordial;
@@ -358,6 +404,7 @@ static bool setup(ot_state* rt) {
     ts->slice = *end == ':' ? strtoull(end + 1, NULL, 10) : 0;
     ts->now = 1;
     new_slice(ts);
+    __atomic_store_n(&rt->poll_limit, UINTPTR_MAX, __ATOMIC_RELAXED);
   }
   ot_value object = oti_alloc(rt, K_THREAD, 3, OTI_BYTES(oti_thread_obj, 3));
   if (!object) return false;
@@ -380,28 +427,43 @@ void oti_threads_destroy(ot_state* rt) {
   for (size_t i = 0; i < ts->count; i++) {
     oti_thread* t = ts->all[i];
     if (t != ts->current) free_exec(rt, &t->exec);
+    while (t->interruptions) {
+      oti_interruption* previous = t->interruptions->previous;
+      free_exec(rt, &t->interruptions->exec);
+      free(t->interruptions);
+      t->interruptions = previous;
+    }
     free_thread(t);
   }
   for (size_t i = 0; i < ts->queue_count; i++) free(ts->queues[i]);
   free(ts->queues);
   free(ts->all);
   free(ts->timers);
+  free(ts->polled);
+  free(ts->polled_threads);
   free(ts);
   rt->threads = NULL;
 }
 
 size_t oti_thread_count(ot_state* rt) { return rt->threads ? rt->threads->count : 1; }
 
+static bool grow_exec_args(ot_state* rt, oti_native_exec* n, size_t capacity) {
+  if (n->args_capacity >= capacity) return true;
+  size_t old = n->args_capacity;
+  if (!oti_grow(rt, (void**)&n->args, &n->args_capacity, capacity, sizeof(ot_value))) return false;
+  for (size_t j = old; j < n->args_capacity; j++) n->args[j] = OT_NIL;
+  return true;
+}
+
 bool oti_threads_grow_args(ot_state* rt) {
   oti_threads* ts = rt->threads;
   if (!ts) return true;
   size_t capacity = rt->native.args_capacity;
   for (size_t i = 0; i < ts->count; i++) {
-    oti_native_exec* n = &ts->all[i]->exec.native;
-    if (ts->all[i] == ts->current || n->args_capacity >= capacity) continue;
-    size_t old = n->args_capacity;
-    if (!oti_grow(rt, (void**)&n->args, &n->args_capacity, capacity, sizeof(ot_value))) return false;
-    for (size_t j = old; j < n->args_capacity; j++) n->args[j] = OT_NIL;
+    oti_thread* t = ts->all[i];
+    if (t != ts->current && !grow_exec_args(rt, &t->exec.native, capacity)) return false;
+    for (oti_interruption* saved = t->interruptions; saved; saved = saved->previous)
+      if (!grow_exec_args(rt, &saved->exec.native, capacity)) return false;
   }
   return true;
 }
@@ -419,10 +481,102 @@ static bool loading_module(ot_state* rt) { return oti_module_depth(rt) > 0; }
 /* Wake threads whose deadline has passed, with :timeout. */
 static void expire(ot_state* rt) {
   oti_threads* ts = rt->threads;
+  uint64_t real = now(NULL);
+  for (size_t i = 0; i < ts->count; i++) {
+    oti_thread* thread = ts->all[i];
+    if (thread->watchdog_at && real >= thread->watchdog_at) {
+      thread->watchdog_at = 0;
+      if (thread->interrupt == OT_NIL) thread->interrupt = thread->watchdog;
+      wake(rt, thread, OT_NIL);
+    }
+  }
   if (!ts->timer_count || ts->timers[0]->deadline > now(ts)) return;
   ot_value timeout = keyword(rt, ":timeout");
   uint64_t t = now(ts);
   while (ts->timer_count && ts->timers[0]->deadline <= t) wake(rt, ts->timers[0], timeout);
+}
+
+/* Wake threads whose fds are ready, waiting up to timeout_ms (-1 for no
+ * limit) for one to be. They see what is ready when %wait-fds runs again. */
+static void poll_fds(ot_state* rt, int timeout_ms) {
+  oti_threads* ts = rt->threads;
+  if (!timeout_ms && !ts->fd_waiters) {
+    if (rt->interrupt_flag && *rt->interrupt_flag) wake(rt, ts->primordial, OT_NIL);
+    return;
+  }
+  size_t n = 1;
+  for (size_t i = 0; i < ts->count; i++) {
+    oti_thread* t = ts->all[i];
+    if (t->fd_waiting) n += t->fd_count;
+  }
+  if (n > ts->polled_capacity) {
+    struct pollfd* fds = realloc(ts->polled, n * sizeof(*fds));
+    if (fds) ts->polled = fds;
+    oti_thread** owners = realloc(ts->polled_threads, n * sizeof(*owners));
+    if (owners) ts->polled_threads = owners;
+    if (!fds || !owners) {
+      ts->poll_error = ENOMEM;
+      wake(rt, ts->primordial, OT_NIL);
+      return;
+    }
+    ts->polled_capacity = n;
+  }
+  n = 1;
+  ts->polled[0] = (struct pollfd){.fd = rt->wake_pipe[0], .events = POLLIN};
+  for (size_t i = 0; i < ts->count; i++) {
+    oti_thread* t = ts->all[i];
+    if (!t->fd_waiting) continue;
+    for (size_t j = 0; j < t->fd_count; j++) {
+      size_t k = 1;
+      if (t->queue) {
+        for (; k < n; k++)
+          if (ts->polled_threads[k]->queue == t->queue && ts->polled[k].fd == t->fds[j].fd) break;
+      } else k = n;
+      if (k < n) ts->polled[k].events |= t->fds[j].events;
+      else {
+        ts->polled[n] = t->fds[j];
+        ts->polled_threads[n++] = t;
+      }
+    }
+  }
+  if (rt->interrupt_flag && *rt->interrupt_flag) timeout_ms = 0;
+  int ready = poll(ts->polled, (nfds_t)n, timeout_ms);
+  if (ts->polled[0].revents) oti_drain_wake(rt);
+  if (rt->interrupt_flag && *rt->interrupt_flag) wake(rt, ts->primordial, OT_NIL);
+  if (ready < 0 && errno != EINTR) {
+    ts->poll_error = errno;
+    wake(rt, ts->primordial, OT_NIL);
+  }
+  if (ready <= 0) return;
+  for (size_t i = 1; i < n; i++) {
+    if (!ts->polled[i].revents) continue;
+    oti_thread* t = ts->polled_threads[i];
+    oti_waitq* q = t->queue;
+    if (q) {
+      while (q->head) wake(rt, q->head, OT_TRUE);
+    } else wake(rt, t, OT_TRUE);
+  }
+}
+
+/* How long the idle scheduler may wait in poll(), in milliseconds: until the
+ * next deadline, or -1 for as long as it takes. */
+static int idle_timeout(oti_threads* ts) {
+  uint64_t delay = UINT64_MAX, t = now(ts);
+  if (ts->timer_count) {
+    uint64_t deadline = ts->timers[0]->deadline;
+    delay = deadline > t ? deadline - t : 0;
+  }
+  t = now(NULL);
+  for (size_t i = 0; i < ts->count; i++) {
+    uint64_t deadline = ts->all[i]->watchdog_at;
+    if (deadline) {
+      uint64_t left = deadline > t ? deadline - t : 0;
+      if (left < delay) delay = left;
+    }
+  }
+  if (delay == UINT64_MAX) return -1;
+  uint64_t ms = (delay + 999999u) / 1000000u;
+  return ms > INT32_MAX ? INT32_MAX : (int)ms;
 }
 
 static oti_thread* pick(oti_threads* ts) {
@@ -439,14 +593,12 @@ static oti_thread* pick(oti_threads* ts) {
  * that failed, a kill, another thread's exit, or a deadlock. */
 static bool checks(ot_state* rt, oti_thread* t) {
   oti_threads* ts = rt->threads;
-  if (t == ts->primordial && !oti_interrupt_point(rt)) return false;
-  /* A thunk from thread/interrupt! runs here, on top of whatever this thread
-   * was doing, unless it is in an atomic section. */
-  if (t->interrupt != OT_NIL && !rt->atomic && !t->kill_pending) {
-    ot_value thunk = t->interrupt;
-    t->interrupt = OT_NIL;
-    if (!oti_native_invoke(rt, thunk, 0)) return false;
+  if (t == ts->primordial && ts->poll_error) {
+    int error = ts->poll_error;
+    ts->poll_error = 0;
+    return oti_errorf(rt, "scheduler poll: %s", strerror(error));
   }
+  if (t == ts->primordial && !oti_interrupt_point(rt)) return false;
   if (t->kill_pending && !rt->interrupted) {
     t->kill_pending = false;
     rt->interrupted = true;
@@ -463,8 +615,65 @@ static bool checks(ot_state* rt, oti_thread* t) {
 
 static _Noreturn void finish(ot_state* rt, ot_value result);
 
+/* An interrupt has its own native stack but retains the thread identity.
+ * Saving execution state instead of a C continuation lets the thunk park;
+ * completion restores the interrupted call, and failure unwinds it. */
+static bool start_interruption(ot_state* rt, oti_thread* t) {
+  oti_interruption* saved = calloc(1, sizeof(*saved));
+  oti_exec fresh = {0};
+  if (!saved) return oti_error(rt, "out of host memory");
+  if (!oti_native_stack_new(rt, &fresh.native)) {
+    free(saved);
+    return false;
+  }
+  size_t capacity = rt->native.args_capacity;
+  fresh.native.args = malloc(capacity * sizeof(ot_value));
+  fresh.params = rt->param_count ? malloc(2 * rt->param_count * sizeof(ot_value)) : NULL;
+  if (!fresh.native.args || (rt->param_count && !fresh.params)) {
+    free_exec(rt, &fresh);
+    free(saved);
+    return oti_error(rt, "out of host memory");
+  }
+  for (size_t j = 0; j < capacity; j++) fresh.native.args[j] = OT_NIL;
+  fresh.native.args_capacity = capacity;
+  if (rt->param_count) memcpy(fresh.params, rt->params, 2 * rt->param_count * sizeof(ot_value));
+  fresh.param_count = fresh.param_capacity = rt->param_count;
+  fresh.native.callee = fresh.condition_values[0] = fresh.pending_output = OT_NIL;
+  fresh.restart_transfer[0] = fresh.restart_transfer[1] = OT_NIL;
+  for (size_t j = 0; j < 4; j++) fresh.error.slots[j] = OT_NIL;
+  fresh.current_namespace = rt->current_namespace;
+  fresh.required_namespace = UINT32_MAX;
+  fresh.source = OTI_NO_SOURCE;
+  saved->exec = rt->exec;
+  saved->resume = t->resume;
+  saved->entry = t->entry;
+  saved->args = t->args;
+  saved->wake_value = t->wake_value;
+  saved->saved_atomic = t->saved_atomic;
+  saved->cursor = t->cursor;
+  t->cursor = 0;
+  saved->woken = t->woken;
+  saved->previous = t->interruptions;
+  t->interruptions = saved;
+  t->entry = t->interrupt;
+  t->args = OT_EMPTY;
+  t->interrupt = OT_NIL;
+  t->resume = R_BEGIN;
+  t->woken = false;
+  rt->exec = fresh;
+  __atomic_store_n(&rt->poll_limit, UINTPTR_MAX, __ATOMIC_RELAXED);
+  return true;
+}
+
 /* Continue t, whose exec is now rt->exec. */
 static _Noreturn void enter(ot_state* rt, oti_thread* t) {
+  if (t->interrupt != OT_NIL && !rt->atomic && !t->kill_pending && !rt->exit_pending) {
+    if (!start_interruption(rt, t)) {
+      oti_ports_abandon(rt, t->object);
+      if (t->resume == R_BEGIN) finish(rt, 0);
+      oti_native_raise(rt);
+    }
+  }
   if (t->resume == R_BEGIN) {
     if (t->kill_pending) {
       rt->interrupted = true;
@@ -503,6 +712,7 @@ static _Noreturn void enter(ot_state* rt, oti_thread* t) {
   }
   if (!ok) {
     /* The parked call is abandoned. */
+    oti_ports_abandon(rt, t->object);
     rt->sp = base;
     rt->native.args_live = 0;
     oti_native_raise(rt);
@@ -528,21 +738,36 @@ static _Noreturn void schedule(ot_state* rt) {
   }
   for (;;) {
     expire(rt);
+    poll_fds(rt, 0);
     oti_thread* next = pick(ts);
     if (next) {
       ts->preempt = 0;
       new_slice(ts);
       next->state = T_RUNNING;
       ts->current = next;
+      uintptr_t limit = __atomic_load_n(&rt->poll_limit, __ATOMIC_RELAXED);
       rt->exec = next->exec;
+      if (limit != UINTPTR_MAX)
+        __atomic_compare_exchange_n(&rt->poll_limit, &limit, rt->native.base_limit, false,
+                                    __ATOMIC_RELAXED, __ATOMIC_RELAXED);
       /* Under the test scheduler every poll counts. */
-      if (ts->test) rt->native.limit = UINTPTR_MAX;
+      if (ts->test) __atomic_store_n(&rt->poll_limit, UINTPTR_MAX, __ATOMIC_RELAXED);
       enter(rt, next);
+    }
+    if (ts->fd_waiters && !(ts->test && ts->timer_count)) {
+      /* Under the test scheduler, time jumps to the next deadline instead,
+       * having just found nothing ready. */
+      poll_fds(rt, idle_timeout(ts));
+      continue;
     }
     if (ts->timer_count) {
       uint64_t deadline = ts->timers[0]->deadline, t = now(ts);
       if (ts->test) ts->now = deadline;
-      else if (deadline > t) pause_for(deadline - t);
+      else if (deadline > t) poll_fds(rt, idle_timeout(ts));
+      continue;
+    }
+    if (idle_timeout(ts) >= 0) {
+      poll_fds(rt, idle_timeout(ts));
       continue;
     }
     if (ts->primordial->state != T_WAITING) abort();
@@ -614,13 +839,15 @@ bool oti_thread_poll(ot_state* rt) {
   oti_threads* ts = rt->threads;
   if (ts->test) {
     /* Every poll counts; keep the limit tripped so the next one does too. */
-    rt->native.limit = UINTPTR_MAX;
+    __atomic_store_n(&rt->poll_limit, UINTPTR_MAX, __ATOMIC_RELAXED);
     if (ts->budget && --ts->budget) return true;
     ts->preempt = 1;
   }
   if (!ts->preempt || rt->atomic || !can_switch(rt)) return true;
   ts->preempt = 0;
-  if (!ts->run.head && !ts->timer_count) return true;
+  if (!ts->run.head && !ts->timer_count && !ts->fd_waiters && !ts->current->watchdog_at &&
+      ts->current->interrupt == OT_NIL)
+    return true;
   oti_thread* me = ts->current;
   me->state = T_RUNNABLE;
   enqueue(&ts->run, me);
@@ -640,6 +867,40 @@ _Noreturn void oti_thread_finished(ot_state* rt, ot_value result) { finish(rt, r
 static _Noreturn void finish(ot_state* rt, ot_value result) {
   oti_threads* ts = rt->threads;
   oti_thread* me = ts->current;
+again:
+  if (me->interruptions) {
+    oti_interruption* saved = me->interruptions;
+    bool interrupted = rt->interrupted, signaled = rt->signaled, raised = rt->raised;
+    ot_value condition = rt->condition_values[0];
+    oti_error_record error = rt->error;
+    memset(&rt->error, 0, sizeof(rt->error));
+    free_exec(rt, &rt->exec);
+    rt->exec = saved->exec;
+    me->resume = saved->resume;
+    me->entry = saved->entry;
+    me->args = saved->args;
+    me->wake_value = saved->wake_value;
+    me->saved_atomic = saved->saved_atomic;
+    me->cursor = saved->cursor;
+    me->woken = saved->woken;
+    me->interruptions = saved->previous;
+    free(saved);
+    __atomic_store_n(&rt->poll_limit, UINTPTR_MAX, __ATOMIC_RELAXED);
+    if (!result) {
+      oti_clear_error(rt);
+      rt->error = error;
+      rt->interrupted = interrupted;
+      rt->signaled = signaled;
+      rt->raised = raised;
+      rt->condition_values[0] = condition;
+      oti_ports_abandon(rt, me->object);
+      if (me->resume == R_BEGIN) goto again;
+      rt->native.args_live = 0;
+      oti_native_raise(rt);
+    }
+    oti_release_error(&error);
+    enter(rt, me);
+  }
   rt->frame_count = 0;
   me->entry = me->args = OT_NIL;
   /* The thread stays running until it is done: reporting a failure runs
@@ -660,6 +921,7 @@ static _Noreturn void finish(ot_state* rt, ot_value result) {
     ot_value condition = oti_error_condition(rt);
     as_thread(me->object)->result = condition ? condition : OT_NIL;
   }
+  oti_ports_abandon(rt, me->object);
   me->state = end;
   ot_value status = keyword(rt, state_name(me->state));
   as_thread(me->object)->status = status;
@@ -724,11 +986,11 @@ static ot_value spawn_builtin(ot_state* rt, size_t first, size_t count) {
     oti_type_error(rt, "spawn", "a function", rt->stack[first + 1]);
     return 0;
   }
-  if (!ts->test && !ts->ticking && pthread_create(&ts->ticker, NULL, ticker, rt) == 0)
-    ts->ticking = true;
+  if (!start_ticker(rt)) return 0;
   oti_thread* t = calloc(1, sizeof(*t));
   if (!t) return oti_fail(rt, "out of host memory");
-  t->object = t->entry = t->args = t->wake_value = t->kill_reason = t->interrupt = OT_NIL;
+  t->object = t->entry = t->args = t->wake_value = t->kill_reason = t->interrupt = t->watchdog =
+      OT_NIL;
   t->watchers = OT_EMPTY;
   t->resume = R_BEGIN;
   if (!oti_native_stack_new(rt, &t->exec.native)) {
@@ -760,7 +1022,7 @@ static ot_value spawn_builtin(ot_state* rt, size_t first, size_t count) {
   oti_exec* x = &t->exec;
   x->native.callee = OT_NIL;
   x->restart_transfer[0] = x->restart_transfer[1] = OT_NIL;
-  x->condition_values[0] = OT_NIL;
+  x->condition_values[0] = x->pending_output = OT_NIL;
   x->current_namespace = rt->current_namespace;
   x->required_namespace = UINT32_MAX;
   x->source = OTI_NO_SOURCE;
@@ -802,7 +1064,7 @@ static ot_value yield_builtin(ot_state* rt, size_t first, size_t count) {
   if (count) return oti_fail(rt, "wrong number of arguments");
   oti_threads* ts = rt->threads;
   if (!ts || retried(rt, NULL)) return OT_NIL;
-  if (!can_switch(rt) || (!ts->run.head && !ts->timer_count)) return OT_NIL;
+  if (!can_switch(rt) || (!ts->run.head && !ts->timer_count && !ts->fd_waiters)) return OT_NIL;
   ts->current->state = T_RUNNABLE;
   enqueue(&ts->run, ts->current);
   return OTI_PARKED;
@@ -827,6 +1089,80 @@ static ot_value sleep_builtin(ot_state* rt, size_t first, size_t count) {
   }
   if (now(rt->threads) >= deadline) return OT_NIL;
   return wait_on(rt, NULL, deadline);
+}
+
+/* (%wait-fds fds deadline): wait until one of fds is ready or the deadline
+ * passes. fds is an array of fd, events pairs, flattened, where events has
+ * bit 1 for reading and 2 for writing. Returns the ready ones the same way,
+ * with bit 4 for an error or hangup, or :timeout. Where the thread can't be
+ * switched, the whole process waits. */
+static ot_value wait_fds_builtin(ot_state* rt, size_t first, size_t count) {
+  if (count != 2) return oti_fail(rt, "wrong number of arguments");
+  if (!setup(rt)) return 0;
+  ot_value list = rt->stack[first];
+  uint64_t deadline = 0;
+  if (!oti_kind(list, K_ARRAY)) {
+    oti_type_error(rt, "%wait-fds", "an array", list);
+    return 0;
+  }
+  if (!deadline_arg(rt, rt->stack[first + 1], &deadline)) return 0;
+  oti_threads* ts = rt->threads;
+  oti_thread* me = ts->current;
+  retried(rt, NULL);
+  size_t length = oti_as_array(list)->length;
+  if (length % 2) return oti_fail(rt, "expected fd and event pairs");
+  size_t n = length / 2;
+  if (!oti_grow(rt, (void**)&me->fds, &me->fd_capacity, n ? n : 1, sizeof(struct pollfd))) return 0;
+  for (size_t i = 0; i < n; i++) {
+    ot_value fd = oti_as_array_data(oti_as_array(list)->data)->items[2 * i],
+             events = oti_as_array_data(oti_as_array(list)->data)->items[2 * i + 1];
+    if (!ot_is_int(fd) || ot_to_int(fd) < 0 || ot_to_int(fd) > INT32_MAX || !ot_is_int(events))
+      return oti_fail(rt, "expected fd and event integers");
+    intptr_t e = ot_to_int(events);
+    if (e <= 0 || e > 3) return oti_fail(rt, "expected read/write event mask (1, 2 or 3)");
+    me->fds[i].fd = (int)ot_to_int(fd);
+    me->fds[i].events = (short)((e & 1 ? POLLIN : 0) | (e & 2 ? POLLOUT : 0));
+    me->fds[i].revents = 0;
+  }
+  me->fd_count = n;
+  bool blocking = !can_switch(rt);
+  for (;;) {
+    int timeout = 0;
+    if (blocking) {
+      uint64_t t = now(ts);
+      if (deadline && t >= deadline) return keyword(rt, ":timeout");
+      /* Short slices, so an interrupt is noticed. */
+      timeout =
+          deadline && deadline - t < 10000000u ? (int)((deadline - t + 999999u) / 1000000u) : 10;
+    }
+    int ready = poll(me->fds, (nfds_t)n, timeout);
+    if (ready > 0) break;
+    if (ready < 0 && errno != EINTR) return oti_fail(rt, "fd poll failed");
+    if (!blocking) {
+      if (deadline && now(ts) >= deadline) return keyword(rt, ":timeout");
+      ot_value result = wait_on(rt, NULL, deadline);
+      if (result == OTI_PARKED) {
+        me->fd_waiting = true;
+        ts->fd_waiters++;
+      }
+      return result;
+    }
+    if (!ot_poll_interrupt(rt)) return 0;
+  }
+  size_t base = rt->sp, m = 0;
+  if (!oti_stack(rt, base + 2 * n)) return 0;
+  for (size_t i = 0; i < n; i++) {
+    short r = me->fds[i].revents;
+    if (!r) continue;
+    intptr_t e =
+        (r & POLLIN ? 1 : 0) | (r & POLLOUT ? 2 : 0) | (r & (POLLERR | POLLHUP | POLLNVAL) ? 4 : 0);
+    rt->stack[base + m++] = ot_int(me->fds[i].fd);
+    rt->stack[base + m++] = ot_int(e);
+  }
+  rt->sp = base + m;
+  ot_value result = oti_array_from(rt, base, m);
+  rt->sp = base;
+  return result;
 }
 
 /* (%thread-join t deadline): #t once t has finished, :timeout when the
@@ -920,10 +1256,35 @@ static ot_value interrupt_builtin(ot_state* rt, size_t first, size_t count) {
   if (!v) return 0;
   oti_thread* t = as_thread(v)->thread;
   if (!t || !rt->threads) return OT_FALSE;
-  if (t == rt->threads->current) return oti_native_invoke(rt, rt->stack[first + 1], 0) ? OT_TRUE : 0;
+  if (t == rt->threads->current) {
+    if (retried(rt, NULL)) return OT_TRUE;
+    if (!can_switch(rt)) return oti_native_invoke(rt, rt->stack[first + 1], 0) ? OT_TRUE : 0;
+    t->interrupt = rt->stack[first + 1];
+    t->state = T_RUNNABLE;
+    enqueue(&rt->threads->run, t);
+    return OTI_PARKED;
+  }
   t->interrupt = rt->stack[first + 1];
   wake(rt, t, OT_NIL);
   return OT_TRUE;
+}
+
+/* Absolute monotonic milliseconds, matching dev/%clock. A deadline belongs
+ * to its target thread and fires once; zero disables it, -1 queries it. */
+static ot_value watchdog_builtin(ot_state* rt, size_t first, size_t count) {
+  if (count != 2 || !ot_is_int(rt->stack[first]))
+    return oti_fail(rt, "expected watchdog deadline and thunk");
+  if (!setup(rt)) return 0;
+  oti_thread* me = rt->threads->current;
+  intptr_t ms = ot_to_int(rt->stack[first]);
+  if (ms == -1) return ot_int((intptr_t)(me->watchdog_at / 1000000u));
+  if (ms < 0 || (uint64_t)ms > UINT64_MAX / 1000000u)
+    return oti_fail(rt, "invalid watchdog deadline");
+  if (ms && !oti_procedure(rt->stack[first + 1])) return oti_fail(rt, "expected watchdog thunk");
+  if (ms && !start_ticker(rt)) return 0;
+  me->watchdog_at = (uint64_t)ms * 1000000u;
+  me->watchdog = rt->stack[first + 1];
+  return OT_NIL;
 }
 
 /* (%monitor t ref): send the caller {:exit t :ref ref :reason r} when t ends,
@@ -990,6 +1351,41 @@ static oti_waitq* waitq_arg(ot_state* rt, ot_value v) {
   if (oti_kind(v, K_WAITQ)) return OTI_CAST(oti_waitq_obj, K_WAITQ, v)->queue;
   oti_type_error(rt, "wait queue", "a wait queue", v);
   return NULL;
+}
+
+ot_value oti_thread_current(ot_state* rt) {
+  return rt->threads ? rt->threads->current->object : OT_NIL;
+}
+
+bool oti_thread_can_wait(ot_state* rt) { return rt->threads && can_switch(rt); }
+
+bool oti_thread_parked(ot_state* rt) {
+  return rt->threads && rt->threads->current->state == T_WAITING;
+}
+
+void oti_thread_io_retry(ot_state* rt) {
+  if (rt->threads) retried(rt, NULL);
+}
+
+ot_value oti_thread_make_waitq(ot_state* rt) { return make_waitq_builtin(rt, 0, 0); }
+
+void oti_thread_io_wake(ot_state* rt, ot_value queue) {
+  if (queue == OT_NIL) return;
+  oti_waitq* q = waitq_arg(rt, queue);
+  while (q && q->head) wake(rt, q->head, OT_TRUE);
+}
+
+ot_value oti_thread_io_wait(ot_state* rt, ot_value queue, int fd, bool writing) {
+  oti_thread* me = rt->threads->current;
+  if (!oti_grow(rt, (void**)&me->fds, &me->fd_capacity, 1, sizeof(struct pollfd))) return 0;
+  me->fds[0] = (struct pollfd){.fd = fd, .events = writing ? POLLOUT : POLLIN};
+  me->fd_count = fd >= 0 ? 1 : 0;
+  ot_value result = wait_on(rt, waitq_arg(rt, queue), 0);
+  if (result == OTI_PARKED && fd >= 0) {
+    me->fd_waiting = true;
+    rt->threads->fd_waiters++;
+  }
+  return result;
 }
 
 /* (%park q deadline): wait on q, returning what woke it: the waker's value,
@@ -1087,6 +1483,12 @@ static ot_value mailbox_take_builtin(ot_state* rt, size_t first, size_t count) {
     size_t at = me->cursor - 1;
     memmove(me->mailbox + at, me->mailbox + at + 1, (me->mailbox_count - at - 1) * sizeof(ot_value));
     me->mailbox_count--;
+    for (oti_interruption* saved = me->interruptions; saved; saved = saved->previous) {
+      if (saved->cursor && at < saved->cursor) {
+        if (at == saved->cursor - 1) saved->cursor = 0;
+        else saved->cursor--;
+      }
+    }
   }
   me->cursor = 0;
   return OT_NIL;
@@ -1144,6 +1546,41 @@ bool oti_thread_foreground(ot_state* rt) {
   return true;
 }
 
+ot_value oti_thread_current(ot_state* rt) {
+  (void)rt;
+  return OT_NIL;
+}
+
+bool oti_thread_can_wait(ot_state* rt) {
+  (void)rt;
+  return false;
+}
+
+bool oti_thread_parked(ot_state* rt) {
+  (void)rt;
+  return false;
+}
+
+void oti_thread_io_retry(ot_state* rt) { (void)rt; }
+
+ot_value oti_thread_make_waitq(ot_state* rt) {
+  (void)rt;
+  return 0;
+}
+
+void oti_thread_io_wake(ot_state* rt, ot_value queue) {
+  (void)rt;
+  (void)queue;
+}
+
+ot_value oti_thread_io_wait(ot_state* rt, ot_value queue, int fd, bool writing) {
+  (void)rt;
+  (void)queue;
+  (void)fd;
+  (void)writing;
+  return 0;
+}
+
 static ot_value no_threads(ot_state* rt, size_t first, size_t count) {
   (void)first;
   (void)count;
@@ -1177,5 +1614,7 @@ const oti_builtin_def oti_thread_builtins[] = {
     THREAD_BUILTIN(B_THREAD_INTERRUPT, "%thread-interrupt", interrupt_builtin)
     THREAD_BUILTIN(B_MONITOR, "%monitor", monitor_builtin)
     THREAD_BUILTIN(B_DEMONITOR, "%demonitor", demonitor_builtin)
+    THREAD_BUILTIN(B_THREAD_WATCHDOG, "%thread-watchdog", watchdog_builtin)
+    THREAD_BUILTIN(B_WAIT_FDS, "%wait-fds", wait_fds_builtin)
     {0, NULL, NULL},
 };

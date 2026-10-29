@@ -1,6 +1,7 @@
 #ifndef OTIUM_DEV_TRANSPORT_H
 #define OTIUM_DEV_TRANSPORT_H
 #include <stdint.h>
+#include <stddef.h>
 /* One process-wide server, serviced on the interpreter thread. No managed
  * pointers cross this boundary. Calls are not thread-safe or reentrant.
  * open borrows path for the call; returns 0 or -1. close releases all queues
@@ -11,6 +12,8 @@ void ot_dev_close(void);
  * whether a complete request is queued. Invalid frames disconnect the client.
  * Payloads must be valid UTF-8 without NUL and at most 4 MiB. */
 int ot_dev_poll(int timeout);
+/* Flattened fd/event pairs, events 1=read and 2=write. Returns slots needed. */
+size_t ot_dev_fds(int* pairs, size_t capacity);
 /* Borrowed string, valid until next/close; NULL means the queue is empty.
  * client returns the ID of the last dequeued request. Copy before polling the
  * next request; the interpreter owns evaluation and response policy. */

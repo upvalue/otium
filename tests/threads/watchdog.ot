@@ -1,0 +1,6 @@
+(def fired #f)
+
+(%thread-watchdog (+ (otium.dev/%clock) 20) (fn () (set! fired #t)))
+(let wait () (unless fired (wait)))
+(unless (= (%thread-watchdog -1 nil) 0) (error "watchdog repeated"))
+(println "checks passed")

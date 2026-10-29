@@ -24,11 +24,11 @@ static uint32_t frame_size(struct sljit_compiler* c, sljit_s32 scratches) {
   return (uint32_t)(c->local_size + pushed * 8);
 }
 
-#define OFF_LIMIT 16
-_Static_assert(offsetof(ot_state, native.limit) == OFF_LIMIT, "the poll's displacement");
+#define OFF_LIMIT 0
+_Static_assert(offsetof(ot_state, poll_limit) == OFF_LIMIT, "the poll's displacement");
 
 /* The poll at function entries and loop back edges: one compare of the stack
- * pointer with native.limit, which sljit can't name, so it goes in as bytes:
+ * pointer with poll_limit, which sljit can't name, so it goes in as bytes:
  * cmp rsp, [rbx + limit]. */
 static struct sljit_jump* poll(struct sljit_compiler* c) {
   _Static_assert(OFF_LIMIT < 128, "poll uses an 8-bit displacement");

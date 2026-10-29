@@ -1,5 +1,5 @@
 ;; lint: allow-file(unbound-name) c/src/dev.ot defines %poll and %evaluate when --dev starts the server
-(require (otium.process :as process))
+(require (otium.process :as process) (otium.thread :as thread))
 
 (defonce pending '())
 
@@ -60,12 +60,17 @@
 (def (enabled?)
   (%enabled?))
 
-(def (event! event)
+(def- (publish-event! event)
   (when (enabled?)
     (set! event-count (+ event-count 1))
     (put! event :seq event-count)
     (set! events (cons event (take (- event-limit 1) events)))
     (%send 0 (%repr event))))
+
+(def (event! event)
+  (if %threaded
+      (thread/atomically (publish-event! event))
+      (publish-event! event)))
 
 (def- (reply! client value)
   (if (= client -1)
@@ -98,7 +103,7 @@
    :script (process/script-name)
    :arguments (process/arguments)
    :uptime-ms (- (%clock) launched)
-   :state (if paused?
+   :state (if (paused-state?)
               :paused
               :running)
    :event event-count})
@@ -132,10 +137,10 @@
       (loop (%next)))))
 
 (def (begin!)
-  (set! started (%clock))
+  (set-started! (%clock))
   (%deadline (if (= watchdog 0)
                  0
-                 (+ started watchdog))))
+                 (+ (request-started) watchdog))))
 
 (def (end!)
   (%deadline 0))
@@ -183,7 +188,7 @@
     (try
       (cond
         ((or (eq? op :eval) (eq? op :load))
-         (let ((old-start started)
+         (let ((old-start (request-started))
                (deadline (%deadline -1))
                (code (if (eq? op :load)
                          (read-file (get request :path))
@@ -207,26 +212,34 @@
                                             :condition (condition-data (get result :condition))
                                             :output (get result :output)})
                                        limit)))
-             (set! started old-start)
+             (set-started! old-start)
              (%deadline deadline))))
         ((eq? op :status) (reply! client {:id id :ok #t :value (status) :output ""}))
         ((eq? op :events)
          (let ((since (get request :since 0)))
            (reply! client {:id id :ok #t :value (reverse (filter (fn (e) (> (get e :seq) since)) events)) :output ""})))
-        ((eq? op :interrupt) (reply! client {:id id :ok #t :value "nil" :output ""}))
+        ((eq? op :interrupt)
+         (if %threaded
+             (interrupt-request! client request)
+             (reply! client {:id id :ok #t :value "nil" :output ""})))
         ((or (eq? op :continue) (eq? op :abort))
-         (unless paused? (error "program is not paused"))
-         (set! action op)
-         (reply! client {:id id :ok #t :value "nil" :output ""}))
+         (if %threaded
+             (resume-request! client request)
+             (begin
+               (unless paused? (error "program is not paused"))
+               (set! action op)
+               (reply! client {:id id :ok #t :value "nil" :output ""}))))
         (else (error "unknown dev operation" op)))
       (catch c (reply! client {:id id :ok #f :condition (condition-data c) :output ""})))))
 
 (def- (serve-one!)
   (let ((entry (car pending)))
     (set! pending (cdr pending))
-    (handle! (car entry) (cadr entry))))
+    (if (and %threaded (member (get (cadr entry) :op) '(:eval :load)))
+        (start-evaluation! (car entry) (cadr entry))
+        (handle! (car entry) (cadr entry)))))
 
-(def (service!)
+(def- (legacy-service!)
   (when (and (enabled?) (not paused?))
     (receive!)
     (let loop ()
@@ -234,7 +247,7 @@
         (serve-one!)
         (loop)))))
 
-(def (break! force? space)
+(def- (legacy-break! force? space)
   (receive!)
   (let ((previous-paused paused?)
         (previous-action action)
@@ -267,7 +280,7 @@
             abort?))
         #f)))
 
-(def (run)
+(def- (legacy-run)
   (let loop ()
     (%poll 50)
     (service!)
@@ -389,3 +402,141 @@
                         (set! stale (cons file stale)))))))
               (namespace-entries))
     (sort stale)))
+
+;; Native server: one transport thread, with an execution thread per eval.
+(defonce %server nil)
+
+(defonce %foreground nil)
+
+(defonce %contexts {})
+
+(defonce %evaluations '())
+
+(def- (context-for target)
+  (or (get %contexts target)
+      (let ((state {:thread target :waiters (%make-waitq) :started (%clock)}))
+        (put! %contexts target state)
+        state)))
+
+(def- (current-context)
+  (context-for (thread/self)))
+
+(def- (request-started)
+  (if %threaded
+      (get (current-context) :started 0)
+      started))
+
+(def- (set-started! value)
+  (if %threaded
+      (put! (current-context) :started value)
+      (set! started value)))
+
+(def- (paused-state?)
+  (if %threaded
+      (let ((found #f))
+        (for ((_target state :in %contexts))
+          (when (get state :paused) (set! found #t)))
+        found)
+      paused?))
+
+(def (%deadline value)
+  (cond
+    (%threaded (%thread-watchdog value
+                                 (fn ()
+                                   (when (pause-thread! (current-context) :watchdog nil)
+                                     (error "evaluation aborted")))))
+    ((= value -1) %deadline-at)
+    (else (set! %deadline-at value))))
+
+(def- (select-context client request paused-only?)
+  (let ((wanted (get request :eval))
+        (found nil))
+    (for ((state :in %evaluations))
+      (when (and (not found)
+                 (or (not wanted) (and (= client (get state :client)) (equal? wanted (get state :id))))
+                 (or (not paused-only?) (get state :paused)))
+        (set! found state)))
+    (or found
+        (and (not wanted)
+             %foreground
+             (let ((state (context-for %foreground))) (and (or (not paused-only?) (get state :paused)) state))))))
+
+(def- (pause-thread! state reason acknowledged)
+  (put! state :paused #t :action #f)
+  (end!)
+  (event! {:event :paused
+           :reason reason
+           :eval (get state :id)
+           :elapsed-ms (- (%clock) (get state :started 0))
+           :ns (str (current-ns))})
+  (when acknowledged (acknowledged))
+  (defer
+    (begin
+      (thread/atomically (let loop ()
+                           (unless (get state :action)
+                             (%park (get state :waiters) nil)
+                             (loop))))
+      (eq? (get state :action) :abort))
+    (put! state :paused #f)
+    (event! {:event :resumed :eval (get state :id)})
+    (begin!)))
+
+(def- (interrupt-request! client request)
+  (let ((state (select-context client request #f))
+        (ack (fn () (reply! client {:id (get request :id) :ok #t :value "nil" :output ""}))))
+    (unless state (error "no matching evaluation"))
+    (if (get state :paused)
+        (ack)
+        (thread/interrupt! (get state :thread)
+                           (fn () (when (pause-thread! state :interrupt ack) (error "evaluation aborted")))))))
+
+(def- (resume-request! client request)
+  (let ((state (select-context client request #t)))
+    (unless state (error "program is not paused"))
+    (thread/atomically (reply! client {:id (get request :id) :ok #t :value "nil" :output ""})
+                       (put! state :action (get request :op))
+                       (%wake-one (get state :waiters)))))
+
+(def- (finish-evaluation!)
+  (end!)
+  (thread/atomically (let ((self (thread/self)))
+                       (set! %evaluations (filter (fn (state) (not (eq? (get state :thread) self))) %evaluations))
+                       (put! %contexts self nil))))
+
+(def- (start-evaluation! client request)
+  (thread/atomically (let ((worker (thread/spawn-named :dev-eval (fn ()
+                                                                   (defer
+                                                                     (handle! client request)
+                                                                     (finish-evaluation!)))))
+                           (state (context-for worker)))
+                       (put! state :id (get request :id) :client client)
+                       (set! %evaluations (cons state %evaluations)))))
+
+(def (service!)
+  (unless %threaded (legacy-service!)))
+
+(def (break! force? space)
+  (if %threaded
+      (and force? (pause-thread! (current-context) :interrupt nil))
+      (legacy-break! force? space)))
+
+(def- (server-loop)
+  (let loop ()
+    (when %active
+      (receive!)
+      (let requests ()
+        (unless (null? pending)
+          (serve-one!)
+          (requests)))
+      (%wait-fds (%transport-fds) (%thread-deadline 0.05))
+      (loop))))
+
+(def (%start-thread!)
+  (set! %foreground (thread/self))
+  (context-for %foreground)
+  (set! %server (thread/daemon! (thread/spawn-named :dev-server server-loop))))
+
+(def (run)
+  (if %threaded
+      (thread/join %server)
+      (legacy-run)))

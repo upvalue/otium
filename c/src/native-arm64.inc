@@ -44,17 +44,17 @@ static void instruction(struct sljit_compiler* c, uint32_t word) {
 #define A64_BR(rn) (0xd61f0000u | (rn) << 5)
 #define A64_HS 2
 
-_Static_assert(offsetof(ot_state, native.limit) % 8 == 0 &&
-                   offsetof(ot_state, native.limit) < 32768 &&
+_Static_assert(offsetof(ot_state, poll_limit) % 8 == 0 &&
+                   offsetof(ot_state, poll_limit) < 32768 &&
                    offsetof(ot_state, native.base_limit) % 8 == 0 &&
                    offsetof(ot_state, native.base_limit) < 32768,
                "the checks load with a scaled 12-bit offset");
 
 /* The poll at function entries and loop back edges: one compare of the stack
- * pointer with native.limit, which sljit can't name: ldr x9, [x19, limit];
+ * pointer with poll_limit, which sljit can't name: ldr x9, [x19, limit];
  * cmp sp, x9. */
 static struct sljit_jump* poll(struct sljit_compiler* c) {
-  instruction(c, A64_LDR(9, 19, offsetof(ot_state, native.limit)));
+  instruction(c, A64_LDR(9, 19, offsetof(ot_state, poll_limit)));
   instruction(c, A64_CMP_SP(9));
   sljit_set_current_flags(c, SLJIT_CURRENT_FLAGS_SUB | SLJIT_CURRENT_FLAGS_COMPARE |
                                  SLJIT_SET_LESS);

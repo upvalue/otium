@@ -201,6 +201,25 @@ void ot_dev_send(int id, const char* text) {
   }
 }
 
+size_t ot_dev_fds(int* pairs, size_t capacity) {
+  if (listener < 0) return 0;
+  size_t n = 0;
+  if (capacity >= 2) {
+    pairs[0] = listener;
+    pairs[1] = 1;
+  }
+  n = 2;
+  for (client* c = clients; c; c = c->next) {
+    if (c->fd < 0) continue;
+    if (n + 2 <= capacity) {
+      pairs[n] = c->fd;
+      pairs[n + 1] = 1 | (c->queued ? 2 : 0);
+    }
+    n += 2;
+  }
+  return n;
+}
+
 int ot_dev_poll(int timeout) {
   if (listener < 0) return 0;
   size_t count = 1;

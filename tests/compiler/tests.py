@@ -80,3 +80,19 @@ def known_table(t):
     """Every known-function entry names a core cell with the stated arity."""
     t.expect(t.otium('--no-project', '-L', LIB, ROOT / 'tests/compiler/known-check.ot'),
              contains=[' 0  failures'])
+
+
+@test('compiler inline bodies')
+def inline_bodies(t):
+    """The boot file keeps every inline candidate's body, which parses back and
+    verifies. A VM process loads core from source, so has none."""
+    t.expect(t.otium('--no-project', '-L', LIB, '-e',
+                     '(require otium.compiler.ir :as ir) (require otium.compiler.known :as known) '
+                     '(for ((name :in (if (%native?) known/inline-candidates (quote ())))) '
+                     '  (let ((text (get %inline-bodies name))) '
+                     '    (unless text (println "missing " name)) '
+                     '    (when text '
+                     '      (ir/verify (ir/text->tree text)) '
+                     '      (unless (equal? (ir/tree->text (ir/text->tree text)) text) (println "differs " name))))) '
+                     '(println "checked") (exit 0)'),
+             stdout='checked\n')

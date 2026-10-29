@@ -1,4 +1,9 @@
 ;; Derived runtime operations used by the shared core library.
+
+;; The text form of core functions the native compiler may inline, by name.
+;; Boot files fill it as they load; see lib/otium/compiler/known.ot.
+(def %inline-bodies {})
+
 (def (identity value) value)
 (def (inc value) (+ value 1))
 (def (dec value) (- value 1))

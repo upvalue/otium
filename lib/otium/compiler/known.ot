@@ -43,6 +43,15 @@
 (def (direct? name)
   (flag? name :direct))
 
+;; Core functions written in Otium whose bodies the compiler keeps, in text
+;; form, for the inline pass. This stands in for (declare inline) in their
+;; definitions (design, section 6.2) until declarations exist. Each is kept
+;; only if inlining it measures well.
+(def inline-candidates
+  '(identity inc dec zero? true? false? even? odd? first second third rest))
+
+(def (inline-candidate? name) (and (memq name inline-candidates) #t))
+
 ;; --- Pairs and lists ---------------------------------------------------------
 
 (defknown car (pair) any :flags (:flushable-if-typed :fast-path))

@@ -28,7 +28,8 @@
 ;; fixnums and pairs, the poll, errors.
 
 (ns otium.compiler.lower
-  (:require (otium.compiler.convert :as cv)))
+  (:require (otium.compiler.convert :as cv)
+            (otium.compiler.options :as options)))
 
 ;; --- Representation ---------------------------------------------------------
 
@@ -659,9 +660,15 @@
                   (emit! fc [:mov [:mem at 12] (get args 2)])
                   (emit! fc [:mov r a]))))))
     (emit! fc [:label join])
-    (cold! fc [:label slow])
-    (cold! fc [:call :cell j args r #f (fc :handlers) offset])
-    (cold! fc [:jump join])
+    (if (direct-slow-path? node)
+        (in-cold fc (fn ()
+                      (emit! fc [:label slow])
+                      (builtin-ccall! fc name args r offset)
+                      (emit! fc [:jump join])))
+        (begin
+          (cold! fc [:label slow])
+          (cold! fc [:call :cell j args r #f (fc :handlers) offset])
+          (cold! fc [:jump join])))
     r))
 
 ;; A boolean from a test.
@@ -758,13 +765,40 @@
 ;; a helper runs the builtin, skipping the call_other stub and dispatch. The
 ;; call keeps its caller's frame, so errors point at the call.
 (def (direct-builtin fc node offset)
-  (let ((ops (map (fn (op) (in-vreg-or-imm fc op)) (arguments fc (get node 4))))
-        (u (fc :u)) (r (vreg! fc)))
+  (let ((ops (map (fn (op) (in-vreg-or-imm fc op)) (arguments fc (get node 4)))) (r (vreg! fc))
+        (name (get node 2)))
+    (if (and (memq name '(set-car! set-cdr!)) (= (length ops) 2))
+        (pair-store fc name ops r offset)
+        (builtin-ccall! fc name ops r offset))
+    r))
+
+;; set-car! and set-cdr! of a pair, inline: one store, and the pair back.
+(def (pair-store fc name ops r offset)
+  (let ((x (in-vreg fc (get ops 0))) (v (get ops 1)) (slow (label! fc)) (join (label! fc)))
+    (pair-check fc x slow)
+    ;; A frozen pair, a table's key, has the top bit of its kind word set.
+    (let ((k (raw! fc)))
+      (emit! fc [:load8 k [:mem x (+ offset-kind 3)]])
+      (emit! fc [:op2u :and :zero k [:imm 128]])
+      (emit! fc [:jcond :nonzero slow]))
+    (emit! fc [:mov [:mem x (if (eq? name 'set-car!) offset-car offset-cdr)] v])
+    (emit! fc [:mov r x])
+    (emit! fc [:label join])
+    (in-cold fc (fn ()
+                  (emit! fc [:label slow])
+                  (builtin-ccall! fc name [x v] r offset)
+                  (emit! fc [:jump join])))))
+
+(def (builtin-ccall! fc name ops r offset)
+  (let ((u (fc :u)))
     (when (> (length ops) (or (u :max-args) 0)) (put! u :max-args (length ops)))
     (store-args fc ops)
-    (ccall! fc h-builtin [[:imm (builtin-id (symbol->string (get node 2)))] [:imm (length ops)]] r
-            offset)
-    r))
+    (ccall! fc h-builtin [[:imm (builtin-id (symbol->string name))] [:imm (length ops)]] r offset)))
+
+;; get, put! and length's slow path, when the global is locked core's, calls
+;; the builtin directly.
+(def (direct-slow-path? node)
+  (and (%native-core-cell? (get node 3)) (%core-locked?) (options/enabled? "direct")))
 
 ;; Builtins the compiler calls itself, and core builtins convert marked, keep
 ;; their caller's frame, so errors point at the call.

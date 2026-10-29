@@ -1,0 +1,48 @@
+;; Core builtins called directly, with inline fast paths, and transformed.
+
+(def (show label x)
+  (display label)
+  (display " ")
+  (write x)
+  (newline))
+
+(def (attempt label thunk)
+  (show label (try (thunk) (catch e (list :error (condition-message e))))))
+
+;; Direct calls to builtins, including wrong arguments.
+(def (classify x) (list (symbol? x) (string? x) (number? x) (keyword? x)))
+(show "classify" (map classify (list 'a "b" 3 :d)))
+(attempt "string-length" (fn () (string-length 3)))
+(attempt "arity" (fn () (apply symbol? '(1 2))))
+(show "str" (str "a" 1 :b))
+(show "many" (string-append "a" "b" "c" "d" "e" "f" "g" "h"))
+
+;; list and append.
+(def (effects)
+  (let ((log []))
+    (list (begin (push! log 1) :a) (begin (push! log 2) :b) (begin (push! log 3) :c) log)))
+(show "list order" (effects))
+(show "list 7" (list 1 2 3 4 5 6 7))
+(show "append" (append '(1 2) '(3)))
+(show "append empty" (append '() '(3)))
+(attempt "append improper tail" (fn () (append (quote (1)) 2)))
+(attempt "append improper" (fn () (append '(1 . 2) '(3))))
+(attempt "append not a list" (fn () (append 1 '(3))))
+
+;; set-car! and set-cdr!, including a frozen key and a non-pair.
+(def p (cons 1 2))
+(show "set-car!" (set-car! p 10))
+(show "set-cdr!" (set-cdr! p '(20)))
+(attempt "set-car! not a pair" (fn () (set-car! 5 1)))
+(def t {})
+(put! t (list 1 2) :x)
+(attempt "set-cdr! frozen" (fn () (set-cdr! (get (keys t) 0) 3)))
+
+;; get, put! and length on tables, arrays and strings.
+(def a [1 2 3])
+(def tbl {:k 1})
+(show "get" (list (get a 1) (get tbl :k) (get tbl :missing) (get "abc" 1)))
+(attempt "get out of range" (fn () (get a 9)))
+(show "put!" (list (put! a 0 :z) (put! tbl :j 2)))
+(show "length" (list (length a) (length tbl) (length "abcd") (length '(1 2))))
+(attempt "length bad" (fn () (length 5)))

@@ -53,9 +53,9 @@
 
 (defknown list rest list :flags (:foldable :flushable :allocates :direct))
 
-(defknown set-car! (pair any) nil :flags (:direct))
+(defknown set-car! (pair any) pair :flags (:direct :fast-path))
 
-(defknown set-cdr! (pair any) nil :flags (:direct))
+(defknown set-cdr! (pair any) pair :flags (:direct :fast-path))
 
 ;; --- Predicates ----------------------------------------------------------------
 
@@ -176,9 +176,9 @@
 
 (defknown pop! (array) any :flags (:direct))
 
-(defknown keys (table) list :flags (:allocates :direct))
+(defknown keys (table) array :flags (:allocates :direct))
 
-(defknown values (table) list :flags (:allocates :direct))
+(defknown values (table) array :flags (:allocates :direct))
 
 (defknown copy (any) any :flags (:allocates :direct))
 

@@ -11,11 +11,13 @@
 ;; entry, and staging slots for the parameters of variadic functions.
 
 (ns otium.compiler.emit
-  (:require (otium.compiler.lower :refer (fc-closure fc-code fc-info fc-live fc-location fc-optional-regs
-                                          fc-params fc-raw fc-rest-reg fc-save-base fc-slots fc-spills
-                                          fc-stage fc-swap fc-target set-fc-save-base! set-fc-slots!
-                                          set-fc-stage! set-fc-swap! set-fc-target! set-unit-descriptors!
-                                          set-unit-labels! set-unit-max-args! unit-cells unit-descriptors
+  (:require (otium.compiler.convert :as cv)
+            (otium.compiler.lower :refer (fc-closure fc-code fc-info fc-live fc-location
+                                          fc-optional-regs fc-params fc-raw fc-rest-reg fc-save-base
+                                          fc-slots fc-spills fc-stage fc-swap fc-target
+                                          set-fc-save-base! set-fc-slots! set-fc-stage! set-fc-swap!
+                                          set-fc-target! set-unit-descriptors! set-unit-labels!
+                                          set-unit-max-args! unit-cells unit-descriptors
                                           unit-functions unit-labels unit-literals unit-max-args
                                           unit-statics))))
 
@@ -130,11 +132,11 @@
       (set-fc-target! fc (+ save (length pool) 1))
       (set-fc-stage! fc (+ save (length pool) 2))
       (set-fc-slots! fc (+ save (length pool) 2
-                          (if (simple-entry? info) 0 (+ 2 (length (info :params))
-                                                          (length (info :optionals)))))))))
+                          (if (simple-entry? info) 0 (+ 2 (length (cv/fn-params info))
+                                                          (length (cv/fn-optionals info)))))))))
 
 (def (simple-entry? info)
-  (and (<= (length (info :params)) 5) (= 0 (length (info :optionals))) (nil? (info :rest))))
+  (and (<= (length (cv/fn-params info)) 5) (= 0 (length (cv/fn-optionals info))) (nil? (cv/fn-rest info))))
 
 (def (save-slot fc r)
   (let find-it ((i 0))
@@ -218,7 +220,7 @@
       (let ((loc (location fc v)))
         (push! slots (if (eq? (get loc 0) :reg) (save-slot fc (get loc 1)) (get loc 1)))))
     (let ((descriptors (unit-descriptors (emitter-unit e))))
-      (push! descriptors [((fc-info fc) :index) slots offset (and (pair? flags) (car flags))])
+      (push! descriptors [(cv/fn-index (fc-info fc)) slots offset (and (pair? flags) (car flags))])
       (- (length descriptors) 1))))
 
 (def (save-live! e i)
@@ -243,7 +245,7 @@
 
 (def (entry! e)
   (let ((fc (emitter-fc e)) (info (fc-info (emitter-fc e))) (u (emitter-unit e)))
-    (let ((required (length (info :params))) (optional (length (info :optionals)))
+    (let ((required (length (cv/fn-params info))) (optional (length (cv/fn-optionals info)))
           (arity (emitter-arity-label e)))
       (if (simple-entry? info)
           (begin
@@ -254,16 +256,16 @@
                                           (range required))))))
           (let ((stage (fc-stage fc)))
             (op! e ns-cmpj (get (emitter-conditions e) :lt) [:reg 0] [:imm required] arity)
-            (unless (info :rest)
+            (unless (cv/fn-rest info)
               (op! e ns-cmpj (get (emitter-conditions e) :gt) [:reg 0] [:imm (+ required optional)] arity))
             (mov! e [:state sf-argc] [:reg 0])
             (mov! e [:state sf-callee] [:reg 1])
             (mov! e [:reg 0] [:state sf-args])
             (dotimes (i 5) (mov! e [:mem 0 (* 8 i)] [:reg (+ 2 i)]))
-            (when (info :rest)
+            (when (cv/fn-rest info)
               (mov! e [:reg 1] [:imm (+ required optional)])
               (let ((d (let ((descriptors (unit-descriptors u)))
-                         (push! descriptors [(info :index) [] (info :offset)])
+                         (push! descriptors [(cv/fn-index info) [] (cv/fn-offset info)])
                          (- (length descriptors) 1))))
                 (op! e ns-ccall h-rest 1 d))
               (mov! e [:slot stage] [:reg 0]))
@@ -282,7 +284,7 @@
               (mov! e (location fc (get (fc-params fc) i)) [:slot (+ stage 2 i)]))
             (dotimes (i optional)
               (mov! e (location fc (get (fc-optional-regs fc) i)) [:slot (+ stage 2 required i)]))
-            (when (info :rest) (mov! e (location fc (fc-rest-reg fc)) [:slot stage])))))))
+            (when (cv/fn-rest info) (mov! e (location fc (fc-rest-reg fc)) [:slot stage])))))))
 
 (def (fresh-label! e)
   (let ((u (emitter-unit e)))
@@ -406,8 +408,8 @@
     (frame-layout fc)
     (set-emitter-fc! e fc)
     (set-emitter-arity-label! e (fresh-label! e))
-    (op! e ns-func (info :index))
-    (label-op! e (info :xep))
+    (op! e ns-func (cv/fn-index info))
+    (label-op! e (cv/fn-xep info))
     (op! e ns-enter (scratch-count fc) (fc-slots fc))
     (let ((code (fc-code fc)))
       (dotimes (i (length code)) (instruction! e i (get code i))))
@@ -437,8 +439,8 @@
          (unit-cells u)
          (list-to-array
           (map (fn (info)
-                 [(info :name) (length (info :params)) (length (info :optionals))
-                  (if (info :rest) #t #f) (info :offset)])
+                 [(cv/fn-name info) (length (cv/fn-params info)) (length (cv/fn-optionals info))
+                  (if (cv/fn-rest info) #t #f) (cv/fn-offset info)])
                (array-to-list (unit-functions u))))
          (unit-descriptors u)
          (unit-statics u)

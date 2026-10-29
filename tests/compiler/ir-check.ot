@@ -47,15 +47,15 @@
                     #t
                     #f)])))
     (def (function! info)
-      (var! (info :self))
-      (for ((v :in (info :params)))
+      (var! (cv/fn-self info))
+      (for ((v :in (cv/fn-params info)))
         (var! v))
-      (for ((pair :in (info :optionals)))
+      (for ((pair :in (cv/fn-optionals info)))
         (var! (get pair 0))
         (node! (get pair 1)))
-      (var! (info :rest))
-      (node! (info :body))
-      (push! out (cons :captures (map number (array-to-list (info :captures))))))
+      (var! (cv/fn-rest info))
+      (node! (cv/fn-body info))
+      (push! out (cons :captures (map number (array-to-list (cv/fn-captures info))))))
     (def (node! node)
       (case (get node 0)
         ((:lref :lset) (var! (get node 2)))
@@ -209,8 +209,8 @@
   (let ((info (ir/text->tree '(fn nil
                                 ()
                                 (let ((x.1 1)) x.1)))))
-    (let ((body (info :body)))
-      (put! info :body [:let 0 (get body 2) [[:const 0 2]] body])
+    (let ((body (cv/fn-body info)))
+      (cv/set-fn-body! info [:let 0 (get body 2) [[:const 0 2]] body])
       (rejects "bound twice" "bound twice" info)))
   (rejects "recur not in tail position"
            "not in tail position"
@@ -238,33 +238,33 @@
   (let ((info (ir/text->tree '(fn nil
                                 ()
                                 1))))
-    (put! info :body [:if 0 [:const 0 1] [:const 0 2]])
+    (cv/set-fn-body! info [:if 0 [:const 0 1] [:const 0 2]])
     (rejects "shape" "wrong number of fields" info))
   (let ((info (ir/text->tree '(fn nil
                                 ()
                                 1))))
-    (put! info :body [:bogus 0])
+    (cv/set-fn-body! info [:bogus 0])
     (rejects "unknown node" "unknown node" info))
   (let ((info (ir/text->tree '(fn nil
                                 (x.1)
                                 (fn nil
                                   ()
                                   x.1)))))
-    (put! ((info :body) 2) :captures [])
+    (cv/set-fn-captures! ((cv/fn-body info) 2) [])
     (rejects "missing capture" "missing from captures" info))
   (let ((info (ir/text->tree '(fn nil
                                 (x.1)
                                 (fn nil
                                   ()
                                   1)))))
-    (push! (((info :body) 2) :captures) (get (info :params) 0))
+    (push! (cv/fn-captures ((cv/fn-body info) 2)) (get (cv/fn-params info) 0))
     (rejects "extra capture" "doesn't use" info))
   (let ((info (ir/text->tree '(fn nil
                                 (x.1)
                                 (fn nil
                                   (y.2)
                                   y.2)))))
-    (cv/set-var-owner! (get (((info :body) 2) :params) 0) info)
+    (cv/set-var-owner! (get (cv/fn-params ((cv/fn-body info) 2)) 0) info)
     (rejects "owner" "owned by another function" info)))
 
 (let ((args (otium.process/arguments)))

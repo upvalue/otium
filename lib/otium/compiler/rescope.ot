@@ -35,8 +35,8 @@
     (when (get (r :uninit) (cv/var-id var)) (cv/set-var-early! var #t))
     (let up ((g f))
       (when (and g (not (eq? g (cv/var-owner var))))
-        (let ((captures (g :captures))) (unless (find (fn (v) (eq? v var)) captures) (push! captures var)))
-        (up (g :parent))))))
+        (let ((captures (cv/fn-captures g))) (unless (find (fn (v) (eq? v var)) captures) (push! captures var)))
+        (up (cv/fn-parent g))))))
 
 ;; An assignment. A definition's variable has one assignment for its
 ;; definition; any other makes it assigned.
@@ -52,15 +52,15 @@
   (use! r var f))
 
 (def (walk-function r info)
-  (put! info :captures [])
-  (when (info :self) (bind! (info :self)))
-  (for ((v :in (info :params)))
+  (cv/set-fn-captures! info [])
+  (when (cv/fn-self info) (bind! (cv/fn-self info)))
+  (for ((v :in (cv/fn-params info)))
     (bind! v))
-  (for ((pair :in (info :optionals)))
+  (for ((pair :in (cv/fn-optionals info)))
     (bind! (get pair 0))
     (walk r (get pair 1) info))
-  (when (info :rest) (bind! (info :rest)))
-  (walk r (info :body) info))
+  (when (cv/fn-rest info) (bind! (cv/fn-rest info)))
+  (walk r (cv/fn-body info) info))
 
 (def (walk-all r nodes f)
   (for ((n :in nodes))
@@ -78,7 +78,7 @@
     ((:fn) (walk-function r (get node 2)))
     ((:call)
      (let ((callee (get node 2)))
-       (if (and (eq? (get callee 0) :fn) ((get callee 2) :self))
+       (if (and (eq? (get callee 0) :fn) (cv/fn-self (get callee 2)))
            (begin
              (walk-all r (get node 3) f)
              (walk r callee f))

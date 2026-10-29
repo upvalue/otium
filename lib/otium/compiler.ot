@@ -75,7 +75,7 @@
 ;; The name of the inline candidate a converted top-level form defines, or
 ;; nil: (def (name ...) ...) of a core function known.ot lists.
 (def (inline-definition info)
-  (let ((body (info :body)))
+  (let ((body (convert/fn-body info)))
     (when (and (eq? (get body 0) :gdef) (eq? (get (get body 3) 0) :fn) (%native-core-cell? (get body 2))
                (%core-locked?))
       (let ((name (string->symbol (cdr (%native-cell-name (get body 2))))))
@@ -88,7 +88,7 @@
   (let ((info (convert form)))
     (let ((name (inline-definition info)))
       (when name
-        (let ((text (ir/tree->text (get (get (info :body) 3) 2))))
+        (let ((text (ir/tree->text (get (get (convert/fn-body info) 3) 2))))
           (put! otium.core/%inline-bodies name text)
           (set! info (convert (list 'begin form (list 'put! 'otium.core/%inline-bodies (list 'quote name)
                                                       (list 'quote text))))))))
@@ -100,7 +100,7 @@
     (let ((u (get lowered 0)) (contexts (get lowered 1)))
       (when sizes?
         (for ((fc :in contexts))
-          (display-to (current-error-port) (str "size " ((lower/fc-info fc) :name) " " (length (lower/fc-code fc)) "\n"))))
+          (display-to (current-error-port) (str "size " (convert/fn-name (lower/fc-info fc)) " " (length (lower/fc-code fc)) "\n"))))
       (timed :allocate (fn () (for ((fc :in contexts)) (alloc/allocate fc))))
       (timed :emit (fn () (emit/emit-unit u contexts))))))
 
@@ -113,7 +113,7 @@
     (let ((lowered (lower/lower-top info)))
       (for ((fc :in (get lowered 1)))
         (alloc/allocate fc)
-        (println "function " ((lower/fc-info fc) :index) " " ((lower/fc-info fc) :name))
+        (println "function " (convert/fn-index (lower/fc-info fc)) " " (convert/fn-name (lower/fc-info fc)))
         (let ((code (lower/fc-code fc)))
           (dotimes (i (length code))
             (let ((ins (get code i)))

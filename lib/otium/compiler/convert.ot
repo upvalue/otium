@@ -32,9 +32,11 @@
 ;; A variable is a Var record: its name, id, owner (its function), whether
 ;; it's captured, assigned, early (captured before initialized),
 ;; initialized, and self (refers to its own function's closure), the loop it
-;; names and the forms of the body it was defined in. A function is a table
-;; with :name, :params, :optionals ([var default] pairs), :rest, :body,
-;; :captures, :self, :offset and :parent.
+;; names and the forms of the body it was defined in. A function is an Fn
+;; record: its name, params, optionals ([var default] pairs), rest, body,
+;; self, captures, offset and parent function. lower gives it an index,
+;; its entry label (xep) and, for a closure without captures, the literal
+;; that holds it (static).
 
 (def- *var-count* 0)
 
@@ -44,8 +46,10 @@
   (set! *var-count* (+ *var-count* 1))
   (make-var :name name :id *var-count* :owner owner :initialized initialized))
 
-(def (make-fn name parent offset)
-  {:name name :params [] :optionals [] :captures [] :offset offset :parent parent})
+(defrecord Fn (name params optionals rest body self captures offset parent index xep static))
+
+(def (new-fn name parent offset)
+  (make-fn :name name :params [] :optionals [] :captures [] :offset offset :parent parent))
 
 ;; --- Errors ------------------------------------------------------------------
 
@@ -87,10 +91,10 @@
   (unless (var-initialized var) (set-var-early! var #t))
   (let walk ((f func))
     (when (and f (not (eq? f (var-owner var))))
-      (let ((captures (f :captures)))
+      (let ((captures (fn-captures f)))
         (unless (find (fn (v) (eq? v var)) captures)
           (push! captures var)))
-      (walk (f :parent)))))
+      (walk (fn-parent f)))))
 
 ;; --- Constants ------------------------------------------------------------
 
@@ -437,16 +441,16 @@
 ;; Convert (fn params . body). self, when given, is the variable whose name
 ;; refers to the function itself inside its body.
 (def (lambda-form params body site off name self)
-  (let ((info (make-fn name (site-fn site) off))
+  (let ((info (new-fn name (site-fn site) off))
         (env (site-env site)))
     (when self
       (let ((own (new-var (var-name self) info #t)))
         (set-var-self! own #t)
-        (put! info :self own)
+        (set-fn-self! info own)
         (set! env (bind env (var-name self) own))))
     (cond ((symbol? params)
            (let ((v (new-var params info #t)))
-             (put! info :rest v)
+             (set-fn-rest! info v)
              (set! env (bind env params v))))
           ((not (or (pair? params) (null? params)))
            (fail "expected a parameter list or rest symbol" params off))
@@ -457,7 +461,7 @@
                     (if (memq p seen)
                         (fail "duplicate parameter" p off)
                         (let ((v (new-var p info #t)))
-                          (put! info :rest v)
+                          (set-fn-rest! info v)
                           (set! env (bind env p v)))))
                    ((eq? (car p) '&optional)
                     (when (null? (cdr p))
@@ -470,7 +474,7 @@
                             (fail "expected (name default) after &optional" spec off))
                           (when (memq (car spec) seen) (fail "duplicate parameter" (car spec) off))
                           (let ((v (new-var (car spec) info #t)))
-                            (push! (info :optionals)
+                            (push! (fn-optionals info)
                                    [v (expression (car (cdr spec))
                                                   (new-site info env #f #f #f (site-ctx site))
                                                   off)])
@@ -480,11 +484,11 @@
                    ((memq (car p) seen) (fail "duplicate parameter" (car p) off))
                    (else
                     (let ((v (new-var (car p) info #t)))
-                      (push! (info :params) v)
+                      (push! (fn-params info) v)
                       (set! env (bind env (car p) v))
                       (walk (cdr p) (cons (car p) seen))))))))
     (let ((forms (if (and (pair? body) (string? (car body)) (pair? (cdr body))) (cdr body) body)))
-      (put! info :body (body-forms forms (new-site info env #t #t #f (site-ctx site)) off)))
+      (set-fn-body! info (body-forms forms (new-site info env #t #t #f (site-ctx site)) off)))
     info))
 
 ;; --- let and loops -----------------------------------------------------------
@@ -937,8 +941,8 @@
     (let attempt ((n 0))
       (put! ctx :retry #f)
       (put! ctx :loops 0)
-      (let ((info (make-fn nil nil (offset-of form 0))))
-        (put! info :body (expression form (new-site info '() #t #t #t ctx) (offset-of form 0)))
+      (let ((info (new-fn nil nil (offset-of form 0))))
+        (set-fn-body! info (expression form (new-site info '() #t #t #t ctx) (offset-of form 0)))
         (cond ((not (ctx :retry)) info)
               ((>= n 8) (%compile-error "compiler binding analysis did not settle" (offset-of form 0)))
               (else (attempt (+ n 1))))))))

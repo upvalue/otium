@@ -210,11 +210,11 @@
 (def (walk-function st info outer)
   (let ((env {}))
     (when outer
-      (for ((var :in (info :captures)))
+      (for ((var :in (cv/fn-captures info)))
         (set-var! env var (var-type outer var))))
-    (for ((pair :in (info :optionals)))
+    (for ((pair :in (cv/fn-optionals info)))
       (put! pair 1 (walk st (get pair 1) env)))
-    (put! info :body (walk st (info :body) env))))
+    (cv/set-fn-body! info (walk st (cv/fn-body info) env))))
 
 (def (walk-all st nodes env)
   (let ((types []))

@@ -59,7 +59,7 @@
   (let ((s (make-state :env {}
                        :refs {}
                        :fn info
-                       :effort (+ base-effort (* 4 (node-size (info :body))))
+                       :effort (+ base-effort (* 4 (node-size (cv/fn-body info))))
                        :attempt nil
                        :inlining '())))
     (simplify-function s info)
@@ -88,9 +88,9 @@
               (add! y)))))
     (if (eq? (get node 0) :fn)
         (let ((info (get node 2)))
-          (for ((pair :in (info :optionals)))
+          (for ((pair :in (cv/fn-optionals info)))
             (push! out (get pair 1)))
-          (push! out (info :body)))
+          (push! out (cv/fn-body info)))
         (for ((i :range 2 (length node)))
           (add! (get node i))))
     out))
@@ -291,9 +291,9 @@
 (def (simplify-function s info)
   (let ((outer (state-fn s)))
     (set-state-fn! s info)
-    (for ((pair :in (info :optionals)))
+    (for ((pair :in (cv/fn-optionals info)))
       (put! pair 1 (simplify s (get pair 1) :value)))
-    (put! info :body (simplify s (info :body) :value))
+    (cv/set-fn-body! info (simplify s (cv/fn-body info) :value))
     (set-state-fn! s outer)))
 
 (def (simplify-ref s node ctx)
@@ -529,11 +529,11 @@
 
 (def (inlinable? s info args)
   (and (> (state-effort s) 0)
-       (= (length (info :optionals)) 0)
-       (nil? (info :rest))
-       (= (length (info :params)) (length args))
+       (= (length (cv/fn-optionals info)) 0)
+       (nil? (cv/fn-rest info))
+       (= (length (cv/fn-params info)) (length args))
        (not (memq info (state-inlining s)))
-       (not (and (info :self) (mentions? (info :body) (info :self))))))
+       (not (and (cv/fn-self info) (mentions? (cv/fn-body info) (cv/fn-self info))))))
 
 ;; Whether node refers to var, inside functions too.
 (def (mentions? node var)
@@ -596,21 +596,21 @@
 ;; in the calling function. nil when it grows past the size limit, or the
 ;; fuel (OTIUM_OPT_FUEL) has run out.
 (def (try-inline s node info args ready ctx)
-  (when (options/rewrite? (str "inline " (info :name)) (get node 1))
+  (when (options/rewrite? (str "inline " (cv/fn-name info)) (get node 1))
     (try-inline-now s node info args ready ctx)))
 
 (def (try-inline-now s node info args ready ctx)
   (let ((owner (state-fn s))
         (renames {})
         (params []))
-    (for ((v :in (info :params)))
+    (for ((v :in (cv/fn-params info)))
       (let ((new (cv/new-var (cv/var-name v) owner #t)))
         (cv/set-var-captured! new (cv/var-captured v))
         (cv/set-var-assigned! new (cv/var-assigned v))
         (cv/set-var-early! new (cv/var-early v))
         (put! renames (cv/var-id v) new)
         (push! params new)))
-    (let ((body (ir/copy-node (info :body) owner renames))
+    (let ((body (ir/copy-node (cv/fn-body info) owner renames))
           (outer (state-attempt s))
           (attempt (make-attempt :size 0 :limit (+ 80 (* 2 (node-size node))))))
       (unless (get node 4) (untail! body))

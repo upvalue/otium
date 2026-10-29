@@ -17,6 +17,8 @@
 ;;                                 [:gcall off cell args tail? check? tail-position?],
 ;;                                 and :bcall with a builtin for the cell
 ;;   (prim name a ...)  (gprim name ns/f a ...)  (known [:tail] name ns/f a ...)
+;;                                 prim's names include the types pass's
+;;                                 unchecked %car, %cdr, %fx+, %fx<, ...
 ;;   (loop name.1 ((i.2 init) ...) body)  (recur name.1 a ...)  (while test body)
 ;;   (try body condition.1 (catch x.2 body) (catch-if pred x.3 body) ...)
 ;;   (cleanup [:outcome] f body)   (handlers ((pred handler) ...) body)
@@ -532,6 +534,11 @@
       (for ((id var :in free))
         (unless (get seen id) (verify-fail "free variable missing from captures" nil (var :name)))))))
 
+;; The primitives lower compiles inline: the builtins convert inlines, and
+;; the unchecked operations the types pass makes from them.
+(def- primitive-names
+  '(+ - * < <= > >= = eq? cons car cdr not null? pair? %car %cdr %fx+ %fx- %fx* %fx< %fx<= %fx> %fx>= %fx=))
+
 ;; Check node in f. loops are the loops node is in tail position of.
 (def (check v node f loops)
   (unless (and (array? node) (> (length node) 1) (keyword? (get node 0)) (int? (get node 1)))
@@ -586,7 +593,7 @@
      (check-nodes v (get node 3) node f))
     ((:prim)
      (shape node 4)
-     (unless (symbol? (get node 2)) (verify-fail "expected a primitive's name" node nil))
+     (unless (memq (get node 2) primitive-names) (verify-fail "expected a primitive's name" node (get node 2)))
      (check-nodes v (get node 3) node f))
     ((:gprim :known)
      (shape node

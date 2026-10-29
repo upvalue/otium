@@ -25,6 +25,9 @@ import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
+# The CPU every process is pinned to; --cpu sets it. The runners' 'auto' picks
+# the last allowed CPU, so two comparisons at once would share it.
+CPU = str(max(os.sched_getaffinity(0)))
 BUILD = Path(os.environ.get('OTIUM_BUILD') or
              ROOT / 'build' / f'{os.uname().machine}-{sys.platform.rstrip("0123456789")}' / 'default')
 
@@ -67,13 +70,13 @@ def run_suites(config, args, out):
     if r7rs:
         d = out / 'r7rs'
         subprocess.run([sys.executable, ROOT / 'benchmarks/r7rs/run.py', '--only', *r7rs, '--runs',
-                        str(args.runs), '--cpu', 'auto', '--output', d], env=env,
+                        str(args.runs), '--cpu', CPU, '--output', d], env=env,
                        stdout=subprocess.DEVNULL)
         results.update(load(d))
     if plb:
         d = out / 'plb'
         subprocess.run([sys.executable, ROOT / 'benchmarks/plb/run.py', '--only', *plb, '--languages', 'otium',
-                        '--runs', str(args.runs), '--size', args.plb_size, '--cpu', 'auto', '--output', d],
+                        '--runs', str(args.runs), '--size', args.plb_size, '--cpu', CPU, '--output', d],
                        env=env, stdout=subprocess.DEVNULL)
         results.update(load(d))
     return results
@@ -88,7 +91,7 @@ def boot_build(config, runs, out):
     times = []
     for i in range(runs):
         start = time.perf_counter()
-        subprocess.run(['taskset', '-c', str(max(os.sched_getaffinity(0))), BUILD / 'otium', '--no-project',
+        subprocess.run(['taskset', '-c', CPU, BUILD / 'otium', '--no-project',
                         '-L', lib, '-e',
                         f'(require otium.compiler.boot :as boot) '
                         f'(boot/build-standard "{out / "stage2.boot"}" "{lib}" "{primitives}") '
@@ -110,7 +113,7 @@ def source_load(config, runs):
     times = []
     for i in range(runs):
         start = time.perf_counter()
-        subprocess.run(['taskset', '-c', str(max(os.sched_getaffinity(0))), BUILD / 'otium', '--no-project',
+        subprocess.run(['taskset', '-c', CPU, BUILD / 'otium', '--no-project',
                         '-L', ROOT / 'lib', '-e', f'{requires} (exit 0)'], env=env, check=True)
         times.append(time.perf_counter() - start)
     return times
@@ -130,10 +133,14 @@ def main():
     p.add_argument('--only', nargs='+', help='benchmarks to run; default: the target set')
     p.add_argument('--numeric', action='store_true', help='also run the numeric ports')
     p.add_argument('--runs', type=int, default=5)
+    p.add_argument('--cpu', help='CPU to pin every process to (default: the last allowed)')
     p.add_argument('--plb-size', default='full', choices=['test', 'small', 'full'])
     p.add_argument('--no-suites', action='store_true', help='only the boot build and code size')
     p.add_argument('--output', type=Path, help='directory to keep the runners\' results in')
     args = p.parse_args()
+    global CPU
+    if args.cpu:
+        CPU = args.cpu
 
     out = args.output or Path(tempfile.mkdtemp(prefix='opt-compare-'))
     configs = {'a': args.a, 'b': args.b}

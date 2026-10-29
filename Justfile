@@ -18,6 +18,16 @@ build:
 test *args: build
     tools/meson-test default "$@"
 
+# Tests with the optimizer switched off, then each of its components in turn. Run before merging optimizer work
+test-opt *args: build
+    #!/bin/sh
+    set -eu
+    for opt in none -direct -transform:list -transform:append; do
+        echo "== OTIUM_OPT=$opt"
+        if [ "$opt" = none ]; then boot="$OTIUM_BUILD/otium-noopt.boot"; else boot="$OTIUM_BUILD/otium.boot"; fi
+        OTIUM_OPT=$opt OTIUM_BOOT=$boot tools/meson-test default "${@:-lang}"
+    done
+
 # Tests on the VM instead of native code
 test-vm *args: build
     tools/meson-test vm "$@"

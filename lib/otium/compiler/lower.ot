@@ -615,14 +615,17 @@
     (else (error "native compiler: unknown primitive" name))))
 
 ;; get, put! and length on an array with a fixnum index in range, inline; the
-;; call through the global otherwise.
+;; call through the global otherwise. A global of locked core can't change,
+;; so only another namespace's global needs checking that it still holds the
+;; builtin.
 (def (guarded-primitive fc node offset)
   (let ((name (get node 2)) (j (cell! (fc :u) (get node 3)))
         (args (map (fn (n) (in-vreg fc (value fc n))) (get node 4)))
         (r (vreg! fc)) (join (label! fc)) (slow (label! fc)))
     (let ((a (get args 0)) (g (raw! fc)) (k (raw! fc)))
-      (emit! fc [:mov g [:cell j 0]])
-      (emit! fc [:cmpj :ne g [:imm (%native-builtin (symbol->string name))] slow])
+      (unless (and (%native-core-cell? (get node 3)) (%core-locked?))
+        (emit! fc [:mov g [:cell j 0]])
+        (emit! fc [:cmpj :ne g [:imm (%native-builtin (symbol->string name))] slow]))
       (emit! fc [:op2u :and :zero a [:imm 7]])
       (emit! fc [:jcond :nonzero slow])
       (emit! fc [:load8 k [:mem a offset-kind]])

@@ -60,6 +60,16 @@
       (set! reversed (cdr reversed)))
     tail))
 
+;; append of two sequences, which the compiler calls for (append a b) to
+;; skip building the rest list. Same results and errors as append.
+(def (%append2 a b)
+  (unless (and (list? a) (list? b)) (error "append: expected proper lists"))
+  (let loop ((rest a) (reversed '()))
+    (if (pair? rest)
+        (loop (cdr rest) (cons (car rest) reversed))
+        (let build ((r reversed) (tail b))
+          (if (pair? r) (build (cdr r) (cons (car r) tail)) tail)))))
+
 (def positive? pos?)
 (def negative? neg?)
 

@@ -587,7 +587,7 @@
         (push! params new)))
     (let ((body (ir/copy-node (info :body) owner renames))
           (outer (s :attempt))
-          (attempt {:size 0 :limit (+ 40 (* 2 (node-size node)))}))
+          (attempt {:size 0 :limit (+ 80 (* 2 (node-size node)))}))
       (unless (get node 4) (untail! body))
       (put! s :attempt attempt)
       (put! s :inlining (cons info (s :inlining)))

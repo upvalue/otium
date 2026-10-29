@@ -48,7 +48,7 @@
 ;; definitions (design, section 6.2) until declarations exist. Each is kept
 ;; only if inlining it measures well.
 (def inline-candidates
-  '(identity inc dec zero? true? false? even? odd? first second third rest))
+  '(identity inc dec zero? true? false? even? odd? first second third rest for-each))
 
 (def (inline-candidate? name) (and (memq name inline-candidates) #t))
 

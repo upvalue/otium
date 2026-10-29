@@ -232,6 +232,20 @@
          ()
          (prim car a.1))))
     ;; --- Limits ---
+    ;; A small fn called in two places is inlined into both.
+    ((fn nil
+       (a.1 b.2)
+       (let ((f.3 (fn f (x.4) (prim + x.4 1)))) (prim cons (call f.3 a.1) (call f.3 b.2))))
+     (fn nil
+       (a.1 b.2)
+       (prim cons (prim + a.1 1) (prim + b.2 1))))
+    ;; A bigger one called in two places stays a function, called from both.
+    ((fn nil
+       (a.1 b.2)
+       (let ((f.3 (fn f (x.4) (prim cons (prim + x.4 1) (prim cons (prim + x.4 2) (prim cons (prim + x.4 3) (prim cons (prim + x.4 4) (prim cons (prim + x.4 5) (prim cons (prim + x.4 6) (prim cons (prim + x.4 7) (quote ()))))))))))) (prim cons (call f.3 a.1) (call f.3 b.2))))
+     (fn nil
+       (a.1 b.2)
+       (let ((f.3 (fn f (x.4) (prim cons (prim + x.4 1) (prim cons (prim + x.4 2) (prim cons (prim + x.4 3) (prim cons (prim + x.4 4) (prim cons (prim + x.4 5) (prim cons (prim + x.4 6) (prim cons (prim + x.4 7) (quote ()))))))))))) (prim cons (call f.3 a.1) (call f.3 b.2)))))
     ;; A body over the size limit isn't inlined.
     ((fn nil
        (a.1)

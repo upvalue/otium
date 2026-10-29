@@ -398,7 +398,7 @@
                              :opaque
                              :pending)}))
           ((var :assigned) (put! values i (simplify s init :value)) (bind! s var {:kind :opaque}))
-          ((eq? (get init 0) :fn) (bind! s var {:kind :fn :value init}))
+          ((eq? (get init 0) :fn) (bind! s var {:kind :fn :value init :calls (call-count body var)}))
           ((copyable? init) (put! values i init) (bind! s var {:kind :copy :value init}))
           (else (let ((value (simplify s init :value)))
                   (put! values i value)
@@ -471,6 +471,20 @@
 
 ;; --- Calls and inlining ----------------------------------------------------------
 
+;; A fn bound to a variable that's called in more than one place is inlined
+;; into each only when it's no bigger than this, so that inlining for-each,
+;; which calls its function in a loop for arrays and another for lists,
+;; doesn't copy the function's body into both.
+(def- shared-fn-size 24)
+
+;; How many calls of var node makes, inside functions too.
+(def (call-count node var)
+  (let ((n (if (and (eq? (get node 0) :call) (eq? (get (get node 2) 0) :lref) (eq? (get (get node 2) 2) var))
+               1
+               0)))
+    (for ((c :in (children node))) (set! n (+ n (call-count c var))))
+    n))
+
 ;; The [:fn] node a callee stands for, or nil.
 (def (callee-fn s node)
   (case (get node 0)
@@ -480,7 +494,7 @@
        (let ((b (and (not (var :assigned)) (not (get node 3)) (binding s var))))
          (when b
            (case (b :kind)
-             ((:fn) (b :value))
+             ((:fn) (when (or (<= (or (b :calls) 1) 1) (<= (node-size (b :value)) shared-fn-size)) (b :value)))
              ((:copy) (callee-fn s (b :value)))
              (else nil))))))
     (else nil)))
@@ -548,11 +562,17 @@
                  (put! core-functions name [text info])
                  info)))))))
 
+;; Whether a higher-order core function's function argument is a fn written
+;; at the call, when known.ot asks for one.
+(def (function-argument-ready? node args)
+  (let ((i (get known/inline-function-arguments (string->symbol (cdr (%native-cell-name (get node 2)))))))
+    (or (nil? i) (and (< i (length args)) (eq? (get (get args i) 0) :fn)))))
+
 ;; A call of a core function inlined, or nil, as simplify-call does for local
 ;; functions.
 (def (inline-core s node ctx)
   (let ((info (core-function node)) (args (get node 3)))
-    (when (and info (inlinable? s info args))
+    (when (and info (inlinable? s info args) (function-argument-ready? node args))
       (let ((ready (list-to-array (map (fn (a) (not (or (eq? (get a 0) :fn) (copyable? a)))) (array-to-list args)))))
         (let ((prepared (map (fn (i)
                                (if (get ready i)

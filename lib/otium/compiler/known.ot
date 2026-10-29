@@ -52,6 +52,11 @@
 
 (def (inline-candidate? name) (and (memq name inline-candidates) #t))
 
+;; Higher-order candidates and the argument that must be a fn written at the
+;; call for them to be inlined: copying the loop pays off when the function
+;; inlines into it, and otherwise only makes the caller bigger to compile.
+(def inline-function-arguments {'for-each 0})
+
 ;; --- Pairs and lists ---------------------------------------------------------
 
 (defknown car (pair) any :flags (:flushable-if-typed :fast-path))

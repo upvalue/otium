@@ -29,6 +29,10 @@
 
 (def- times {})
 
+;; OTIUM_OPT_SIZES=1 prints each function's name and number of virtual
+;; instructions to stderr as it's lowered, to see what inlining grows.
+(def- sizes? (equal? (process/getenv "OTIUM_OPT_SIZES") "1"))
+
 (def (timed pass thunk)
   (if times?
       (let ((start (current-jiffy)))
@@ -94,6 +98,9 @@
   (timed :types (fn () (optimize info)))
   (let ((lowered (timed :lower (fn () (lower/lower-top info)))))
     (let ((u (get lowered 0)) (contexts (get lowered 1)))
+      (when sizes?
+        (for ((fc :in contexts))
+          (display-to (current-error-port) (str "size " ((lower/fc-info fc) :name) " " (length (lower/fc-code fc)) "\n"))))
       (timed :allocate (fn () (for ((fc :in contexts)) (alloc/allocate fc))))
       (timed :emit (fn () (emit/emit-unit u contexts))))))
 

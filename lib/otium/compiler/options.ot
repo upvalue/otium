@@ -41,3 +41,8 @@
           (when (= rewrites fuel)
             (display-to (current-error-port) (str "optimizer: rewrite " rewrites ": " what " at offset " off "\n")))
           #t)))
+
+;; OTIUM_OPT_CHECK=1 makes lower keep the check of every unchecked operation
+;; the types pass made, and trap when one fails: a wrong proof then stops
+;; where it was made instead of corrupting memory. See section 9.5.
+(def check-mode (equal? (otium.process/getenv "OTIUM_OPT_CHECK") "1"))

@@ -19,7 +19,7 @@
 (def- pool [0 1 2 3 4 5 7 8 9 10])
 
 ;; Helpers that never return.
-(def- noreturn-helpers {3 #t 4 #t 5 #t 12 #t})
+(def- noreturn-helpers {3 #t 4 #t 5 #t 12 #t 26 #t})
 
 ;; --- Bit sets, 60 bits to a fixnum ---------------------------------------------
 

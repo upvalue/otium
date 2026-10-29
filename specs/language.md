@@ -138,7 +138,7 @@ symbol.
 | `keyword` | `:foo` | -- | self-evaluating |
 | `char` | `#\a` | -- | one Unicode scalar value; named form for space, newline, tab, return, nul; `#\x7f` for other control chars |
 | `string` | `"hi"` | -- | Unicode; indexed and measured by code point |
-| `pair` | `(1 . 2)` | yes | mutable with `set-car!` / `set-cdr!`; cycles are rejected |
+| `pair` | `(1 . 2)` | yes | mutable with `set-car!` / `set-cdr!`, which may form cycles |
 | `bytevector` | `#u8(1 2)` | yes | fixed-length byte sequence; literal evaluates a constructor call |
 | `array` | `[1 2]` | yes | growable vector |
 | `table` | `{:a 1}` | yes | insertion-ordered map, arbitrary keys |
@@ -254,10 +254,12 @@ collection involved unless stated otherwise; "expected" means a hashed
 operation whose worst case may degrade under adversarial keys.
 
 **Pairs and lists** are singly-linked chains. Mutation may create shared
-structure, but an operation that would introduce a cycle is an error:
+structure and cycles. A cyclic list is not a proper list; operations that
+walk a whole list detect the cycle and raise an error rather than looping.
+Searches that stop at the first match (`find`, `member`, `assoc` and the
+like) do not check, and do not return on a cyclic list without a match.
 
-- `cons`, `car`, `cdr`, `first`, `rest`: O(1)
-- `set-car!`, `set-cdr!`: O(size of the proposed new value), to reject cycles
+- `cons`, `car`, `cdr`, `first`, `rest`, `set-car!`, `set-cdr!`: O(1)
 - `length`, `nth`, `last`, `reverse`, `list?`: O(n)
 - `append`, `concat`: O(total length of the arguments)
 
@@ -986,7 +988,7 @@ Type predicates, each `(p x)` → bool: `nil?`, `null?` (empty list),
 `keyword?`, `char?`, `string?`, `pair?`, `array?`, `table?`, `buffer?`, `macro?`,
 `eof-object?`,
 `procedure?` (applicable function), `list?` (proper list: `()` or a
-nil-terminated pair chain).
+nil-terminated pair chain without cycles).
 
 `(true? x)` / `(false? x)` -- `#t` only for the booleans themselves.
 
@@ -1003,7 +1005,7 @@ table, string, buffer; other types error.
 |---|---|
 | `(cons a d)` → pair | |
 | `(car p)` / `(cdr p)` | Head/tail of a **pair**; strict, `(car '())` is an error. |
-| `(set-car! p v)` / `(set-cdr! p v)` → p | Mutate a pair. Cycles and mutation of pairs frozen as table keys are errors. |
+| `(set-car! p v)` / `(set-cdr! p v)` → p | Mutate a pair; the result may be cyclic. Mutating a pair frozen as a table key is an error. |
 | `(caar p)` `(cadr p)` `(cddr p)` … `(cadddr p)` | Compositions, up to three levels plus `cadddr`. |
 | `(list-ref l k)` / `(list-tail l k)` | Element at, or tail after, index `k`; out of range is an error. |
 | `(memq x l)` / `(member x l)` | First tail whose car is `eq?` / `equal?` to `x`, or `nil`. |
@@ -1022,7 +1024,8 @@ These accept any sequence (list / array / nil) and never error on
 emptiness; misses yield `nil`.
 
 Whole-sequence traversal requires proper lists. `for-each`, `apply`,
-`string-join`, and `get-in` raise an error when a list has a dotted tail.
+`string-join`, and `get-in` raise an error when a list has a dotted tail
+or is cyclic.
 
 | form | behavior |
 |---|---|

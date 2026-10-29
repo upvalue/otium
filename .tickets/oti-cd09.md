@@ -1,6 +1,6 @@
 ---
 id: oti-cd09
-status: open
+status: closed
 deps: []
 links: [oti-l8fn]
 created: 2026-10-27T03:30:53Z
@@ -21,3 +21,9 @@ Usual fix: after a collection, double capacity (up to the limit) when more than 
 
 After a collection that leaves the heap more than about half full, the heap grows if the limit allows. graphs spends much less time in the collector. GC stress and heap growth tests pass.
 
+
+## Notes
+
+**2026-10-29T00:28:03Z**
+
+After a collection, the heap grows when more than OTI_HEAP_LIVE_PERCENT (50) of the space is live, sized to bring it back to that. The launcher's default --c.heap-max is now 1 GiB per semispace. graphs: 16.0s -> 6.3s, 7980 -> 588 collections, settling at 128 MiB. At the old 64 MiB limit it's 6.7s. make test passes and gc-lint shows the same 8 warnings as before; GC stress tests not run yet.

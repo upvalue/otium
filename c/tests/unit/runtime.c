@@ -415,7 +415,7 @@ TEST(apply_calls) {
   check_error(rt, "(apply +)", "argument sequence");
   check_error(rt, "(apply list 1)", "proper list");
   check_error(rt, "(apply list '(1 . 2))", "proper list");
-  check_error(rt, "(let ((p (cons 1 nil))) (set-cdr! p p) (apply list p))", "cycle");
+  check_error(rt, "(let ((p (cons 1 nil))) (set-cdr! p p) (apply list p))", "acyclic");
   check_error(rt, "(apply 1 '())", "callable");
   check_error(rt, "(apply (fn (x) x) '())", "arguments");
   ot_destroy(rt);

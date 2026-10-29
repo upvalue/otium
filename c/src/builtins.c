@@ -406,27 +406,15 @@ static bool mutable_pair(ot_state* rt, ot_value a) {
   return oti_error(rt, "frozen table key");
 }
 
-/* False, with an error, if pair is reachable from value: storing value in
- * pair would make a cycle. */
-static bool acyclic(ot_state* rt, ot_value pair, ot_value value) {
-  int found = oti_reaches(value, pair);
-  if (found < 0) return oti_error(rt, "out of host memory");
-  return !found || oti_tagged_error(rt, "set-pair!", NULL, "cycle", 0, NULL);
-}
-
 static ot_value set_car_builtin(ot_state* rt, size_t first, size_t count) {
-  if (!core_arity(rt, count, 2) || !mutable_pair(rt, rt->stack[first]) ||
-      !acyclic(rt, rt->stack[first], rt->stack[first + 1]))
-    return 0;
+  if (!core_arity(rt, count, 2) || !mutable_pair(rt, rt->stack[first])) return 0;
   ot_value a = rt->stack[first];
   oti_as_pair(a)->car = rt->stack[first + 1];
   return a;
 }
 
 static ot_value set_cdr_builtin(ot_state* rt, size_t first, size_t count) {
-  if (!core_arity(rt, count, 2) || !mutable_pair(rt, rt->stack[first]) ||
-      !acyclic(rt, rt->stack[first], rt->stack[first + 1]))
-    return 0;
+  if (!core_arity(rt, count, 2) || !mutable_pair(rt, rt->stack[first])) return 0;
   ot_value a = rt->stack[first];
   oti_as_pair(a)->cdr = rt->stack[first + 1];
   return a;

@@ -1530,7 +1530,6 @@ ot_value oti_table_new(ot_state* rt);
 ot_value oti_array_from(ot_state* rt, size_t first, size_t count);
 /* Whether target is reachable from from through pairs, arrays and tables: 1 if
  * so, 0 if not, -1 if host memory ran out. Never allocates on the managed heap. */
-int oti_reaches(ot_value from, ot_value target);
 ot_value oti_list_from(ot_state* rt, size_t first, size_t count);
 bool oti_procedure(ot_value v);
 

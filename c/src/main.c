@@ -215,7 +215,7 @@ static bool integer_value(const char* text, unsigned long long limit, unsigned l
 /* Fill o from argv. Returns 0 to continue, or an exit status. */
 static int parse_options(int argc, char** argv, options* o) {
   *o = (options){.heap_init = 1024 * 1024,
-                 .heap_max = 64 * 1024 * 1024,
+                 .heap_max = 1024 * 1024 * 1024,
                  .watchdog = 2000,
                  .option_end = argc,
                  .arguments = argc};

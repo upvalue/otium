@@ -9,6 +9,11 @@
 
 _Static_assert(sizeof(oti_object_header) % 8 == 0, "object alignment");
 
+/* The most of the space that may stay live after a collection before the heap
+ * grows, as a percentage. Growth aims to bring it back to this. Lower means
+ * fewer collections and more memory. */
+#define OTI_HEAP_LIVE_PERCENT 50
+
 #ifdef OTIUM_CHECK_ROOTS
 /* Root-checking builds copy every collection into fresh memory and make the old
  * space inaccessible, so a pointer that missed a collection faults when used.
@@ -189,9 +194,18 @@ ot_value oti_heap_alloc(oti_heap* h, uint32_t kind, uint32_t fields, size_t byte
   if (bytes > SIZE_MAX - base - 7) return 0;
   size_t size = (base + bytes + 7) & ~(size_t)7;
   if (size > h->limit) return 0;
-  if (size > h->capacity - h->used) oti_heap_collect(h);
-  if (size > h->capacity - h->used && (size > h->limit - h->used || !grow(h, h->used + size)))
-    return 0;
+  if (size > h->capacity - h->used) {
+    oti_heap_collect(h);
+    /* As more of the space stays live, each collection frees less and they
+     * come closer together, so grow back to OTI_HEAP_LIVE_PERCENT. A failed
+     * grow is fine while the allocation still fits. */
+    size_t needed = h->used + size;
+    if (needed > h->capacity / 100 * OTI_HEAP_LIVE_PERCENT && h->capacity < h->limit)
+      grow(h, needed > h->limit / 100 * OTI_HEAP_LIVE_PERCENT
+                  ? h->limit
+                  : needed / OTI_HEAP_LIVE_PERCENT * 100);
+  }
+  if (size > h->capacity - h->used) return 0;
   oti_object_header* o = (oti_object_header*)(h->start + h->used);
   h->used += size;
   *o = (oti_object_header){.size = size, .fields = fields, .kind = kind & 255};

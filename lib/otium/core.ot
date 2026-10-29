@@ -206,7 +206,7 @@ Includes runtime builtins, special forms, and the Otium prelude."
      (if (> (length seq) 0)
          (get seq (- (length seq) 1))
          nil))
-    ((pair? seq)
+    ((list? seq)
      (let ((s seq))
        (while (pair? (cdr s)) (set! s (cdr s)))
        (car s)))
@@ -230,17 +230,66 @@ Includes runtime builtins, special forms, and the Otium prelude."
     ((or (array? coll) (table? coll)) (= (length coll) 0))
     (else (error "empty?: unsupported type"))))
 
+(def- (map-tail f seq)
+  (unless (list? seq) (error "map: expected a proper list or array"))
+  (let ((head (cons nil '())))
+    (let loop ((tail head)
+               (rest seq))
+      (if (pair? rest)
+          (let ((next (cons (f (car rest)) '())))
+            (set-cdr! tail next)
+            (loop next (cdr rest)))
+          (cdr head)))))
+
+;; Recursion builds a short list fastest. Past a fixed depth the rest of the
+;; list is built in order with set-cdr!, so long lists don't use deep stack.
+(def- (map-list f seq depth)
+  (cond
+    ((pair? seq)
+     (if (< depth 1000)
+         (cons (f (car seq)) (map-list f (cdr seq) (+ depth 1)))
+         (map-tail f seq)))
+    ((null? seq) '())
+    (else (error "map: expected a proper list or array"))))
+
 (def (map f seq)
   "Kind-preserving: list in, list out; array in, array out; nil -> ()."
-  (let ((out (builder-like seq)))
-    (for-each (fn (x) (set! out (builder-add out (f x)))) seq)
-    (builder-finish out)))
+  (if (pair? seq)
+      (map-list f seq 0)
+      (let ((out (builder-like seq)))
+        (for-each (fn (x) (set! out (builder-add out (f x)))) seq)
+        (builder-finish out))))
+
+(def- (filter-tail pred seq)
+  (unless (list? seq) (error "filter: expected a proper list or array"))
+  (let ((head (cons nil '())))
+    (let loop ((tail head)
+               (rest seq))
+      (cond
+        ((not (pair? rest)) (cdr head))
+        ((pred (car rest))
+         (let ((next (cons (car rest) '())))
+           (set-cdr! tail next)
+           (loop next (cdr rest))))
+        (else (loop tail (cdr rest)))))))
+
+(def- (filter-list pred seq depth)
+  (cond
+    ((pair? seq)
+     (cond
+       ((>= depth 1000) (filter-tail pred seq))
+       ((pred (car seq)) (cons (car seq) (filter-list pred (cdr seq) (+ depth 1))))
+       (else (filter-list pred (cdr seq) (+ depth 1)))))
+    ((null? seq) '())
+    (else (error "filter: expected a proper list or array"))))
 
 (def (filter pred seq)
   "(filter predicate sequence)\nKeep elements for which predicate returns a truthy value; preserve list/array kind."
-  (let ((out (builder-like seq)))
-    (for-each (fn (x) (when (pred x) (set! out (builder-add out x)))) seq)
-    (builder-finish out)))
+  (if (pair? seq)
+      (filter-list pred seq 0)
+      (let ((out (builder-like seq)))
+        (for-each (fn (x) (when (pred x) (set! out (builder-add out x)))) seq)
+        (builder-finish out))))
 
 (def (find pred seq)
   "Return the first matching element, or nil. Stop at the first match."

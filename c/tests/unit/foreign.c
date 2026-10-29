@@ -59,7 +59,7 @@ TEST(library_loading_and_binding) {
   check_error(rt, "(ffi/bind lib \"fixture_id\" '(unknown) 'int #t)", "unsupported scalar");
   check_error(rt, "(ffi/bind lib \"fixture_id\" '(int . int) 'int #t)", "improper");
   check_error(rt, "(let ((p (list 'int))) (set-cdr! p p) (ffi/bind lib \"fixture_id\" p 'int #t))",
-              "cycle");
+              "cyclic");
   ot_destroy(rt);
 }
 

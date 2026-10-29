@@ -41,7 +41,7 @@ TEST(templates_build_and_share_structure) {
   check_int(rt, "hits", 1);
   check_error(rt, "`(,@[1 2] 3)", "proper list");
   check_error(rt, "`(,@'(1 . 2) 3)", "proper list");
-  check_error(rt, "(let ((x (cons 1 nil))) (set-cdr! x x) `(,@x 2))", "cycle");
+  check_error(rt, "(let ((x (cons 1 nil))) (set-cdr! x x) `(,@x 2))", "cyclic");
   check_error(rt, "`(unquote)", "operand");
   check_error(rt, "`,@(unquote 1)", "outside");
   check_error(rt, ",1", "outside");

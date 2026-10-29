@@ -80,7 +80,7 @@ Notes on specific ports:
   it measures.
 - `quicksort` used an escape continuation only in its untimed checker. The port
   uses a boolean loop there.
-- The canonical `mperm` input needs a heap well past the 64 MiB default.
+- The canonical `mperm` input needs a heap well past the 64 MiB the runner gives other ports.
 - `equal` uses structural equality on acyclic arrays in place of vectors.
 
 To add a port, translate it into `r7rs/ports/`, expose `benchmark-main`, and use

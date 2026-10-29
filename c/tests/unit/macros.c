@@ -23,7 +23,7 @@ TEST(macros_expand_and_redefine) {
   check_error(rt, "(defmacro bad)", "defmacro needs a name and parameters");
   check_error(rt, "(outer)", "wrong number of arguments");
   check_error(rt, "(defmacro forever () '(forever)) (forever)", "macro expansion limit exceeded");
-  check_error(rt, "(defmacro cycle () (let ((x (list 1))) (set-cdr! x x) x)) (cycle)", "cycle");
+  check_error(rt, "(defmacro cycle () (let ((x (list 1))) (set-cdr! x x) x)) (cycle)", "cyclic");
   for (size_t i = 0; i < 200; i++) check_int(rt, "(defmacro again (x) `(+ ,x 1)) (again 41)", 42);
   ot_destroy(rt);
 }

@@ -80,31 +80,24 @@
 (println "number?-both:" (number? 1) (number? 1.5) (number? "1"))
 (println "list?-proper:" (list? '(1 2)) (list? '()))
 
-; Pair mutation may share structure but may not make a pair reachable
-; from itself, including through mutable collections.
-(let ((p (cons 1 2)))
-  (println "set-cdr-cycle:"
+; Pair mutation may make cycles. List operations report a cyclic list
+; as not proper instead of looping.
+(let ((p (list 1 2)))
+  (set-cdr! (cdr p) p)
+  (println "set-cdr-cycle:" (eq? (cdr (cdr p)) p))
+  (println "cycle-list?:" (list? p))
+  (println "cycle-length:"
            (try
-             (set-cdr! p p)
+             (length p)
              (catch (error? e) (condition-message e))))
-  (println "set-cdr-cycle-value:" p))
-(let ((p (cons 1 2)))
-  (println "set-car-nested-cycle:"
+  (println "cycle-reverse:"
            (try
-             (set-car! p (list 0 p))
+             (reverse p)
+             (catch (error? e) (condition-message e))))
+  (println "cycle-map:"
+           (try
+             (map identity p)
              (catch (error? e) (condition-message e)))))
 (let ((p (cons 1 2)))
-  (println "set-car-array-cycle:"
-           (try
-             (set-car! p [p])
-             (catch (error? e) (condition-message e)))))
-(let ((p (cons 1 2)))
-  (println "set-cdr-table-cycle:"
-           (try
-             (set-cdr! p {:p p})
-             (catch (error? e) (condition-message e)))))
-(let ((a [nil])
-      (p (cons 1 2)))
-  (put! a 0 a)
-  (set-car! p a)
-  (println "set-car-existing-array-cycle:" (type (car p))))
+  (set-car! p [p])
+  (println "set-car-array-cycle:" (eq? (get (car p) 0) p)))

@@ -28,3 +28,7 @@ Each port either runs and reports its result, or the manifest gives it the limit
 **2026-10-28T00:30:31Z**
 
 benchmarks/r7rs/run.py no longer takes --runtime; there is only the C runtime.
+
+**2026-10-29T00:28:03Z**
+
+With the cd09 growth change and the 1 GiB default, paraffins, nboyer and sboyer finish (peaks of 1 GiB, 1 GiB and 512 MiB per semispace). earley still runs out at 1 GiB. run.py still passes 64 MiB unless the manifest overrides it. ack not rechecked.

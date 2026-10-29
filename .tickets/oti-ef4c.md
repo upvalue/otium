@@ -1,6 +1,6 @@
 ---
 id: oti-ef4c
-status: open
+status: closed
 deps: []
 links: []
 created: 2026-10-27T03:28:29Z
@@ -25,3 +25,7 @@ map (and filter, if it shares the pattern) takes a direct path for proper lists 
 **2026-10-28T00:22:59Z**
 
 Chez runtime removed; the 'Chez runtime isn't slower' criterion no longer applies.
+
+**2026-10-29T00:18:28Z**
+
+map and filter recurse on lists up to depth 1000, then build the rest in order with set-cdr!. deriv: 5.5s -> 2.0s for 10M iterations. Building in order needed set-cdr! to stop checking for cycles, which walked everything reachable from the stored value; that check is removed and specs/language.md updated. for-each already walked lists directly.

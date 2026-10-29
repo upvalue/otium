@@ -1686,9 +1686,7 @@ static W h_builtin(ot_state* rt, W id, W argc) {
     if (!oti_failed(rt)) oti_error(rt, "VM stack limit exceeded");
     oti_native_raise(rt);
   }
-  /* One word at a time: compiled code has just stored the arguments a word
-   * at a time, and memcpy's wider loads of them stall the CPU. */
-  for (W i = 0; i < argc; i++) rt->stack[base + i] = rt->native.args[i];
+  oti_copy_words(rt->stack + base, rt->native.args, argc);
   rt->sp = base + argc;
   ot_value result = rt->builtin_run[id](rt, base, argc);
   rt->sp = base;
@@ -1840,7 +1838,7 @@ static W h_run_cleanup(ot_state* rt) {
 static size_t args_to_stack(ot_state* rt, size_t count) {
   size_t top = rt->sp;
   if (!oti_stack(rt, top + count)) oti_native_raise(rt);
-  memcpy(rt->stack + top, rt->native.args, count * sizeof(ot_value));
+  oti_copy_words(rt->stack + top, rt->native.args, count);
   rt->sp = top + count;
   return top;
 }
@@ -2042,7 +2040,7 @@ static W dispatch(ot_state* rt) {
   if ((callee & 255) == TAG_BUILTIN && callee != APPLY_VALUE && (callee >> 8) < B_COUNT &&
       base + argc <= rt->stack_room) {
     /* A new thread has no VM stack until something needs one. */
-    if (argc) memcpy(rt->stack + base, rt->native.args, argc * sizeof(ot_value));
+    oti_copy_words(rt->stack + base, rt->native.args, argc);
     rt->sp = base + argc;
     ot_value result = rt->builtin_run[callee >> 8](rt, base, argc);
     rt->sp = base;
@@ -2056,7 +2054,7 @@ static W dispatch(ot_state* rt) {
     oti_native_raise(rt);
   }
   rt->stack[base] = rt->native.callee;
-  memcpy(rt->stack + base + 1, rt->native.args, argc * sizeof(ot_value));
+  oti_copy_words(rt->stack + base + 1, rt->native.args, argc);
   rt->sp = base + 1 + argc;
   for (;;) {
     ot_value f = rt->stack[base];

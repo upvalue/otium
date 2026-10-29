@@ -170,7 +170,7 @@ ot_value oti_equal(ot_state* rt, ot_value a, ot_value b, bool keys) {
 ot_value oti_array_from(ot_state* rt, size_t first, size_t count) {
   ot_value a = array_new(rt, count);
   if (!a) return 0;
-  if (count) memcpy(items(a), rt->stack + first, count * sizeof(ot_value));
+  oti_copy_words(items(a), rt->stack + first, count);
   oti_as_array(a)->length = count;
   return a;
 }

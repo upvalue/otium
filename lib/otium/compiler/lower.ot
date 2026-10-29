@@ -45,9 +45,12 @@
 (def kind-closure 3)
 (def kind-float 4)
 (def kind-array 8)
+(def kind-array-data 12)
 (def kind-record 29)
 (def offset-array-data 16)
 (def offset-array-length 24)
+(def offset-array-capacity 32)
+(def offset-array-items 16)
 (def offset-float 16)
 (def header-bytes 16)
 ;; The smallest OTI_LARGE_MIN in c/src/heap.h, so native code is right for
@@ -855,6 +858,9 @@
                (and (eq? name 'bitwise-not) (= n 1)))
            (bitwise fc node offset))
           ((= n (or (get bytevector-arities name) -1)) (bytevector-access fc node offset))
+          ((and (eq? name 'push!) (= n 2)) (array-push fc node offset))
+          ((eq? name 'array) (array-literal fc node offset))
+          ((and (memq name '(max min)) (= n 2)) (fixnum-extremum fc node offset))
           (else
            (let ((ops (map (fn (op) (in-vreg-or-imm fc op)) (arguments fc (get node 4)))) (r (vreg! fc)))
              (if (and (memq name '(set-car! set-cdr!)) (= (length ops) 2))
@@ -895,6 +901,63 @@
          (emit! fc [:jcond :nonzero otherwise])
          (emit! fc [:load8 k [:mem x offset-kind]])
          (emit! fc [:cmpj :ne k [:imm test] otherwise]))))))
+
+;; push! of one value onto an array with room for it, inline: a store and the
+;; length. The builtin grows a full array.
+(def (array-push fc node offset)
+  (let ((ops (map (fn (op) (in-vreg fc op)) (arguments fc (get node 4))))
+        (r (vreg! fc)) (join (label! fc)) (slow (label! fc)))
+    (let ((a (get ops 0)) (v (get ops 1)) (k (raw! fc)) (n (raw! fc)) (at (raw! fc)))
+      (emit! fc [:op2u :and :zero a [:imm 7]])
+      (emit! fc [:jcond :nonzero slow])
+      (emit! fc [:load8 k [:mem a offset-kind]])
+      (emit! fc [:cmpj :ne k [:imm kind-array] slow])
+      (emit! fc [:mov n [:mem a offset-array-length]])
+      (emit! fc [:cmpj :ge n [:mem a offset-array-capacity] slow])
+      (emit! fc [:op2 :shl 0 at n [:imm 3]])
+      (emit! fc [:op2 :add 0 at at [:mem a offset-array-data]])
+      (emit! fc [:mov [:mem at offset-array-items] v])
+      (emit! fc [:op2 :add 0 n n [:imm 1]])
+      (emit! fc [:mov [:mem a offset-array-length] n])
+      (emit! fc [:mov r a]))
+    (emit! fc [:label join])
+    (in-cold fc (fn ()
+                  (emit! fc [:label slow])
+                  (builtin-ccall! fc 'push! ops r offset)
+                  (emit! fc [:jump join])))
+    r))
+
+;; An array of the values, [a b c], allocated inline: the items' storage,
+;; filled, then the array, full.
+(def (array-literal fc node offset)
+  (let ((ops (map (fn (op) (in-vreg-or-imm fc op)) (arguments fc (get node 4)))))
+    (let ((n (length ops)))
+      (let ((data (if (= n 0) [:imm word-nil] (allocate fc kind-array-data n 0 offset))))
+        (for ((op :in ops) (i :range n))
+          (emit! fc [:mov [:mem data (+ offset-array-items (* 8 i))] op]))
+        (let ((a (allocate fc kind-array 1 16 offset)))
+          (emit! fc [:mov [:mem a offset-array-data] data])
+          (emit! fc [:mov [:mem a offset-array-length] [:imm n]])
+          (emit! fc [:mov [:mem a offset-array-capacity] [:imm n]])
+          a)))))
+
+;; max and min of two fixnums, inline: a comparison. Anything else calls the
+;; builtin. As it does, a tie keeps the first.
+(def (fixnum-extremum fc node offset)
+  (let ((name (get node 2))
+        (ops (map (fn (op) (in-vreg fc op)) (arguments fc (get node 4))))
+        (r (vreg! fc)) (join (label! fc)) (slow (label! fc)))
+    (let ((a (get ops 0)) (b (get ops 1)))
+      (both-fixnums fc a b slow)
+      (emit! fc [:mov r a])
+      (emit! fc [:cmpj (if (eq? name 'max) :sge :sle) a b join])
+      (emit! fc [:mov r b]))
+    (emit! fc [:label join])
+    (in-cold fc (fn ()
+                  (emit! fc [:label slow])
+                  (builtin-ccall! fc name ops r offset)
+                  (emit! fc [:jump join])))
+    r))
 
 ;; bytevector-length, -u8-ref and -u8-set! on a bytevector, inline, with the
 ;; builtin for anything it would fail on.

@@ -1081,6 +1081,13 @@ ot_value oti_instance_call(ot_state* rt, ot_value instance, size_t first, size_t
 ot_value oti_instance_copy(ot_state* rt, ot_value instance);
 ot_value oti_record_call(ot_state* rt, ot_value record, size_t first, size_t count);
 ot_value oti_record_copy(ot_state* rt, ot_value record);
+
+/* Copy n values one word at a time. Compiled code stores arguments a word
+ * at a time just before a builtin copies them, and memcpy's wider loads of
+ * just-stored words stall the CPU. */
+static inline void oti_copy_words(ot_value* dst, const ot_value* src, size_t n) {
+  for (size_t i = 0; i < n; i++) dst[i] = src[i];
+}
 /* The symbol or keyword constant with this kind, gensym serial (0 for an
  * interned symbol) and text, or 0. */
 ot_value oti_text_constant(ot_state* rt, unsigned kind, uint64_t id, const char* text, size_t n);

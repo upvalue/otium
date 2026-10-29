@@ -19,6 +19,17 @@ def differential(t):
                 f'--- vm\n{vm.stderr}--- native\n{native.stderr}')
 
 
+def expected_boot():
+    """The boot file a build in this configuration should match, or None when
+    none does: with a component switched off, or in check mode, the build
+    differs from both boot files by design."""
+    opt = os.environ.get('OTIUM_OPT', '')
+    if os.environ.get('OTIUM_OPT_CHECK') == '1' or opt not in ('', 'all', 'none'):
+        return None
+    name = 'otium-noopt.boot' if opt == 'none' else 'otium.boot'
+    return Path(os.environ['OTIUM_BUILD']) / name
+
+
 @test('compiler stage 2', timeout=120)
 def stage2(t):
     out = t.scratch / 'stage2.boot'
@@ -27,8 +38,8 @@ def stage2(t):
     t.expect(t.otium('--no-project', '-L', lib, '-e',
                      f'(require otium.compiler.boot :as boot) '
                      f'(boot/build-standard "{out}" "{lib}" "{primitives}") (exit 0)'))
-    built = Path(os.environ['OTIUM_BUILD']) / 'otium.boot'
-    t.check(out.read_bytes() == built.read_bytes(), 'the natively built boot file differs')
+    built = expected_boot()
+    t.check(built is None or out.read_bytes() == built.read_bytes(), 'the natively built boot file differs')
 
 
 LIB = ROOT / 'lib'
@@ -58,6 +69,24 @@ def ir_texts(t):
     ir_check(t, 'texts')
 
 
+@test('compiler types pass')
+def types_pass(t):
+    """The types pass's rewrites, and rewrites it must not make."""
+    t.expect(t.otium('--no-project', '-L', LIB, ROOT / 'tests/compiler/types-check.ot'),
+             contains=[' 0 failures'])
+
+
+@test('compiler check mode')
+def check_mode(t):
+    """OTIUM_OPT_CHECK=1 keeps unchecked operations' checks, and a failed one traps."""
+    if os.environ.get('OTIUM_VM'):
+        return
+    out = t.expect(t.otium('--no-project', '-L', LIB, ROOT / 'tests/compiler/proof-trap.ot',
+                           env={'OTIUM_OPT_CHECK': '1'}))
+    t.check(out.stdout == 'optimizer: type proof failed\n' * 3, 'check mode did not trap',
+            out.stdout)
+
+
 @test('compiler verify mode', timeout=120)
 def verify_mode(t):
     """OTIUM_OPT_VERIFY=1 checks and rescopes trees without changing the code."""
@@ -66,8 +95,9 @@ def verify_mode(t):
     t.expect(t.otium('--no-project', '-L', LIB, '-e',
                      f'(require otium.compiler.boot :as boot) '
                      f'(boot/build-standard "{out}" "{LIB}" "{PRIMITIVES}") (exit 0)', env=env))
-    built = Path(os.environ['OTIUM_BUILD']) / 'otium.boot'
-    t.check(out.read_bytes() == built.read_bytes(), 'the boot file built with verifying differs')
+    built = expected_boot()
+    t.check(built is None or out.read_bytes() == built.read_bytes(),
+            'the boot file built with verifying differs')
     for program in PROGRAMS:
         plain = t.otium(program)
         verified = t.expect(t.otium(program, env=env), status=plain.status)

@@ -13,6 +13,8 @@
             (otium.compiler.known :as known)
             (otium.compiler.options :as options)
             (otium.compiler.rescope :as rescope)
+            (otium.compiler.options :as options)
+            (otium.compiler.types :as types)
             (otium.compiler.lower :as lower)
             (otium.compiler.alloc :as alloc)
             (otium.compiler.emit :as emit)
@@ -57,6 +59,15 @@
       (when verify? (ir/verify info)))
     info))
 
+;; The passes between convert and lower. Each relies on what rescope works
+;; out about variables, and leaves it stale.
+(def (optimize info)
+  (when (options/enabled? "types")
+    (rescope/rescope info)
+    (types/optimize info)
+    (rescope/rescope info)
+    (when verify? (ir/verify info))))
+
 ;; The name of the inline candidate a converted top-level form defines, or
 ;; nil: (def (name ...) ...) of a core function known.ot lists.
 (def (inline-definition info)
@@ -80,6 +91,7 @@
     (compile-info info)))
 
 (def (compile-info info)
+  (timed :types (fn () (optimize info)))
   (let ((lowered (timed :lower (fn () (lower/lower-top info)))))
     (let ((u (get lowered 0)) (contexts (get lowered 1)))
       (timed :allocate (fn () (for ((fc :in contexts)) (alloc/allocate fc))))

@@ -1912,6 +1912,13 @@ static W h_restart_apply(ot_state* rt, W transfer) {
   return result;
 }
 
+/* Check mode's trap: an unchecked operation the optimizer's types pass made
+ * was given a value its proof said it couldn't be. */
+static W h_proof_failed(ot_state* rt) {
+  oti_error(rt, "optimizer: type proof failed");
+  oti_native_raise(rt);
+}
+
 /* The closure eval reads as, for the namespace named by a symbol. */
 static W h_evaluator(ot_state* rt, W name) {
   size_t length;
@@ -1950,7 +1957,8 @@ static W h_evaluator(ot_state* rt, W name) {
   X(H_RESTART_APPLY, h_restart_apply)  \
   X(H_EVALUATOR, h_evaluator)  \
   X(H_POP_CLEANUP, h_pop_cleanup)  \
-  X(H_BUILTIN, h_builtin)
+  X(H_BUILTIN, h_builtin)  \
+  X(H_PROOF_FAILED, h_proof_failed)
 
 enum {
 #define HELPER_ID(id, fn) id,

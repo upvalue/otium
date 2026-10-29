@@ -1,0 +1,625 @@
+;; types.ot -- the types pass: what kinds of value variables and expressions
+;; can hold, and checked operations rewritten to unchecked ones where the
+;; kinds are proven. See scratch/optimizer-design.md, section 5.7.
+;;
+;; A type is a bitset of kinds. The walk goes forward through each function
+;; with an environment, a table from variable id to type; a variable that
+;; isn't there is any. Tests narrow the environment for each branch, and
+;; loops are walked until their types stop growing.
+;;
+;; Rewrites, made in place on the tree:
+;;
+;;   (prim car x), x a pair         ->  (prim %car x), and %cdr
+;;   (prim + a b), both fixnums     ->  (prim %fx+ a b), and - * < <= > >= =
+;;   (if test a b), test's answer known  ->  a or b, after test if it has effects
+;;
+;; A wrong proof is memory corruption, so anything unsure is any.
+
+(ns otium.compiler.types (:require (otium.compiler.known :as known) (otium.compiler.options :as options)))
+
+;; --- Types -------------------------------------------------------------------
+
+(def t-fixnum 1)
+
+(def t-float 2)
+
+(def t-empty 4)
+
+(def t-nil 8)
+
+(def t-true 16)
+
+(def t-false 32)
+
+(def t-pair 64)
+
+(def t-char 128)
+
+(def t-string 256)
+
+(def t-symbol 512)
+
+(def t-keyword 1024)
+
+(def t-array 2048)
+
+;; table, closure, record, instance and other: values are never proven to be
+;; one of these, so they only appear as part of any.
+(def t-any 131071)
+
+(def t-falsy (bitwise-ior t-nil t-false))
+
+(def t-boolean (bitwise-ior t-true t-false))
+
+(def t-number (bitwise-ior t-fixnum t-float))
+
+;; Types by the names known.ot uses. Names not here are any.
+(def- named
+  {'any t-any
+   'fixnum t-fixnum
+   'float t-float
+   'number t-number
+   'empty t-empty
+   'nil t-nil
+   'boolean t-boolean
+   'pair t-pair
+   'list (bitwise-ior t-pair t-empty)
+   'char t-char
+   'string t-string
+   'symbol t-symbol
+   'keyword t-keyword
+   'array t-array})
+
+(def (type-named name)
+  (get named name t-any))
+
+(def (within? t u)
+  (= (bitwise-and t (bitwise-not u)) 0))
+
+(def (meet t u)
+  (bitwise-and t u))
+
+(def (without t u)
+  (bitwise-and t (bitwise-not u)))
+
+(def (constant-type value)
+  (cond
+    ((int? value) t-fixnum)
+    ((float? value) t-float)
+    ((null? value) t-empty)
+    ((nil? value) t-nil)
+    ((eq? value #t) t-true)
+    ((eq? value #f) t-false)
+    ((pair? value) t-pair)
+    ((char? value) t-char)
+    ((string? value) t-string)
+    ((keyword? value) t-keyword)
+    ((symbol? value) t-symbol)
+    (else t-any)))
+
+;; Constants with a kind of their own, for eq?.
+(def (singleton? t)
+  (memq t (list t-empty t-nil t-true t-false)))
+
+;; --- Environments ------------------------------------------------------------
+
+;; A captured variable that is assigned, or captured before it's
+;; initialized, lives in a box that closures can change: always any.
+(def (tracked? var)
+  (not (and (var :captured) (or (var :assigned) (var :early)))))
+
+(def (var-type env var)
+  (if (tracked? var)
+      (get env (var :id) t-any)
+      t-any))
+
+(def (set-var! env var t)
+  (when (tracked? var)
+    (put! env
+          (var :id)
+          (if (= t t-any)
+              nil
+              t))))
+
+;; Environments where control may arrive from either; nil is one it can't.
+(def (join a b)
+  (cond
+    ((nil? a) b)
+    ((nil? b) a)
+    (else (let ((out {}))
+            (for ((id t :in a))
+              (let ((u (get b id))) (when u (put! out id (bitwise-ior t u)))))
+            out))))
+
+;; Make env the same as from; nil (unreachable) leaves it alone.
+(def (replace! env from)
+  (when (and from (not (eq? env from)))
+    (for ((id :in (keys env)))
+      (put! env id nil))
+    (for ((id t :in from))
+      (put! env id t)))
+  env)
+
+(def (same-env? a b)
+  (and (= (length a) (length b))
+       (let check ((ids (keys a))
+                   (i 0))
+         (or (= i (length ids)) (and (eq? (get a (get ids i)) (get b (get ids i))) (check ids (+ i 1)))))))
+
+;; env without the variables whose ids are in ids.
+(def (forget env ids)
+  (let ((out (copy env)))
+    (for ((id :in (keys ids)))
+      (put! out id nil))
+    out))
+
+;; Narrow a local reference's variable to its type within u; nil if that
+;; leaves nothing, so the branch can't run.
+(def (narrowed env node u)
+  (let ((out (copy env)))
+    (if (eq? (get node 0) :lref)
+        (let ((var (get node 2)))
+          (if (tracked? var)
+              (let ((t (meet (var-type env var) u)))
+                (if (= t 0)
+                    nil
+                    (begin
+                      (set-var! out var t)
+                      out)))
+              out))
+        out)))
+
+;; The ids of variables node assigns, not counting nested functions, whose
+;; assignments are to boxed variables.
+(def (assigned node)
+  (let ((out {}))
+    (def (scan x)
+      (cond
+        ((and (array? x) (> (length x) 0) (keyword? (get x 0)))
+         (unless (memq (get x 0) '(:fn :const))
+           (when (eq? (get x 0) :lset) (put! out ((get x 2) :id) #t))
+           (for ((i :range 2 (length x)))
+             (scan (get x i)))))
+        ((array? x)
+         (for ((y :in x))
+           (scan y)))))
+    (scan node)
+    out))
+
+;; --- The walk ----------------------------------------------------------------
+
+;; The walk's state: :rewrite whether to rewrite (not while a loop's types are
+;; still growing), :type the type of the node just walked, :true and :false
+;; the environments after a test, :backs a loop variable's id to the
+;; environments its recurs pass.
+(def (optimize info)
+  (let ((st {:rewrite #t :type t-any :true nil :false nil :backs {}}))
+    (walk-function st info nil)
+    info))
+
+(def (typed st t node)
+  (put! st :type t)
+  node)
+
+(def (rewrite? st what node)
+  (and (st :rewrite) (options/rewrite? what (get node 1))))
+
+(def (walk-function st info outer)
+  (let ((env {}))
+    (when outer
+      (for ((var :in (info :captures)))
+        (set-var! env var (var-type outer var))))
+    (for ((pair :in (info :optionals)))
+      (put! pair 1 (walk st (get pair 1) env)))
+    (put! info :body (walk st (info :body) env))))
+
+(def (walk-all st nodes env)
+  (let ((types []))
+    (dotimes (i (length nodes))
+      (put! nodes i (walk st (get nodes i) env))
+      (push! types (st :type)))
+    types))
+
+;; Walk node, which runs in env and leaves env as it is afterwards. Returns
+;; the node to use instead, with its type in (st :type).
+(def (walk st node env)
+  (case (get node 0)
+    ((:const) (typed st (constant-type (get node 2)) node))
+    ((:lref) (typed st (var-type env (get node 2)) node))
+    ((:lset) (put! node 3 (walk st (get node 3) env)) (set-var! env (get node 2) (st :type)) (typed st t-nil node))
+    ((:gset :gdef) (put! node 3 (walk st (get node 3) env)) (typed st t-any node))
+    ((:if) (walk-if st node env #f))
+    ((:seq) (let ((types (walk-all st (get node 2) env))) (typed st (get types (- (length types) 1)) node)))
+    ((:let) (walk-let st node env) (put! node 4 (walk st (get node 4) env)) node)
+    ((:fn)
+     ;; Closures can't change the variables walked here, so while a loop's
+     ;; types are growing they can wait.
+     (when (st :rewrite) (walk-function st (get node 2) env))
+     (typed st t-any node))
+    ((:call) (put! node 2 (walk st (get node 2) env)) (walk-all st (get node 3) env) (typed st t-any node))
+    ((:gcall)
+     (let ((types (walk-all st (get node 3) env)))
+       (known-result st (core-builtin (get node 2)) (get node 3) types env node)))
+    ((:known) (let ((types (walk-all st (get node 4) env))) (known-result st (get node 2) (get node 4) types env node)))
+    ((:bcall) (walk-all st (get node 3) env) (typed st t-any node))
+    ((:gprim)
+     (walk-all st (get node 4) env)
+     (typed st
+            (if (and (eq? (get node 2) 'length) (%native-core-cell? (get node 3)) (%core-locked?))
+                t-fixnum
+                t-any)
+            node))
+    ((:prim) (walk-prim st node env))
+    ((:loop) (walk-loop st node env))
+    ((:recur)
+     (let ((types (walk-all st (get node 3) env))
+           (loop (get node 2)))
+       (let ((back (copy env)))
+         (dotimes (i (length types))
+           (set-var! back (get (loop :vars) i) (get types i)))
+         (push! (get (st :backs) ((loop :var) :id)) back))
+       (typed st 0 node)))
+    ((:while) (walk-while st node env))
+    ((:try) (walk-try st node env))
+    ((:unbound :evaluator :class-object :gref) (typed st t-any node))
+    (else (walk-opaque st node env))))
+
+(def (walk-let st node env)
+  (let ((vars (get node 2))
+        (inits (get node 3)))
+    (dotimes (i (length vars))
+      (put! inits i (walk st (get inits i) env))
+      (set-var! env (get vars i) (st :type)))))
+
+;; The builtin a call of a global names, when it's a cell of locked core.
+(def (core-builtin cell)
+  (and (%native-core-cell? cell) (%core-locked?) (%native-cell-builtin cell)))
+
+;; After a known call returns, a local passed where a pair is required is a
+;; pair. Other argument types in the table aren't trusted for this yet.
+(def (narrow-arguments! name args env)
+  (let ((e (and name (known/entry name))))
+    (when (and e (pair? (e :args)))
+      (let loop ((types (e :args))
+                 (i 0))
+        (when (and (pair? types) (< i (length args)))
+          (let ((arg (get args i)))
+            (when (and (eq? (car types) 'pair) (eq? (get arg 0) :lref) (tracked? (get arg 2)))
+              (let ((t (meet (var-type env (get arg 2)) t-pair))) (unless (= t 0) (set-var! env (get arg 2) t)))))
+          (loop (cdr types) (+ i 1)))))))
+
+;; The type a predicate the table says narrows its argument gives, from the
+;; argument's type.
+(def- narrowing-predicates '(null? pair? nil? symbol? keyword? string? char? boolean? number? int? float? array?))
+
+(def (narrows name)
+  (and (memq name narrowing-predicates) (type-named ((known/entry name) :narrows))))
+
+(def (predicate-result n t)
+  (cond
+    ((within? t n) t-true)
+    ((= (meet t n) 0) t-false)
+    (else t-boolean)))
+
+(def (known-result st name args types env node)
+  (narrow-arguments! name args env)
+  (let ((e (and name (known/entry name))))
+    (typed st
+           (cond
+             ((not e) t-any)
+             ((and (narrows name) (= (length args) 1)) (predicate-result (narrows name) (get types 0)))
+             (else (type-named (e :result))))
+           node)))
+
+;; --- Primitives --------------------------------------------------------------
+
+(def- fixnum-ops
+  {'+ '%fx+
+   '- '%fx-
+   '* '%fx*
+   '< '%fx<
+   '<= '%fx<=
+   '> '%fx>
+   '>= '%fx>=
+   '= '%fx=
+   '%fx+ '%fx+
+   '%fx- '%fx-
+   '%fx* '%fx*
+   '%fx< '%fx<
+   '%fx<= '%fx<=
+   '%fx> '%fx>
+   '%fx>= '%fx>=
+   '%fx= '%fx=})
+
+(def (walk-prim st node env)
+  (let ((name (get node 2))
+        (args (get node 3)))
+    (let ((types (walk-all st args env)))
+      (case name
+        ((car cdr %car %cdr)
+         (when (and (memq name '(car cdr)) (within? (get types 0) t-pair) (rewrite? st (str "types:" name) node))
+           (put! node
+                 2
+                 (if (eq? name 'car)
+                     '%car
+                     '%cdr)))
+         (narrow-arguments! 'car args env)
+         (typed st t-any node))
+        ((cons) (typed st t-pair node))
+        ((+ - * < <= > >= = %fx+ %fx- %fx* %fx< %fx<= %fx> %fx>= %fx=)
+         (let ((fixnums (and (within? (get types 0) t-fixnum) (within? (get types 1) t-fixnum))))
+           (when (and fixnums (not (eq? name (get fixnum-ops name))) (rewrite? st (str "types:" name) node))
+             (put! node 2 (get fixnum-ops name)))
+           (typed st
+                  (cond
+                    ((memq name '(+ - * %fx+ %fx- %fx*))
+                     (if fixnums
+                         t-fixnum
+                         t-number))
+                    (else t-boolean))
+                  node)))
+        ((pair? null?) (typed st (predicate-result (narrows name) (get types 0)) node))
+        ((not)
+         (typed st
+                (cond
+                  ((within? (get types 0) t-falsy) t-true)
+                  ((= (meet (get types 0) t-falsy) 0) t-false)
+                  (else t-boolean))
+                node))
+        (else (typed st t-boolean node))))))
+
+;; --- Tests -------------------------------------------------------------------
+
+(def (tested st node t-env f-env)
+  (put! st :true t-env)
+  (put! st :false f-env)
+  node)
+
+;; Walk node as an if's test. Leaves the environments for when it's true and
+;; when it's false in (st :true) and (st :false), nil for one that can't
+;; happen, and env in no particular state.
+(def (walk-test st node env)
+  (case (get node 0)
+    ((:const)
+     (if (or (nil? (get node 2)) (eq? (get node 2) #f))
+         (tested st (typed st (constant-type (get node 2)) node) nil env)
+         (tested st (typed st (constant-type (get node 2)) node) env nil)))
+    ((:lref)
+     (let ((t (var-type env (get node 2))))
+       (put! st :type t)
+       (tested st node (narrowed env node (without t-any t-falsy)) (narrowed env node t-falsy))))
+    ((:if) (walk-if st node env #t))
+    ((:let) (walk-let st node env) (put! node 4 (walk-test st (get node 4) env)) node)
+    ((:seq)
+     (let ((nodes (get node 2)))
+       (dotimes (i (- (length nodes) 1))
+         (put! nodes i (walk st (get nodes i) env)))
+       (put! nodes (- (length nodes) 1) (walk-test st (get nodes (- (length nodes) 1)) env))
+       node))
+    ((:prim)
+     (case (get node 2)
+       ((pair? null?) (predicate-test st node (narrows (get node 2)) (get node 3) env))
+       ((not)
+        (let ((args (get node 3)))
+          (put! args 0 (walk-test st (get args 0) env))
+          (let ((t (st :type)))
+            (walk-prim-type st node t)
+            (tested st node (st :false) (st :true)))))
+       ((eq?) (eq-test st node env))
+       (else (test-by-type st (walk st node env) env))))
+    ((:known :gcall)
+     (let ((name (if (eq? (get node 0) :known)
+                     (get node 2)
+                     (core-builtin (get node 2))))
+           (args (get node
+                      (if (eq? (get node 0) :known)
+                          4
+                          3))))
+       (if (and (narrows name) (= (length args) 1))
+           (predicate-test st node (narrows name) args env)
+           (test-by-type st (walk st node env) env))))
+    (else (test-by-type st (walk st node env) env))))
+
+(def (walk-prim-type st node t)
+  (put! st
+        :type (cond
+                ((within? t t-falsy) t-true)
+                ((= (meet t t-falsy) 0) t-false)
+                (else t-boolean))))
+
+;; A test whose environments only follow from its type.
+(def (test-by-type st node env)
+  (let ((t (st :type)))
+    (cond
+      ((= (meet t t-falsy) 0) (tested st node env nil))
+      ((within? t t-falsy) (tested st node nil env))
+      (else (tested st node env (copy env))))))
+
+;; A one-argument predicate true for values of type n.
+(def (predicate-test st node n args env)
+  (put! args 0 (walk st (get args 0) env))
+  (let ((arg (get args 0))
+        (t (st :type)))
+    (put! st :type (predicate-result n t))
+    (cond
+      ((within? t n) (tested st node env nil))
+      ((= (meet t n) 0) (tested st node nil env))
+      (else (tested st node (narrowed env arg n) (narrowed env arg (without t-any n)))))))
+
+;; eq? of a local and a constant: the local has the constant's type when
+;; true, and when false, not the constant's kind if it's the only value of
+;; that kind.
+(def (eq-test st node env)
+  (let ((args (get node 3)))
+    (walk-all st args env)
+    (put! st :type t-boolean)
+    (let ((a (get args 0))
+          (b (get args 1)))
+      (let ((ref (cond
+                   ((and (eq? (get a 0) :lref) (eq? (get b 0) :const)) a)
+                   ((and (eq? (get b 0) :lref) (eq? (get a 0) :const)) b)
+                   (else nil))))
+        (if (nil? ref)
+            (tested st node env (copy env))
+            (let ((c (constant-type (get (if (eq? ref a)
+                                             b
+                                             a)
+                                         2))))
+              (tested st
+                      node
+                      (narrowed env ref c)
+                      (if (singleton? c)
+                          (narrowed env ref (without t-any c))
+                          (copy env)))))))))
+
+;; Whether node can be dropped when its value isn't used: it has no effects
+;; and can't raise.
+(def- pure-prims '(pair? null? not eq? cons %car %cdr %fx+ %fx- %fx* %fx< %fx<= %fx> %fx>= %fx=))
+
+(def (pure? node)
+  (case (get node 0)
+    ((:const :fn) #t)
+    ((:lref) (not (get node 3)))
+    ((:prim) (and (memq (get node 2) pure-prims) (all-pure? (get node 3))))
+    ((:known)
+     (let ((e (known/entry (get node 2))))
+       (and e
+            (memq :flushable (or (e :flags) '()))
+            (pair? (e :args))
+            (= (length (e :args)) (length (get node 4)))
+            (all-pure? (get node 4)))))
+    (else #f)))
+
+(def (all-pure? nodes)
+  (let loop ((i 0)) (or (= i (length nodes)) (and (pure? (get nodes i)) (loop (+ i 1))))))
+
+;; --- Control -----------------------------------------------------------------
+
+;; An if, as a value or, when test? is true, as another if's test.
+(def (walk-if st node env test?)
+  (let ((test (walk-test st (get node 2) env)))
+    (put! node 2 test)
+    (let ((t-env (st :true))
+          (f-env (st :false)))
+      (cond
+        ((nil? f-env) (walk-taken st node 3 (or t-env env) env test?))
+        ((nil? t-env) (walk-taken st node 4 f-env env test?))
+        (test? (put! node 3 (walk-test st (get node 3) t-env))
+               (let ((t1 (st :type))
+                     (tt (st :true))
+                     (tf (st :false)))
+                 (put! node 4 (walk-test st (get node 4) f-env))
+                 (put! st :type (bitwise-ior t1 (st :type)))
+                 (tested st node (join tt (st :true)) (join tf (st :false)))))
+        (else (put! node 3 (walk st (get node 3) t-env))
+              (let ((t1 (st :type)))
+                (put! node 4 (walk st (get node 4) f-env))
+                (put! st :type (bitwise-ior t1 (st :type)))
+                (replace! env (join t-env f-env))
+                node))))))
+
+;; An if whose test always goes to the branch at index i: that branch, after
+;; the test if the test has effects.
+(def (walk-taken st node i branch-env env test?)
+  (let ((branch (if test?
+                    (walk-test st (get node i) branch-env)
+                    (walk st (get node i) branch-env))))
+    (unless test? (replace! env branch-env))
+    (put! node i branch)
+    (if (rewrite? st "types:if" node)
+        (if (pure? (get node 2))
+            branch
+            [:seq (get node 1) [(get node 2) branch]])
+        node)))
+
+;; Rounds of a loop's analysis before its variables are given up as any.
+(def- max-rounds 4)
+
+;; A loop's environment at its head: its entry, joined with the
+;; environment at every recur, until that stops growing.
+(def (walk-loop st node env)
+  (let ((loop (get node 2))
+        (inits (get node 3)))
+    (let ((types (walk-all st inits env)))
+      (dotimes (i (length types))
+        (set-var! env (get (loop :vars) i) (get types i))))
+    (let ((id ((loop :var) :id))
+          (entry (copy env))
+          (rewrite (st :rewrite)))
+      (put! st :rewrite #f)
+      (let ((head (let round ((head entry)
+                              (n 1))
+                    (put! (st :backs) id [])
+                    (walk st (get node 4) (copy head))
+                    (let ((next (reduce join entry (get (st :backs) id))))
+                      (cond
+                        ((same-env? next head) head)
+                        ((= n max-rounds)
+                         (let ((ids (assigned (get node 4))))
+                           (for ((var :in (loop :vars)))
+                             (put! ids (var :id) #t))
+                           (forget entry ids)))
+                        (else (round next (+ n 1))))))))
+        (put! st :rewrite rewrite)
+        (put! (st :backs) id [])
+        (replace! env head)
+        (put! node 4 (walk st (get node 4) env))
+        (put! (st :backs) id nil)
+        node))))
+
+;; A while loop the same way, for the variables its test and body assign.
+(def (walk-while st node env)
+  (let ((entry (copy env))
+        (rewrite (st :rewrite)))
+    (put! st :rewrite #f)
+    (let ((head (let round ((head entry)
+                            (n 1))
+                  (walk-test st (get node 2) (copy head))
+                  (let ((t-env (st :true)))
+                    (when t-env (walk st (get node 3) t-env))
+                    (let ((next (join entry t-env)))
+                      (cond
+                        ((same-env? next head) head)
+                        ((= n max-rounds) (forget entry (assigned node)))
+                        (else (round next (+ n 1)))))))))
+      (put! st :rewrite rewrite)
+      (replace! env head)
+      (put! node 2 (walk-test st (get node 2) env))
+      (let ((t-env (st :true))
+            (f-env (st :false)))
+        (when t-env (put! node 3 (walk st (get node 3) t-env)))
+        (replace! env f-env))
+      (typed st t-nil node))))
+
+;; A raise in a try's body can land in its clauses from anywhere in the
+;; body, so they start from the entry without what the body assigns.
+(def (walk-try st node env)
+  (let ((landing (forget env (assigned (get node 2)))))
+    (put! node 2 (walk st (get node 2) env))
+    (let ((t (st :type))
+          (out (copy env)))
+      (for ((clause :in (get node 4)))
+        (let ((e (copy landing)))
+          (when (get clause 0) (put! clause 0 (walk st (get clause 0) e)))
+          (put! clause 2 (walk st (get clause 2) e))
+          (set! t (bitwise-ior t (st :type)))
+          (set! out (join out e))))
+      (replace! env out)
+      (typed st t node))))
+
+;; Cleanups, handlers, parameters and restarts run their parts in an order
+;; of their own, and a restart lands from anywhere in the body: each part
+;; starts from the entry without what the node assigns, and so does what
+;; follows.
+(def (walk-opaque st node env)
+  (let ((base (forget env (assigned node))))
+    (for ((i :range 2 (length node)))
+      (let ((x (get node i)))
+        (cond
+          ((and (array? x) (> (length x) 0) (keyword? (get x 0))) (put! node i (walk st x (copy base))))
+          ((array? x)
+           (for ((clause :in x))
+             (dotimes (j (length clause))
+               (put! clause j (walk st (get clause j) (copy base)))))))))
+    (replace! env base)
+    (typed st t-any node)))

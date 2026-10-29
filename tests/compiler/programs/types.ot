@@ -1,0 +1,130 @@
+;; Programs for the types pass: loops whose variables change kind, fixnum
+;; arithmetic at the edges of the range, and errors from checks the pass
+;; must keep.
+
+(def big 4611686018427387903)
+
+(def small -4611686018427387904)
+
+;; Fixnums from constants, so the pass proves them.
+(def (edges)
+  (let ((a 4611686018427387903)
+        (b -4611686018427387904)
+        (one 1))
+    (println (+ a one) (- b one) (* a 2) (* b -1) (- a b) (+ a b))
+    (println (< a b) (<= b a) (> a b) (>= a a) (= b b))))
+
+(edges)
+
+(println (+ big 1) (- small 1) (* big big) (* small small))
+
+;; A counter that turns into a float half way.
+(def (count-up n)
+  (let loop ((i 0)
+             (acc 0))
+    (if (> i n)
+        acc
+        (loop (if (= i 5)
+                  (+ i 0.5)
+                  (+ i 1))
+              (+ acc i)))))
+
+(println (count-up 10))
+
+;; A loop variable that is a pair, then a list's end, then a number.
+(def (walk-kinds x)
+  (let loop ((v (cons 1 2))
+             (n 0))
+    (cond
+      ((> n 3) (list v n))
+      ((pair? v) (loop (cdr v) (+ n 1)))
+      ((int? v) (loop '() (+ n 1)))
+      ((null? v) (loop 7.5 (+ n 1)))
+      (else (loop x (+ n 1))))))
+
+(println (walk-kinds "s"))
+
+;; set! in a while loop changes a variable's kind.
+(def (assigned-kinds)
+  (let ((p (cons 1 2))
+        (i 0)
+        (out '()))
+    (while (< i 4)
+      (set! out
+            (cons (if (pair? p)
+                      (car p)
+                      p)
+                  out))
+      (set! p
+            (if (pair? p)
+                (cdr p)
+                (list i)))
+      (set! i (+ i 1)))
+    out))
+
+(println (assigned-kinds))
+
+;; car of what isn't a pair raises as before.
+(def (first-of x)
+  (if (null? x)
+      (car x)
+      (car x)))
+
+(println (try
+           (first-of '())
+           (catch e (condition-message e))))
+(println (try
+           (first-of 5)
+           (catch e (condition-message e))))
+
+;; A variable assigned in a try body is unknown in the catch.
+(def (try-kinds)
+  (let ((p (cons 1 2)))
+    (try
+      (begin
+        (set! p 3)
+        (error "boom"))
+      (catch e
+        (try
+          (car p)
+          (catch e2 (condition-message e2)))))))
+
+(println (try-kinds))
+
+;; A captured variable assigned by a closure.
+(def (captured)
+  (let ((p (cons 1 2)))
+    (let ((change (fn () (set! p 'gone))))
+      (change)
+      (try
+        (car p)
+        (catch e (condition-message e))))))
+
+(println (captured))
+
+;; Arithmetic on proven fixnums in a loop, wrapping past the top.
+(def (wrap-loop)
+  (let loop ((i 0)
+             (x 4611686018427387900))
+    (if (= i 6)
+        x
+        (loop (+ i 1) (+ x 1)))))
+
+(println (wrap-loop))
+
+(def (sum-to n)
+  (let ((total 0)
+        (i 0))
+    (while (< i 100)
+      (set! total (+ total i))
+      (set! i (+ i 1)))
+    (+ total n)))
+
+(println (sum-to 1))
+
+(def (uncaught)
+  (let ((x (cons 1 2))) (car (cdr x))))
+
+(println (try
+           (uncaught)
+           (catch e (condition-message e))))

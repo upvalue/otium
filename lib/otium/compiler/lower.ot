@@ -86,6 +86,7 @@
 (def h-evaluator 23)
 (def h-pop-cleanup 24)
 (def h-builtin 25)
+(def h-proof-failed 26)
 
 ;; State fields.
 (def sf-heap-end 0)
@@ -586,6 +587,37 @@
           slow)
         builtin)))
 
+(def (fixnum-arithmetic fc name a b r)
+  (case name
+    ((+)
+     (cond ((doubles-to-fixnum? b) (emit! fc [:op2 :add 0 r a [:imm (* 2 (get b 1))]]))
+           ((doubles-to-fixnum? a) (emit! fc [:op2 :add 0 r b [:imm (* 2 (get a 1))]]))
+           (else
+            (emit! fc [:op2 :add 0 r (in-vreg fc a) b])
+            (emit! fc [:op2 :sub 0 r r [:imm 1]]))))
+    ((-)
+     (if (doubles-to-fixnum? b)
+         (emit! fc [:op2 :sub 0 r a [:imm (* 2 (get b 1))]])
+         (begin
+           (emit! fc [:op2 :sub 0 r (in-vreg fc a) b])
+           (emit! fc [:op2 :add 0 r r [:imm 1]]))))
+    (else
+     (let ((x (raw! fc)) (y (raw! fc)))
+       (emit! fc [:op2 :sub 0 x a [:imm 1]])
+       (emit! fc [:op2 :ashr 0 y b [:imm 1]])
+       (emit! fc [:op2 :mul 0 x x y])
+       (emit! fc [:op2 :add 0 r x [:imm 1]])))))
+
+(def- checked-names
+  {'%fx+ '+ '%fx- '- '%fx* '* '%fx< '< '%fx<= '<= '%fx> '> '%fx>= '>= '%fx= '=})
+
+;; Where a failed check of an unchecked operation goes, in check mode.
+(def (proof-trap fc offset)
+  (let ((trap (label! fc)))
+    (cold! fc [:label trap])
+    (cold-ccall! fc h-proof-failed [] nil offset)
+    trap))
+
 (def (primitive fc name args offset)
   (case name
     ((car cdr)
@@ -604,27 +636,23 @@
            (join (label! fc)))
        (let ((slow (slow-arithmetic fc name a b r offset join)))
          (both-fixnums fc a b slow)
-         (case name
-           ((+)
-            (cond ((doubles-to-fixnum? b) (emit! fc [:op2 :add 0 r a [:imm (* 2 (get b 1))]]))
-                  ((doubles-to-fixnum? a) (emit! fc [:op2 :add 0 r b [:imm (* 2 (get a 1))]]))
-                  (else
-                   (emit! fc [:op2 :add 0 r (in-vreg fc a) b])
-                   (emit! fc [:op2 :sub 0 r r [:imm 1]]))))
-           ((-)
-            (if (doubles-to-fixnum? b)
-                (emit! fc [:op2 :sub 0 r a [:imm (* 2 (get b 1))]])
-                (begin
-                  (emit! fc [:op2 :sub 0 r (in-vreg fc a) b])
-                  (emit! fc [:op2 :add 0 r r [:imm 1]]))))
-           (else
-            (let ((x (raw! fc)) (y (raw! fc)))
-              (emit! fc [:op2 :sub 0 x a [:imm 1]])
-              (emit! fc [:op2 :ashr 0 y b [:imm 1]])
-              (emit! fc [:op2 :mul 0 x x y])
-              (emit! fc [:op2 :add 0 r x [:imm 1]]))))
+         (fixnum-arithmetic fc name a b r)
          (emit! fc [:label join])
          r)))
+    ;; Unchecked operations the types pass proved safe. Check mode keeps the
+    ;; check, and a failure traps.
+    ((%car %cdr)
+     (let ((x (in-vreg fc (value fc (get args 0)))) (r (vreg! fc)))
+       (when options/check-mode (pair-check fc x (proof-trap fc offset)))
+       (emit! fc [:mov r [:mem x (if (eq? name '%car) offset-car offset-cdr)]])
+       r))
+    ((%fx+ %fx- %fx*)
+     (let ((a (operand fc (get args 0))) (b (operand fc (get args 1))) (r (vreg! fc)))
+       (when options/check-mode (both-fixnums fc a b (proof-trap fc offset)))
+       (fixnum-arithmetic fc (get checked-names name) a b r)
+       r))
+    ((%fx< %fx<= %fx> %fx>= %fx=)
+     (boolean fc (fn (otherwise) (test-primitive fc name args otherwise offset))))
     ((< <= > >= =)
      (boolean fc (fn (otherwise) (test-primitive fc name args otherwise offset))))
     ((eq? not null? pair?)
@@ -701,6 +729,11 @@
          (emit! fc [:label join])
          (falsy-jump fc r otherwise)
          (emit! fc [:label cont]))))
+    ((%fx< %fx<= %fx> %fx>= %fx=)
+     (let ((a (operand fc (get args 0))) (b (operand fc (get args 1))))
+       (when (and (fixnum-operand? a) (fixnum-operand? b)) (set! a (in-vreg fc a)))
+       (when options/check-mode (both-fixnums fc a b (proof-trap fc offset)))
+       (emit! fc [:cmpj (get (get comparisons (get checked-names name)) 1) (tagged a) (tagged b) otherwise])))
     ((eq?)
      (let ((a (in-vreg fc (value fc (get args 0)))) (b (value fc (get args 1))))
        (emit! fc [:cmpj :ne a b otherwise])))

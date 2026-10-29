@@ -63,12 +63,17 @@ if native_enabled
   boot_sources = files('lib/otium/expander.ot', 'lib/otium/core.ot', 'lib/otium/loop.ot',
     'c/src/primitives.ot', 'lib/otium/compiler.ot', 'lib/otium/compiler/convert.ot',
     'lib/otium/compiler/lower.ot', 'lib/otium/compiler/alloc.ot', 'lib/otium/compiler/emit.ot',
-    'lib/otium/compiler/fasl.ot', 'lib/otium/compiler/boot.ot')
+    'lib/otium/compiler/fasl.ot', 'lib/otium/compiler/boot.ot', 'lib/otium/compiler/known.ot',
+    'lib/otium/compiler/options.ot')
+  boot_command = [otium, '--c.vm', '--no-project', '-L', source_root / 'lib', '-e',
+    '(require otium.compiler.boot :as boot) (boot/build-standard "@OUTPUT@" "@0@" "@1@") (exit 0)'.format(
+      source_root / 'lib', source_root / 'c/src/primitives.ot')]
   custom_target('otium.boot', output: 'otium.boot', depend_files: boot_sources,
-    command: [otium, '--c.vm', '--no-project', '-L', source_root / 'lib', '-e',
-      '(require otium.compiler.boot :as boot) (boot/build-standard "@OUTPUT@" "@0@" "@1@") (exit 0)'.format(
-        source_root / 'lib', source_root / 'c/src/primitives.ot')],
-    build_by_default: true)
+    command: boot_command, build_by_default: true)
+  # The same, compiled with the optimizer switched off, for comparing
+  # (benchmarks/opt-compare.py): OTIUM_BOOT picks it.
+  custom_target('otium-noopt.boot', output: 'otium-noopt.boot', depend_files: boot_sources,
+    command: boot_command, env: {'OTIUM_OPT': 'none'}, build_by_default: true)
 endif
 
 # The optional UI bridge: SDL_GPU rendering, SDL_ttf text and Yoga layout.

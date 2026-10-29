@@ -48,6 +48,7 @@
             ("E0206" "(require wrong-name)")
             ("E0207" "(def comp 1)")
             ("E0208" "(require private-space :as otium.core)")
+            ("E0209" "(set! map car)")
             ("E0301" "((fn (x) x) 1 2)")
             ("E0302" "(3)")
             ("E0401" "(car 5)")))

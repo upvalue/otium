@@ -146,6 +146,13 @@ static ot_value codegen_core_cell(ot_state* rt, size_t first, size_t count) {
   return ot_bool(rt->global_info[cell].space == 0);
 }
 
+/* Whether otium.core's cells are fixed, so the compiler can rely on them. */
+static ot_value codegen_core_locked(ot_state* rt, size_t first, size_t count) {
+  (void)first;
+  if (!codegen_arity(rt, count, 0, 0)) return 0;
+  return ot_bool(rt->core_locked);
+}
+
 /* The machine word of a builtin, by name; "qq-append" is the compiler's
  * unnamed append for quasiquote. */
 static ot_value codegen_builtin(ot_state* rt, size_t first, size_t count) {
@@ -237,6 +244,7 @@ const oti_builtin_def oti_codegen_builtins[] = {
     {B_SYMBOL_SERIAL, "%symbol-serial", codegen_symbol_serial},
     {B_NATIVE_CELL_DEFINE, "%native-cell-define", codegen_cell_define},
     {B_NATIVE_CORE_CELL, "%native-core-cell?", codegen_core_cell},
+    {B_CORE_LOCKED, "%core-locked?", codegen_core_locked},
     {B_NATIVE_BUILTIN, "%native-builtin", codegen_builtin},
     {B_NATIVE_OBJECT_CLASS, "%native-object-class", codegen_object_class},
     {B_NATIVE_INSTALL, "%native-install", codegen_install},

@@ -62,7 +62,8 @@ typedef struct {
   const char *script, *source, *project, *dev_path;
   size_t heap_init, heap_max, max_depth;
   unsigned watchdog;
-  bool heap_max_given, repl, no_project, preloads, serve, server, gc_stats, gc_stats_json, vm;
+  bool heap_max_given, repl, no_project, preloads, serve, server, gc_stats, gc_stats_json, vm,
+      unlock_core;
   /* Launcher options end at option_end; program arguments start at arguments. */
   int option_end, arguments;
 } options;
@@ -290,6 +291,7 @@ static int parse_options(int argc, char** argv, options* o) {
     else if (!strcmp(name, "c.gc-stats")) o->gc_stats = true;
     else if (!strcmp(name, "c.gc-stats-json")) o->gc_stats_json = true;
     else if (!strcmp(name, "c.vm")) o->vm = true;
+    else if (!strcmp(name, "c.unlock-core")) o->unlock_core = true;
     else if (!strcmp(name, "c.heap-init") || !strcmp(name, "c.heap-max")) {
       if (number > SIZE_MAX / 2 || (name[7] == 'i' && number < 1024))
         return usage_error("--%s out of range", name);
@@ -646,6 +648,9 @@ int main(int argc, char** argv) {
     return 1;
   }
 #endif
+  /* --c.unlock-core or OTIUM_UNLOCK_CORE=1 lets programs redefine core. */
+  const char* unlock = getenv("OTIUM_UNLOCK_CORE");
+  if (o.unlock_core || (unlock && *unlock && strcmp(unlock, "0"))) ot_unlock_core(rt);
   bool dev = o.dev_path != NULL;
   bool ok = ot_set_arguments(rt, o.script, (size_t)(argc - o.arguments),
                              (const char* const*)(argv + o.arguments));

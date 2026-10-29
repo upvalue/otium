@@ -247,6 +247,14 @@
     "example": "(require app.tools :as app.store)",
     "fixed": "(require app.tools :as tools)"
   },
+  "E0209": {
+    "title": "otium.core is locked",
+    "type": "namespace-error",
+    "message": "`{name}` is in otium.core, which is locked; run with --c.unlock-core to change it",
+    "explanation": "Once the core library has loaded, its definitions are fixed: `def` or `set!` of a name in `otium.core` is an error, so the compiler can rely on what core functions do. Defining the same name in your own namespace is fine; it shadows the core definition there. To change core itself, for example to stub a function in a test, run with `--c.unlock-core` or set `OTIUM_UNLOCK_CORE=1`.",
+    "example": "(set! map (fn (f xs) xs))",
+    "fixed": "(def (map f xs) xs)"
+  },
   "E0301": {
     "title": "wrong number of arguments",
     "type": "arity-error",

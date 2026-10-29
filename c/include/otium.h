@@ -74,6 +74,9 @@ bool ot_set_arguments(ot_state* rt, const char* script, size_t count, const char
 /* Loading. The expander must be loaded before the core library. */
 bool ot_load_expander(ot_state* rt, const char* directory);
 bool ot_load_core(ot_state* rt, const char* directory);
+/* Once core has loaded, defining or assigning a name in otium.core is an
+ * error (E0209). This leaves core open to redefinition. */
+void ot_unlock_core(ot_state* rt);
 /* Append a module search directory before the default . and lib directories. */
 bool ot_add_load_path(ot_state* rt, const char* path);
 /* Add the module directories listed by (paths ...) forms in a project file.

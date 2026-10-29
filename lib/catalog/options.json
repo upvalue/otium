@@ -13,5 +13,6 @@
  ["c.max-depth", "integer", "VM frame depth limit"],
  ["c.gc-stats", "flag", "Print collector statistics at exit"],
  ["c.gc-stats-json", "flag", "Print machine-readable GC statistics"],
- ["c.vm", "flag", "Run on the VM instead of native code"]
+ ["c.vm", "flag", "Run on the VM instead of native code"],
+ ["c.unlock-core", "flag", "Allow redefining names in otium.core"]
 ]

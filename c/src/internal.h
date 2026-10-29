@@ -364,6 +364,7 @@ enum {
   B_DEV_NAMESPACE_BINDINGS,
   B_DEV_EVAL_IN,
   B_DEV_PREPARE_IN,
+  B_DEV_SET_PARAM_DEFAULT,
   B_NATIVE_INSTALL,
   B_NATIVE_CELL,
   B_NATIVE_CELL_BUILTIN,
@@ -374,6 +375,7 @@ enum {
   B_COMPILE_ERROR,
   B_NATIVE_CELL_DEFINE,
   B_NATIVE_CORE_CELL,
+  B_CORE_LOCKED,
   B_NATIVE_BUILTIN,
   B_NATIVE_OBJECT_CLASS,
   B_READ_FORMS,
@@ -834,6 +836,9 @@ struct ot_state {
   oti_builtin_fn builtin_run[B_COUNT];
   oti_roots class_roots;
   bool classes_ready, core_loaded;
+  /* Once core has loaded, its cells can't be defined or assigned unless the
+   * host unlocked it with ot_unlock_core. */
+  bool core_locked, core_unlocked;
   oti_roots constant_roots;
   /* Each condition type's parent, a table. */
   ot_value condition_types;
@@ -934,6 +939,17 @@ bool oti_arity_error(ot_state* rt, const oti_function* fn, size_t argc);
 bool oti_callable_error(ot_state* rt, ot_value value);
 /* Record E0201 for the unbound global cell, with :name. */
 bool oti_unbound_error(ot_state* rt, uint32_t global);
+/* Record E0209 for an attempt to define or assign a cell of locked core. */
+bool oti_core_locked_error(ot_state* rt, uint32_t global);
+
+/* True, with E0209, when the cell belongs to otium.core and core is locked.
+ * Checked wherever code defines or assigns a global. */
+static inline bool oti_core_cell_locked(ot_state* rt, uint32_t global) {
+  if (!rt->core_locked || rt->global_info[global].space != 0) return false;
+  oti_core_locked_error(rt, global);
+  return true;
+}
+
 /* The source id of a file path, registered on first use, or OTI_NO_SOURCE. */
 uint32_t oti_source_id(ot_state* rt, const char* path);
 /* Free what an error record owns. */

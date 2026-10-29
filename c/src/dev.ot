@@ -142,7 +142,7 @@
                                               (flush-output-port original)))
                                         (set! %output (string-append %output text)))
                                       (- end start))}))
-    (%eval-in 'otium.core (list 'defparam 'current-output-port %output-port)))
+    (%set-param-default! current-output-port %output-port))
   (when %threaded (%start-thread!)))
 
 (def (%stop! &optional (cancel? #f))

@@ -267,7 +267,7 @@ static ot_value class_define_generic(ot_state* rt, size_t first, size_t count) {
     return 0;
   }
   uint32_t global = oti_global(rt, text, length);
-  if (global == UINT32_MAX) return 0;
+  if (global == UINT32_MAX || oti_core_cell_locked(rt, global)) return 0;
   ot_value existing = oti_global_value(rt, global);
   size_t wanted = (size_t)ot_to_int(n);
   if (!oti_unbound(existing) && rt->stack[first + 2] != OT_TRUE) {

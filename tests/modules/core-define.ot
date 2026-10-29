@@ -1,0 +1,8 @@
+;; Defines and assigns a name in otium.core, which only --c.unlock-core allows.
+(ns otium.core)
+
+(def (clamp x low high)
+  :redefined)
+
+(set! clamp (fn (x low high) :assigned))
+(display (clamp 1 2 3))

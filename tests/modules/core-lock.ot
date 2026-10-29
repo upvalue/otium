@@ -1,0 +1,30 @@
+;; otium.core is locked once it has loaded: assigning one of its names is an
+;; error, and defining the same name in another namespace shadows it.
+(ns core-lock)
+(require otium.test :refer (check report))
+
+(def (code-of thunk)
+  ;; The :code of the condition thunk raises, or nil.
+  (try
+    (begin
+      (thunk)
+      nil)
+    (catch c (and (table? c) (get c :code)))))
+
+(check "locked" #t (%core-locked?))
+(check "set! function" "E0209" (code-of (fn () (eval '(set! map (fn (f xs) xs))))))
+(check "set! param" "E0209" (code-of (fn () (eval '(set! current-output-port nil)))))
+(check "qualified set!" "E0209" (code-of (fn () (eval '(set! otium.core/filter nil)))))
+(check "map unchanged" '(1 2) (map car '((1) (2))))
+
+;; A definition here gets its own cell; core and other namespaces keep theirs.
+(def (map f xs)
+  :shadowed)
+
+(check "shadowed" :shadowed (map car '((1))))
+(check "core map" '(1) (otium.core/map car '((1))))
+(check "set! shadow" nil (code-of (fn () (set! map (fn (f xs) :changed)))))
+(check "changed shadow" :changed (map car '((1))))
+(check "core map after" '(1) (otium.core/map car '((1))))
+
+(report "core lock")

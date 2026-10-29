@@ -1702,7 +1702,8 @@ static bool inlined_builtin_cell(ot_state* rt, uint32_t index) {
 }
 
 static W h_define(ot_state* rt, W cell, W value) {
-  if (inlined_builtin_cell(rt, (uint32_t)cell)) oti_native_raise(rt);
+  if (inlined_builtin_cell(rt, (uint32_t)cell) || oti_core_cell_locked(rt, (uint32_t)cell))
+    oti_native_raise(rt);
   rt->global_info[cell].defined = 1;
   rt->global_info[cell].macro = oti_kind(value, K_MACRO);
   oti_set_global(rt, (uint32_t)cell, value);
@@ -1714,7 +1715,8 @@ static W h_set_global(ot_state* rt, W cell, W value) {
     oti_coded_error(rt, "E0201", "cannot set an unbound global");
     oti_native_raise(rt);
   }
-  if (inlined_builtin_cell(rt, (uint32_t)cell)) oti_native_raise(rt);
+  if (inlined_builtin_cell(rt, (uint32_t)cell) || oti_core_cell_locked(rt, (uint32_t)cell))
+    oti_native_raise(rt);
   rt->global_info[cell].macro = oti_kind(value, K_MACRO);
   oti_set_global(rt, (uint32_t)cell, value);
   return OT_NIL;

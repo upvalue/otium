@@ -171,7 +171,7 @@ static ot_value instance_define_class(ot_state* rt, size_t first, size_t count) 
     return 0;
   }
   uint32_t global = oti_global(rt, (char*)oti_bytes_data(name), oti_bytes_length(name));
-  if (global == UINT32_MAX) return 0;
+  if (global == UINT32_MAX || oti_core_cell_locked(rt, global)) return 0;
   ot_value old = oti_global_value(rt, global);
   if (oti_unbound(old)) old = V_UNBOUND;
   bool reset = rt->stack[first + 4] == OT_TRUE;

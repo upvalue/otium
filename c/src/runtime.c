@@ -1103,6 +1103,7 @@ static bool load_boot(ot_state* rt) {
   if (!path || !*path) path = OTIUM_BOOT_FILE;
   if (!oti_classes_init(rt) || !oti_load_boot(rt, path)) return false;
   rt->shared_expander = rt->core_loaded = true;
+  rt->core_locked = !rt->core_unlocked;
   /* Programs compiled ahead of time, for testing the compiler. */
   const char* program = getenv("OTIUM_FASL");
   if (program && *program && !oti_load_fasl(rt, program)) {
@@ -1163,8 +1164,16 @@ bool ot_load_core(ot_state* rt, const char* directory) {
   bool ok = eval_library_file(rt, OTIUM_BOOTSTRAP_FILE, "bootstrap library") &&
             eval_library_file(rt, path, "core library");
   free(path);
-  if (ok) rt->core_loaded = true;
+  if (ok) {
+    rt->core_loaded = true;
+    rt->core_locked = !rt->core_unlocked;
+  }
   return ok;
+}
+
+void ot_unlock_core(ot_state* rt) {
+  rt->core_unlocked = true;
+  rt->core_locked = false;
 }
 
 bool ot_eval(ot_state* rt, const char* source, size_t length, ot_value* result) {

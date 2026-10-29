@@ -174,6 +174,13 @@ bool oti_unbound_error(ot_state* rt, uint32_t global) {
   return false;
 }
 
+bool oti_core_locked_error(ot_state* rt, uint32_t global) {
+  return oti_coded_errorf(rt, "E0209",
+                          "`%s` is in otium.core, which is locked; run with --c.unlock-core to "
+                          "change it",
+                          rt->global_info[global].name);
+}
+
 /* Reports. Values under construction live on the VM stack above sp, which is
  * rooted, and are named by their slot. */
 

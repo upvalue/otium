@@ -279,6 +279,19 @@ static ot_value dev_prepare_in(ot_state* rt, size_t first, size_t count) {
   return oti_array_from(rt, first, 2);
 }
 
+/* Replace a param's default, the value it has outside any with-params. The
+ * server sends output printed outside requests to clients this way, since
+ * current-output-port's cell in otium.core can't be redefined. */
+static ot_value dev_set_param_default(ot_state* rt, size_t first, size_t count) {
+  if (!dev_arity(rt, count, 2)) return 0;
+  if (!oti_kind(rt->stack[first], K_PARAM)) {
+    oti_error(rt, "expected a param");
+    return 0;
+  }
+  oti_as_param(rt->stack[first])->value = rt->stack[first + 1];
+  return OT_NIL;
+}
+
 #ifdef OTIUM_FREESTANDING
 /* Without an operating system there is no socket or file system: the server
  * can't listen, and the rest answer as for a process with nothing to report. */
@@ -346,6 +359,7 @@ int64_t ot_dev_mtime(const char* path) {
 const oti_builtin_def oti_dev_builtins[] = {
     {B_DEV_PREPARE_IN, "otium.dev/%prepare-in", dev_prepare_in},
     {B_DEV_EVAL_IN, "otium.dev/%eval-in", dev_eval_in},
+    {B_DEV_SET_PARAM_DEFAULT, "otium.dev/%set-param-default!", dev_set_param_default},
     {B_DEV_OPEN, "otium.dev/%open", dev_open},
     {B_DEV_CLOSE, "otium.dev/%close", dev_close},
     {B_DEV_FDS, "otium.dev/%transport-fds", dev_fds},

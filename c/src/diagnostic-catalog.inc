@@ -32,6 +32,7 @@ static const struct { const char* code; const char* type; const char* message; }
   {"E0206", "namespace-error", "file declares namespace `{declared}` but was loaded as `{namespace}`"},
   {"E0207", "namespace-error", "{detail}"},
   {"E0208", "namespace-error", "alias `{alias}` is the name of an existing namespace"},
+  {"E0209", "namespace-error", "`{name}` is in otium.core, which is locked; run with --c.unlock-core to change it"},
   {"E0301", "arity-error", "wrong number of arguments to `{name}`"},
   {"E0302", "type-error", "{value} is not callable"},
   {"E0401", "type-error", "{detail}"},

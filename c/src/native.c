@@ -1686,7 +1686,9 @@ static W h_builtin(ot_state* rt, W id, W argc) {
     if (!oti_failed(rt)) oti_error(rt, "VM stack limit exceeded");
     oti_native_raise(rt);
   }
-  if (argc) memcpy(rt->stack + base, rt->native.args, argc * sizeof(ot_value));
+  /* One word at a time: compiled code has just stored the arguments a word
+   * at a time, and memcpy's wider loads of them stall the CPU. */
+  for (W i = 0; i < argc; i++) rt->stack[base + i] = rt->native.args[i];
   rt->sp = base + argc;
   ot_value result = rt->builtin_run[id](rt, base, argc);
   rt->sp = base;
@@ -1725,7 +1727,7 @@ static bool inlined_builtin_cell(ot_state* rt, uint32_t index) {
 }
 
 static W h_define(ot_state* rt, W cell, W value) {
-  if (inlined_builtin_cell(rt, (uint32_t)cell) || oti_core_cell_locked(rt, (uint32_t)cell))
+  if (inlined_builtin_cell(rt, (uint32_t)cell) || oti_cell_locked(rt, (uint32_t)cell))
     oti_native_raise(rt);
   rt->global_info[cell].defined = 1;
   rt->global_info[cell].macro = oti_kind(value, K_MACRO);
@@ -1738,7 +1740,7 @@ static W h_set_global(ot_state* rt, W cell, W value) {
     oti_coded_error(rt, "E0201", "cannot set an unbound global");
     oti_native_raise(rt);
   }
-  if (inlined_builtin_cell(rt, (uint32_t)cell) || oti_core_cell_locked(rt, (uint32_t)cell))
+  if (inlined_builtin_cell(rt, (uint32_t)cell) || oti_cell_locked(rt, (uint32_t)cell))
     oti_native_raise(rt);
   rt->global_info[cell].macro = oti_kind(value, K_MACRO);
   oti_set_global(rt, (uint32_t)cell, value);

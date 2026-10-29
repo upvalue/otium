@@ -388,9 +388,107 @@ ot_value oti_alloc_slow(ot_state* rt, uint32_t kind, uint32_t fields, size_t byt
   return v;
 }
 
-uint32_t oti_constant(ot_state* rt, ot_value value) {
+/* --- The index of symbol and keyword constants ------------------------------ */
+
+static size_t text_hash(unsigned kind, uint64_t id, const char* text, size_t n) {
+  uint64_t h = 1469598103934665603ull ^ kind ^ (id * 0x9e3779b97f4a7c15ull);
+  for (size_t i = 0; i < n; i++) h = (h ^ (unsigned char)text[i]) * 1099511628211ull;
+  return (size_t)(h ^ (h >> 29));
+}
+
+/* The kind and gensym serial a constant is indexed by, or false when it
+ * isn't a symbol or keyword. */
+static bool text_key(ot_value v, unsigned* kind, uint64_t* id) {
+  if (oti_kind(v, K_SYMBOL)) {
+    *kind = K_SYMBOL;
+    *id = oti_symbol_id(v);
+    return true;
+  }
+  *kind = K_KEYWORD;
+  *id = 0;
+  return oti_kind(v, K_KEYWORD);
+}
+
+static bool text_matches(ot_value v, unsigned kind, uint64_t id, const char* text, size_t n) {
+  if (!oti_kind(v, kind) || (kind == K_SYMBOL && oti_symbol_id(v) != id)) return false;
+  return oti_bytes_length(v) == n && !memcmp(oti_bytes_data(v), text, n);
+}
+
+static uint32_t text_find(ot_state* rt, unsigned kind, uint64_t id, const char* text, size_t n) {
+  if (!rt->text_slot_count) return UINT32_MAX;
+  size_t mask = rt->text_slot_count - 1;
+  for (size_t s = text_hash(kind, id, text, n) & mask; rt->text_slots[s]; s = (s + 1) & mask) {
+    uint32_t i = rt->text_slots[s] - 1;
+    if (i < rt->constant_count && rt->constant_state[i] &&
+        text_matches(rt->constants[i], kind, id, text, n))
+      return i;
+  }
+  return UINT32_MAX;
+}
+
+ot_value oti_text_constant(ot_state* rt, unsigned kind, uint64_t id, const char* text, size_t n) {
+  uint32_t i = text_find(rt, kind, id, text, n);
+  return i == UINT32_MAX ? 0 : rt->constants[i];
+}
+
+static void text_place(ot_state* rt, uint32_t index) {
+  unsigned kind;
+  uint64_t id;
+  ot_value v = rt->constants[index];
+  text_key(v, &kind, &id);
+  size_t mask = rt->text_slot_count - 1;
+  size_t s = text_hash(kind, id, (const char*)oti_bytes_data(v), oti_bytes_length(v)) & mask;
+  while (rt->text_slots[s]) s = (s + 1) & mask;
+  rt->text_slots[s] = index + 1;
+  rt->text_used++;
+}
+
+/* Index the constant at index when it's a symbol or keyword that no other
+ * constant already stands for. */
+static bool text_index(ot_state* rt, uint32_t index) {
+  unsigned kind;
+  uint64_t id;
+  ot_value v = rt->constants[index];
+  if (!text_key(v, &kind, &id)) return true;
+  if (text_find(rt, kind, id, (const char*)oti_bytes_data(v), oti_bytes_length(v)) != UINT32_MAX)
+    return true;
+  if ((rt->text_used + 1) * 2 > rt->text_slot_count) {
+    size_t old_count = rt->text_slot_count, count = old_count ? old_count * 2 : 1024;
+    uint32_t *old = rt->text_slots, *slots = calloc(count, sizeof(uint32_t));
+    if (!slots) return oti_error(rt, "out of host memory");
+    rt->text_slots = slots;
+    rt->text_slot_count = count;
+    rt->text_used = 0;
+    for (size_t s = 0; s < old_count; s++)
+      if (old[s]) text_place(rt, old[s] - 1);
+    free(old);
+  }
+  text_place(rt, index);
+  return true;
+}
+
+bool oti_reindex_text_constants(ot_state* rt) {
+  if (rt->text_slot_count) memset(rt->text_slots, 0, rt->text_slot_count * sizeof(uint32_t));
+  rt->text_used = 0;
   for (size_t i = 0; i < rt->constant_count; i++)
-    if (rt->constant_state[i] && rt->constants[i] == value) return (uint32_t)i;
+    if (rt->constant_state[i] && !text_index(rt, (uint32_t)i)) return false;
+  return true;
+}
+
+uint32_t oti_constant(ot_state* rt, ot_value value) {
+  unsigned kind;
+  uint64_t id;
+  bool text = text_key(value, &kind, &id);
+  uint32_t found = text ? text_find(rt, kind, id, (const char*)oti_bytes_data(value),
+                                    oti_bytes_length(value))
+                        : UINT32_MAX;
+  if (found != UINT32_MAX && rt->constants[found] == value) return found;
+  /* Every symbol and keyword constant is indexed, by its text if not
+   * itself, so only another kind of value, or a second constant with the
+   * same text, needs the search. */
+  if (!text || found != UINT32_MAX)
+    for (size_t i = 0; i < rt->constant_count; i++)
+      if (rt->constant_state[i] && rt->constants[i] == value) return (uint32_t)i;
   size_t index = rt->constant_free;
   while (index < rt->constant_count && rt->constant_state[index]) index++;
   if (index >= UINT32_MAX ||
@@ -404,6 +502,7 @@ uint32_t oti_constant(ot_state* rt, ot_value value) {
   rt->constants[index] = value;
   rt->constant_free = index + 1;
   rt->constant_roots.count = rt->constant_count;
+  if (text && !text_index(rt, (uint32_t)index)) return UINT32_MAX;
   return (uint32_t)index;
 }
 
@@ -431,12 +530,43 @@ uint32_t oti_namespace(ot_state* rt, const char* name, size_t length) {
   return id;
 }
 
+static size_t global_hash(uint32_t space, const char* name, size_t length) {
+  return text_hash(0, space + 1, name, length);
+}
+
 static uint32_t find_global(ot_state* rt, uint32_t space, const char* name, size_t length) {
-  for (size_t i = 0; i < rt->global_count; i++)
-    if (rt->global_info[i].space == space && strlen(rt->global_info[i].name) == length &&
-        !memcmp(rt->global_info[i].name, name, length))
-      return (uint32_t)i;
+  if (!rt->global_slot_count) return UINT32_MAX;
+  size_t mask = rt->global_slot_count - 1;
+  for (size_t s = global_hash(space, name, length) & mask; rt->global_slots[s];
+       s = (s + 1) & mask) {
+    const oti_global_info* info = &rt->global_info[rt->global_slots[s] - 1];
+    if (info->space == space && info->length == length && !memcmp(info->name, name, length))
+      return rt->global_slots[s] - 1;
+  }
   return UINT32_MAX;
+}
+
+static void global_place(ot_state* rt, uint32_t index) {
+  const oti_global_info* info = &rt->global_info[index];
+  size_t mask = rt->global_slot_count - 1;
+  size_t s = global_hash(info->space, info->name, info->length) & mask;
+  while (rt->global_slots[s]) s = (s + 1) & mask;
+  rt->global_slots[s] = index + 1;
+}
+
+/* Index the global just added at index. */
+static bool global_index(ot_state* rt, uint32_t index) {
+  if (rt->global_count * 2 > rt->global_slot_count) {
+    size_t count = rt->global_slot_count ? rt->global_slot_count * 2 : 4096;
+    uint32_t* slots = calloc(count, sizeof(uint32_t));
+    if (!slots) return oti_error(rt, "out of host memory");
+    free(rt->global_slots);
+    rt->global_slots = slots;
+    rt->global_slot_count = count;
+    for (uint32_t i = 0; i < index; i++) global_place(rt, i);
+  }
+  global_place(rt, index);
+  return true;
 }
 
 static uint32_t namespace_global(ot_state* rt, uint32_t space, const char* name, size_t length) {
@@ -458,7 +588,8 @@ static uint32_t namespace_global(ot_state* rt, uint32_t space, const char* name,
   memcpy(copy, name, length);
   copy[length] = 0;
   uint32_t index = (uint32_t)rt->global_count++;
-  rt->global_info[index] = (oti_global_info){.name = copy, .space = space};
+  rt->global_info[index] = (oti_global_info){.name = copy, .space = space, .length = (uint32_t)length};
+  if (!global_index(rt, index)) return UINT32_MAX;
   oti_set_global(rt, index, oti_unbound_marker(index));
   return index;
 }
@@ -692,6 +823,8 @@ void ot_destroy(ot_state* rt) {
   free(rt->frames);
   free(rt->stack);
   free(rt->constant_state);
+  free(rt->text_slots);
+  free(rt->global_slots);
   oti_heap_destroy(&rt->heap);
   free_state(rt);
 }

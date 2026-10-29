@@ -640,6 +640,7 @@ typedef struct {
   uint32_t space;
   /* accessor: defined by defrecord, so only defrecord may change it. */
   bool defined, is_private, macro, accessor;
+  uint32_t length;
 } oti_global_info;
 
 /* A builtin reads its arguments from rt->stack[first, first + count). It
@@ -818,6 +819,11 @@ struct ot_state {
   /* Constant states: 0 free, 1 retained until code reclamation. */
   unsigned char* constant_state;
   size_t constant_state_capacity, constant_free, function_free, permanent_constants;
+  /* Hash indexes, open addressing, of each slot's index + 1 or 0 when empty:
+   * the symbol and keyword constants by kind, gensym serial and text, and
+   * the globals by namespace and name. Sizes are powers of two. */
+  uint32_t *text_slots, *global_slots;
+  size_t text_slot_count, text_used, global_slot_count;
   oti_global_info* global_info;
   size_t global_info_capacity;
   char** namespaces;
@@ -1075,6 +1081,11 @@ ot_value oti_instance_call(ot_state* rt, ot_value instance, size_t first, size_t
 ot_value oti_instance_copy(ot_state* rt, ot_value instance);
 ot_value oti_record_call(ot_state* rt, ot_value record, size_t first, size_t count);
 ot_value oti_record_copy(ot_state* rt, ot_value record);
+/* The symbol or keyword constant with this kind, gensym serial (0 for an
+ * interned symbol) and text, or 0. */
+ot_value oti_text_constant(ot_state* rt, unsigned kind, uint64_t id, const char* text, size_t n);
+/* Index every symbol and keyword constant again, after constants are freed. */
+bool oti_reindex_text_constants(ot_state* rt);
 
 ot_value oti_equal(ot_state* rt, ot_value a, ot_value b, bool keys);
 ot_value oti_table_set(ot_state* rt, ot_value table, ot_value key, ot_value value);

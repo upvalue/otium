@@ -477,15 +477,9 @@ static ot_value datum(oti_compiler* c, const oti_ast* a) {
     case AST_SYMBOL:
     case AST_KEYWORD: {
       unsigned kind = a->kind == AST_SYMBOL ? K_SYMBOL : K_KEYWORD;
-      for (size_t i = 0; i < rt->constant_count; i++) {
-        ot_value v = rt->constants[i];
-        if (!oti_kind(v, kind)) continue;
-        size_t length;
-        const char* bytes = oti_text_bytes(v, &length);
-        if ((kind != K_SYMBOL || oti_symbol_id(v) == a->symbol_id) && length == a->as.text.size &&
-            !memcmp(bytes, a->as.text.data, length))
-          return v;
-      }
+      ot_value found = oti_text_constant(rt, kind, kind == K_SYMBOL ? a->symbol_id : 0,
+                                         a->as.text.data, a->as.text.size);
+      if (found) return found;
       ot_value v = oti_text(rt, kind, a->as.text.data, a->as.text.size);
       if (v && kind == K_SYMBOL) oti_symbol_set_id(v, a->symbol_id);
       if (v && oti_constant(rt, v) == UINT32_MAX) return 0;

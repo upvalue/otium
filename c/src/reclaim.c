@@ -142,6 +142,7 @@ bool oti_reclaim(ot_state* rt) {
     while (rt->function_count && !rt->functions[rt->function_count - 1]) rt->function_count--;
     while (rt->constant_count && !rt->constant_state[rt->constant_count - 1]) rt->constant_count--;
     rt->constant_roots.count = rt->constant_count;
+    if (!oti_reindex_text_constants(rt)) ok = false;
     rt->constant_free = rt->function_free = 0;
   }
   /* The collection also clears the reclaim marks, including those left by

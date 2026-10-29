@@ -1,0 +1,24 @@
+;; Fixnum arithmetic with constants near the limits, where the tagged words
+;; don't fit in a fixnum.
+
+(def big 4611686018427387903)
+(def small -4611686018427387904)
+(def (add-small x) (+ x -4611686018427387904))
+(def (add-near x) (+ x -4611686018427387903))
+(def (add-half x) (+ x 2305843009213693952))
+(def (add-under-half x) (+ x 2305843009213693951))
+(def (sub-small x) (- x -4611686018427387904))
+(def (sub-half x) (- x 2305843009213693952))
+(def (small-plus x) (+ -4611686018427387904 x))
+(def (times x) (* x 17))
+
+(for ((x :in (list 0 1 -1 5 big small)))
+  (write (list (add-small x) (add-near x) (add-half x) (add-under-half x) (sub-small x) (sub-half x)
+               (small-plus x) (times x)))
+  (newline))
+
+(def (loop-sum n)
+  (let loop ((acc 0) (k n))
+    (if (<= k 0) acc (loop (+ acc -4611686018427387904) (- k 1)))))
+(write (list (loop-sum 1) (loop-sum 2) (loop-sum 3) (* 17 (loop-sum 1))))
+(newline)

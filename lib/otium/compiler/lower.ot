@@ -508,6 +508,12 @@
 
 (def (fixnum-operand? op) (and (array? op) (eq? (get op 0) :fix)))
 
+;; A fixnum operand whose doubled value, the difference its tagged word
+;; makes to a sum, is itself a fixnum: an immediate the compiler can work out.
+;; Doubling a bigger one would wrap in Otium's 63-bit fixnums.
+(def (doubles-to-fixnum? op)
+  (and (fixnum-operand? op) (< -2305843009213693953 (get op 1) 2305843009213693952)))
+
 ;; Operands for a binary primitive: registers, or fixnum immediates.
 (def (operand fc node)
   (let ((op (value fc node)))
@@ -600,16 +606,16 @@
          (both-fixnums fc a b slow)
          (case name
            ((+)
-            (cond ((fixnum-operand? b) (emit! fc [:op2 :add 0 r a [:imm (* 2 (get b 1))]]))
-                  ((fixnum-operand? a) (emit! fc [:op2 :add 0 r b [:imm (* 2 (get a 1))]]))
+            (cond ((doubles-to-fixnum? b) (emit! fc [:op2 :add 0 r a [:imm (* 2 (get b 1))]]))
+                  ((doubles-to-fixnum? a) (emit! fc [:op2 :add 0 r b [:imm (* 2 (get a 1))]]))
                   (else
-                   (emit! fc [:op2 :add 0 r a b])
+                   (emit! fc [:op2 :add 0 r (in-vreg fc a) b])
                    (emit! fc [:op2 :sub 0 r r [:imm 1]]))))
            ((-)
-            (if (fixnum-operand? b)
+            (if (doubles-to-fixnum? b)
                 (emit! fc [:op2 :sub 0 r a [:imm (* 2 (get b 1))]])
                 (begin
-                  (emit! fc [:op2 :sub 0 r a b])
+                  (emit! fc [:op2 :sub 0 r (in-vreg fc a) b])
                   (emit! fc [:op2 :add 0 r r [:imm 1]]))))
            (else
             (let ((x (raw! fc)) (y (raw! fc)))

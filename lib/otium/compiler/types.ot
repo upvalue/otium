@@ -189,21 +189,23 @@
 
 ;; --- The walk ----------------------------------------------------------------
 
-;; The walk's state: :rewrite whether to rewrite (not while a loop's types are
-;; still growing), :type the type of the node just walked, :true and :false
-;; the environments after a test, :backs a loop variable's id to the
-;; environments its recurs pass.
+;; The walk's state: rewrite, whether to rewrite (not while a loop's types
+;; are still growing), type, the type of the node just walked, true and
+;; false, the environments after a test, and backs, a loop variable's id to
+;; the environments its recurs pass.
+(defrecord State (rewrite type true false backs))
+
 (def (optimize info)
-  (let ((st {:rewrite #t :type t-any :true nil :false nil :backs {}}))
+  (let ((st (make-state :rewrite #t :type t-any :true nil :false nil :backs {})))
     (walk-function st info nil)
     info))
 
 (def (typed st t node)
-  (put! st :type t)
+  (set-state-type! st t)
   node)
 
 (def (rewrite? st what node)
-  (and (st :rewrite) (options/rewrite? what (get node 1))))
+  (and (state-rewrite st) (options/rewrite? what (get node 1))))
 
 (def (walk-function st info outer)
   (let ((env {}))
@@ -218,16 +220,16 @@
   (let ((types []))
     (dotimes (i (length nodes))
       (put! nodes i (walk st (get nodes i) env))
-      (push! types (st :type)))
+      (push! types (state-type st)))
     types))
 
 ;; Walk node, which runs in env and leaves env as it is afterwards. Returns
-;; the node to use instead, with its type in (st :type).
+;; the node to use instead, with its type in (state-type st).
 (def (walk st node env)
   (case (get node 0)
     ((:const) (typed st (constant-type (get node 2)) node))
     ((:lref) (typed st (var-type env (get node 2)) node))
-    ((:lset) (put! node 3 (walk st (get node 3) env)) (set-var! env (get node 2) (st :type)) (typed st t-nil node))
+    ((:lset) (put! node 3 (walk st (get node 3) env)) (set-var! env (get node 2) (state-type st)) (typed st t-nil node))
     ((:gset :gdef) (put! node 3 (walk st (get node 3) env)) (typed st t-any node))
     ((:if) (walk-if st node env #f))
     ((:seq) (let ((types (walk-all st (get node 2) env))) (typed st (get types (- (length types) 1)) node)))
@@ -235,7 +237,7 @@
     ((:fn)
      ;; Closures can't change the variables walked here, so while a loop's
      ;; types are growing they can wait.
-     (when (st :rewrite) (walk-function st (get node 2) env))
+     (when (state-rewrite st) (walk-function st (get node 2) env))
      (typed st t-any node))
     ((:call) (put! node 2 (walk st (get node 2) env)) (walk-all st (get node 3) env) (typed st t-any node))
     ((:gcall)
@@ -259,7 +261,7 @@
        (let ((back (copy env)))
          (dotimes (i (length types))
            (set-var! back (get (loop :vars) i) (get types i)))
-         (push! (get (st :backs) ((loop :var) :id)) back))
+         (push! (get (state-backs st) ((loop :var) :id)) back))
        (typed st 0 node)))
     ((:while) (walk-while st node env))
     ((:try) (walk-try st node env))
@@ -271,7 +273,7 @@
         (inits (get node 3)))
     (dotimes (i (length vars))
       (put! inits i (walk st (get inits i) env))
-      (set-var! env (get vars i) (st :type)))))
+      (set-var! env (get vars i) (state-type st)))))
 
 ;; A call of otium.core/%declared, which declare and the expand to, or nil
 ;; for any other call. Afterwards its value, and the local it checks, have the
@@ -390,12 +392,12 @@
 ;; --- Tests -------------------------------------------------------------------
 
 (def (tested st node t-env f-env)
-  (put! st :true t-env)
-  (put! st :false f-env)
+  (set-state-true! st t-env)
+  (set-state-false! st f-env)
   node)
 
 ;; Walk node as an if's test. Leaves the environments for when it's true and
-;; when it's false in (st :true) and (st :false), nil for one that can't
+;; when it's false in (state-true st) and (state-false st), nil for one that can't
 ;; happen, and env in no particular state.
 (def (walk-test st node env)
   (case (get node 0)
@@ -405,7 +407,7 @@
          (tested st (typed st (constant-type (get node 2)) node) env nil)))
     ((:lref)
      (let ((t (var-type env (get node 2))))
-       (put! st :type t)
+       (set-state-type! st t)
        (tested st node (narrowed env node (without t-any t-falsy)) (narrowed env node t-falsy))))
     ((:if) (walk-if st node env #t))
     ((:let) (walk-let st node env) (put! node 4 (walk-test st (get node 4) env)) node)
@@ -421,9 +423,9 @@
        ((not)
         (let ((args (get node 3)))
           (put! args 0 (walk-test st (get args 0) env))
-          (let ((t (st :type)))
+          (let ((t (state-type st)))
             (walk-prim-type st node t)
-            (tested st node (st :false) (st :true)))))
+            (tested st node (state-false st) (state-true st)))))
        ((eq?) (eq-test st node env))
        (else (test-by-type st (walk st node env) env))))
     ((:known :gcall)
@@ -440,15 +442,15 @@
     (else (test-by-type st (walk st node env) env))))
 
 (def (walk-prim-type st node t)
-  (put! st
-        :type (cond
-                ((within? t t-falsy) t-true)
-                ((= (meet t t-falsy) 0) t-false)
-                (else t-boolean))))
+  (set-state-type! st
+                   (cond
+                     ((within? t t-falsy) t-true)
+                     ((= (meet t t-falsy) 0) t-false)
+                     (else t-boolean))))
 
 ;; A test whose environments only follow from its type.
 (def (test-by-type st node env)
-  (let ((t (st :type)))
+  (let ((t (state-type st)))
     (cond
       ((= (meet t t-falsy) 0) (tested st node env nil))
       ((within? t t-falsy) (tested st node nil env))
@@ -458,8 +460,8 @@
 (def (predicate-test st node n args env)
   (put! args 0 (walk st (get args 0) env))
   (let ((arg (get args 0))
-        (t (st :type)))
-    (put! st :type (predicate-result n t))
+        (t (state-type st)))
+    (set-state-type! st (predicate-result n t))
     (cond
       ((within? t n) (tested st node env nil))
       ((= (meet t n) 0) (tested st node nil env))
@@ -471,7 +473,7 @@
 (def (eq-test st node env)
   (let ((args (get node 3)))
     (walk-all st args env)
-    (put! st :type t-boolean)
+    (set-state-type! st t-boolean)
     (let ((a (get args 0))
           (b (get args 1)))
       (let ((ref (cond
@@ -518,22 +520,22 @@
 (def (walk-if st node env test?)
   (let ((test (walk-test st (get node 2) env)))
     (put! node 2 test)
-    (let ((t-env (st :true))
-          (f-env (st :false)))
+    (let ((t-env (state-true st))
+          (f-env (state-false st)))
       (cond
         ((nil? f-env) (walk-taken st node 3 (or t-env env) env test?))
         ((nil? t-env) (walk-taken st node 4 f-env env test?))
         (test? (put! node 3 (walk-test st (get node 3) t-env))
-               (let ((t1 (st :type))
-                     (tt (st :true))
-                     (tf (st :false)))
+               (let ((t1 (state-type st))
+                     (tt (state-true st))
+                     (tf (state-false st)))
                  (put! node 4 (walk-test st (get node 4) f-env))
-                 (put! st :type (bitwise-ior t1 (st :type)))
-                 (tested st node (join tt (st :true)) (join tf (st :false)))))
+                 (set-state-type! st (bitwise-ior t1 (state-type st)))
+                 (tested st node (join tt (state-true st)) (join tf (state-false st)))))
         (else (put! node 3 (walk st (get node 3) t-env))
-              (let ((t1 (st :type)))
+              (let ((t1 (state-type st)))
                 (put! node 4 (walk st (get node 4) f-env))
-                (put! st :type (bitwise-ior t1 (st :type)))
+                (set-state-type! st (bitwise-ior t1 (state-type st)))
                 (replace! env (join t-env f-env))
                 node))))))
 
@@ -564,13 +566,13 @@
         (set-var! env (get (loop :vars) i) (get types i))))
     (let ((id ((loop :var) :id))
           (entry (copy env))
-          (rewrite (st :rewrite)))
-      (put! st :rewrite #f)
+          (rewrite (state-rewrite st)))
+      (set-state-rewrite! st #f)
       (let ((head (let round ((head entry)
                               (n 1))
-                    (put! (st :backs) id [])
+                    (put! (state-backs st) id [])
                     (walk st (get node 4) (copy head))
-                    (let ((next (reduce join entry (get (st :backs) id))))
+                    (let ((next (reduce join entry (get (state-backs st) id))))
                       (cond
                         ((same-env? next head) head)
                         ((= n max-rounds)
@@ -579,33 +581,33 @@
                              (put! ids (cv/var-id var) #t))
                            (forget entry ids)))
                         (else (round next (+ n 1))))))))
-        (put! st :rewrite rewrite)
-        (put! (st :backs) id [])
+        (set-state-rewrite! st rewrite)
+        (put! (state-backs st) id [])
         (replace! env head)
         (put! node 4 (walk st (get node 4) env))
-        (put! (st :backs) id nil)
+        (put! (state-backs st) id nil)
         node))))
 
 ;; A while loop the same way, for the variables its test and body assign.
 (def (walk-while st node env)
   (let ((entry (copy env))
-        (rewrite (st :rewrite)))
-    (put! st :rewrite #f)
+        (rewrite (state-rewrite st)))
+    (set-state-rewrite! st #f)
     (let ((head (let round ((head entry)
                             (n 1))
                   (walk-test st (get node 2) (copy head))
-                  (let ((t-env (st :true)))
+                  (let ((t-env (state-true st)))
                     (when t-env (walk st (get node 3) t-env))
                     (let ((next (join entry t-env)))
                       (cond
                         ((same-env? next head) head)
                         ((= n max-rounds) (forget entry (assigned node)))
                         (else (round next (+ n 1)))))))))
-      (put! st :rewrite rewrite)
+      (set-state-rewrite! st rewrite)
       (replace! env head)
       (put! node 2 (walk-test st (get node 2) env))
-      (let ((t-env (st :true))
-            (f-env (st :false)))
+      (let ((t-env (state-true st))
+            (f-env (state-false st)))
         (when t-env (put! node 3 (walk st (get node 3) t-env)))
         (replace! env f-env))
       (typed st t-nil node))))
@@ -615,13 +617,13 @@
 (def (walk-try st node env)
   (let ((landing (forget env (assigned (get node 2)))))
     (put! node 2 (walk st (get node 2) env))
-    (let ((t (st :type))
+    (let ((t (state-type st))
           (out (copy env)))
       (for ((clause :in (get node 4)))
         (let ((e (copy landing)))
           (when (get clause 0) (put! clause 0 (walk st (get clause 0) e)))
           (put! clause 2 (walk st (get clause 2) e))
-          (set! t (bitwise-ior t (st :type)))
+          (set! t (bitwise-ior t (state-type st)))
           (set! out (join out e))))
       (replace! env out)
       (typed st t node))))

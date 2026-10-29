@@ -35,39 +35,47 @@
 
 ;; --- State -------------------------------------------------------------------
 
-;; The walk's state: :env maps variable ids to bindings, :refs counts the
-;; references to each variable the result keeps, :fn is the function being
-;; simplified, :effort the steps left for inlining, :attempt the innermost
-;; inline attempt ({:size :limit}) or nil, :inlining the functions being
-;; inlined, innermost first.
-;;
-;; A binding is {:kind kind ...}: :const with :value a constant node, :copy
-;; with :value an lref to put in its place, :fn with :value a [:fn] node to
-;; inline from, :pending for a body definition not yet run, and :opaque.
+;; The walk's state: env maps variable ids to bindings, refs counts the
+;; references to each variable the result keeps, fn is the function being
+;; simplified, effort the steps left for inlining, attempt the innermost
+;; inline attempt or nil, inlining the functions being inlined, innermost
+;; first.
+(defrecord State (env refs fn effort attempt inlining))
+
+;; An inline attempt: the size of the copy so far, and the limit past which
+;; it gives up.
+(defrecord Attempt (size limit))
+
+;; What the walk knows about a variable. kind is :const with value a
+;; constant node, :copy with value an lref to put in its place, :fn with
+;; value a [:fn] node to inline from and calls the number of calls of it,
+;; :pending for a body definition not yet run, with lset its definition,
+;; and :opaque. dropped marks a definition left out.
+(defrecord Binding (kind value calls lset dropped))
 
 (def- base-effort 2000)
 
 (def (inline info)
-  (let ((s {:env {}
-            :refs {}
-            :fn info
-            :effort (+ base-effort (* 4 (node-size (info :body))))
-            :attempt nil
-            :inlining '()}))
+  (let ((s (make-state :env {}
+                       :refs {}
+                       :fn info
+                       :effort (+ base-effort (* 4 (node-size (info :body))))
+                       :attempt nil
+                       :inlining '())))
     (simplify-function s info)
     info))
 
 (def (binding s var)
-  (get (s :env) (cv/var-id var)))
+  (get (state-env s) (cv/var-id var)))
 
 (def (bind! s var b)
-  (put! (s :env) (cv/var-id var) b))
+  (put! (state-env s) (cv/var-id var) b))
 
 (def (refs s var)
-  (get (s :refs) (cv/var-id var) 0))
+  (get (state-refs s) (cv/var-id var) 0))
 
 (def (count-ref! s var)
-  (put! (s :refs) (cv/var-id var) (+ (refs s var) 1)))
+  (put! (state-refs s) (cv/var-id var) (+ (refs s var) 1)))
 
 ;; The nodes directly inside node; for a fn, its defaults and body.
 (def (children node)
@@ -206,11 +214,11 @@
 ;; --- The walk ----------------------------------------------------------------
 
 (def (step! s)
-  (put! s :effort (- (s :effort) 1))
-  (let ((a (s :attempt)))
+  (set-state-effort! s (- (state-effort s) 1))
+  (let ((a (state-attempt s)))
     (when a
-      (put! a :size (+ (a :size) 1))
-      (when (> (a :size) (a :limit)) (error abort-message a)))))
+      (set-attempt-size! a (+ (attempt-size a) 1))
+      (when (> (attempt-size a) (attempt-limit a)) (error abort-message a)))))
 
 (def- abort-message "inline: over the size limit")
 
@@ -281,23 +289,23 @@
       node))
 
 (def (simplify-function s info)
-  (let ((outer (s :fn)))
-    (put! s :fn info)
+  (let ((outer (state-fn s)))
+    (set-state-fn! s info)
     (for ((pair :in (info :optionals)))
       (put! pair 1 (simplify s (get pair 1) :value)))
     (put! info :body (simplify s (info :body) :value))
-    (put! s :fn outer)))
+    (set-state-fn! s outer)))
 
 (def (simplify-ref s node ctx)
   (let ((var (get node 2)))
     (let ((b (and (not (cv/var-assigned var)) (binding s var))))
       (cond
-        ((and b (eq? (b :kind) :const))
+        ((and b (eq? (binding-kind b) :const))
          (if (eq? ctx :effect)
              (nothing (get node 1))
-             [:const (get node 1) (get (b :value) 2)]))
-        ((and b (eq? (b :kind) :copy))
-         (let ((target (b :value))) (simplify s [:lref (get node 1) (get target 2) #f] ctx)))
+             [:const (get node 1) (get (binding-value b) 2)]))
+        ((and b (eq? (binding-kind b) :copy))
+         (let ((target (binding-value b))) (simplify s [:lref (get node 1) (get target 2) #f] ctx)))
         ((and (eq? ctx :effect) (not (get node 3))) (nothing (get node 1)))
         (else (count-ref! s var) node)))))
 
@@ -307,11 +315,11 @@
         (value (simplify s (get node 3) :value)))
     (let ((b (binding s var))
           (new [:lset (get node 1) var value]))
-      (if (and b (eq? (b :kind) :pending) (not (cv/var-assigned var)))
+      (if (and b (eq? (binding-kind b) :pending) (not (cv/var-assigned var)))
           (begin
-            (put! b :kind (kind-of value))
-            (put! b :value value)
-            (put! b :lset new))
+            (set-binding-kind! b (kind-of value))
+            (set-binding-value! b value)
+            (set-binding-lset! b new))
           (count-ref! s var))
       new)))
 
@@ -386,23 +394,19 @@
            (put! values i init)
            (bind! s
                   var
-                  {:kind (if (cv/var-assigned var)
-                             :opaque (kind-of init))
-                   :value init}))
+                  (make-binding :kind (if (cv/var-assigned var) :opaque (kind-of init)) :value init)))
           ((eq? (get init 0) :unbound)
            (set! defs #t)
            (put! values i init)
            (bind! s
                   var
-                  {:kind (if (cv/var-assigned var)
-                             :opaque
-                             :pending)}))
-          ((cv/var-assigned var) (put! values i (simplify s init :value)) (bind! s var {:kind :opaque}))
-          ((eq? (get init 0) :fn) (bind! s var {:kind :fn :value init :calls (call-count body var)}))
-          ((copyable? init) (put! values i init) (bind! s var {:kind :copy :value init}))
+                  (make-binding :kind (if (cv/var-assigned var) :opaque :pending))))
+          ((cv/var-assigned var) (put! values i (simplify s init :value)) (bind! s var (make-binding :kind :opaque)))
+          ((eq? (get init 0) :fn) (bind! s var (make-binding :kind :fn :value init :calls (call-count body var))))
+          ((copyable? init) (put! values i init) (bind! s var (make-binding :kind :copy :value init)))
           (else (let ((value (simplify s init :value)))
                   (put! values i value)
-                  (bind! s var {:kind (kind-of value) :value value}))))))
+                  (bind! s var (make-binding :kind (kind-of value) :value value)))))))
     (let ((body (simplify s body ctx))
           (segments '()))
       (when defs (set! body (drop-definitions s vars body)))
@@ -412,12 +416,12 @@
                 (value (get values i)))
             (cond
               ((> (refs s var) 0)
-               (when (or (nil? value) (eq? ((binding s var) :kind) :copy))
+               (when (or (nil? value) (eq? (binding-kind (binding s var)) :copy))
                  (set! value (simplify s (get inits i) :value)))
                (set! segments (cons [:bind var value] segments)))
               ((nil? value) nil)
               ((eq? (get value 0) :unbound)
-               (unless ((binding s var) :dropped) (set! segments (cons [:bind var value] segments))))
+               (unless (binding-dropped (binding s var)) (set! segments (cons [:bind var value] segments))))
               (else (let ((d (drop-value value))) (when d (set! segments (cons [:effect d] segments)))))))
           (loop (- i 1))))
       (build-let off segments body))))
@@ -428,12 +432,12 @@
   (let ((dropped []))
     (for ((var :in vars))
       (let ((b (binding s var)))
-        (when (and (= (refs s var) 0) (b :lset) (effect-free? (get (b :lset) 3)))
+        (when (and (= (refs s var) 0) (binding-lset b) (effect-free? (get (binding-lset b) 3)))
           (cond
-            ((eq? body (b :lset)) (put! b :dropped #t) (set! body (nothing (get body 1))))
-            ((and (eq? (get body 0) :seq) (memq (b :lset) (array-to-list (get body 2))))
-             (put! b :dropped #t)
-             (push! dropped (b :lset)))))))
+            ((eq? body (binding-lset b)) (set-binding-dropped! b #t) (set! body (nothing (get body 1))))
+            ((and (eq? (get body 0) :seq) (memq (binding-lset b) (array-to-list (get body 2))))
+             (set-binding-dropped! b #t)
+             (push! dropped (binding-lset b)))))))
     (if (and (> (length dropped) 0) (eq? (get body 0) :seq))
         (let ((nodes (get body 2))
               (kept []))
@@ -493,9 +497,9 @@
      (let ((var (get node 2)))
        (let ((b (and (not (cv/var-assigned var)) (not (get node 3)) (binding s var))))
          (when b
-           (case (b :kind)
-             ((:fn) (when (or (<= (or (b :calls) 1) 1) (<= (node-size (b :value)) shared-fn-size)) (b :value)))
-             ((:copy) (callee-fn s (b :value)))
+           (case (binding-kind b)
+             ((:fn) (when (or (<= (or (binding-calls b) 1) 1) (<= (node-size (binding-value b)) shared-fn-size)) (binding-value b)))
+             ((:copy) (callee-fn s (binding-value b)))
              (else nil))))))
     (else nil)))
 
@@ -524,11 +528,11 @@
         [:call (get node 1) (simplify s (get node 2) :value) (simplify-all s args) (get node 4)])))
 
 (def (inlinable? s info args)
-  (and (> (s :effort) 0)
+  (and (> (state-effort s) 0)
        (= (length (info :optionals)) 0)
        (nil? (info :rest))
        (= (length (info :params)) (length args))
-       (not (memq info (s :inlining)))
+       (not (memq info (state-inlining s)))
        (not (and (info :self) (mentions? (info :body) (info :self))))))
 
 ;; Whether node refers to var, inside functions too.
@@ -596,7 +600,7 @@
     (try-inline-now s node info args ready ctx)))
 
 (def (try-inline-now s node info args ready ctx)
-  (let ((owner (s :fn))
+  (let ((owner (state-fn s))
         (renames {})
         (params []))
     (for ((v :in (info :params)))
@@ -607,20 +611,20 @@
         (put! renames (cv/var-id v) new)
         (push! params new)))
     (let ((body (ir/copy-node (info :body) owner renames))
-          (outer (s :attempt))
-          (attempt {:size 0 :limit (+ 80 (* 2 (node-size node)))}))
+          (outer (state-attempt s))
+          (attempt (make-attempt :size 0 :limit (+ 80 (* 2 (node-size node))))))
       (unless (get node 4) (untail! body))
-      (put! s :attempt attempt)
-      (put! s :inlining (cons info (s :inlining)))
+      (set-state-attempt! s attempt)
+      (set-state-inlining! s (cons info (state-inlining s)))
       (let ((done (try
                     (simplify-let s (get node 1) params args body ctx ready)
                     (catch (abort? _) nil))))
-        (put! s :attempt outer)
-        (put! s :fn owner)
-        (put! s :inlining (cdr (s :inlining)))
+        (set-state-attempt! s outer)
+        (set-state-fn! s owner)
+        (set-state-inlining! s (cdr (state-inlining s)))
         (when (and done outer)
-          (put! outer :size (+ (outer :size) (attempt :size)))
-          (when (> (outer :size) (outer :limit)) (error abort-message outer)))
+          (set-attempt-size! outer (+ (attempt-size outer) (attempt-size attempt)))
+          (when (> (attempt-size outer) (attempt-limit outer)) (error abort-message outer)))
         done))))
 
 ;; Clear the tail flags of calls in tail position of node, which moves out of

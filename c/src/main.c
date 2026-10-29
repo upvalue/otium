@@ -470,10 +470,18 @@ static ssize_t edited_line(const char* prompt, char** line, size_t* capacity) {
 /* The line editor is used on a terminal, and with the development server so
  * requests are served while the REPL waits. Otherwise lines come from the
  * standard input port and evaluation stops at an interrupt. */
-static bool repl(ot_state* rt, bool dev) {
+static bool repl(ot_state* rt, bool dev, bool native) {
   bool terminal = ot_line_interactive(), editing = terminal || dev, ok = true;
   if (dev) ot_line_set_service(dev_service, rt);
-  if (terminal) puts("otium repl (c) - ^C interrupts, ^D exits, ,help for help");
+#if defined(__aarch64__)
+  const char* machine = "native arm64";
+#elif defined(__x86_64__)
+  const char* machine = "native x86-64";
+#else
+  const char* machine = "native";
+#endif
+  if (terminal)
+    printf("otium repl (%s) - ^C interrupts, ^D exits, ,help for help\n", native ? machine : "vm");
   char *line = NULL, *pending = NULL;
   size_t line_capacity = 0, length = 0;
   for (;;) {
@@ -621,10 +629,12 @@ int main(int argc, char** argv) {
   }
   ot_set_interrupt_flag(rt, &interrupt_requested);
   interrupt_runtime = rt;
+  bool native = false;
 #ifdef OTIUM_NATIVE
   /* Native code by default; --c.vm or OTIUM_VM=1 keeps the VM. */
   const char* vm = getenv("OTIUM_VM");
-  if (!o.vm && !(vm && *vm && strcmp(vm, "0")) && !ot_use_native(rt)) {
+  native = !o.vm && !(vm && *vm && strcmp(vm, "0"));
+  if (native && !ot_use_native(rt)) {
     fprintf(stderr, "cannot run native code: %s\n", ot_error(rt));
     ot_destroy(rt);
     return 1;
@@ -657,7 +667,7 @@ int main(int argc, char** argv) {
     if (!ok && !ot_interrupted(rt) && !ot_exit_status(rt, &exit_status)) report_error(rt, "<dev>");
   }
   if (ok && o.server) ok = stdio_server(rt);
-  if (ok && o.repl) ok = repl(rt, dev);
+  if (ok && o.repl) ok = repl(rt, dev, native);
   if (dev) ot_set_interrupt_handler(rt, NULL);
   ot_poll_interrupt(rt);
   status = ot_interrupted(rt) ? 130 : ok ? 0 : 1;

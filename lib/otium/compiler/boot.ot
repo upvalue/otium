@@ -27,11 +27,11 @@
   (let ((name (car (cdr form))))
     (if (pair? name) (car name) name)))
 
-;; A writer's :compile, when set, takes each form instead of the compiler:
+;; A writer's compile function, when set, takes each form instead of the compiler:
 ;; tests use it to see the forms a build compiles.
 (def (compile! w form)
-  (if (w :compile)
-      ((w :compile) form)
+  (if (fasl/fasl-writer-compile w)
+      ((fasl/fasl-writer-compile w) form)
       (fasl/unit! w (nc/compile-top form))))
 
 ;; One form as read from a file: evaluate_top, then evaluate_expanded.
@@ -69,7 +69,7 @@
     (top! w form)
     ;; A program compiled on its own is also evaluated, so later forms see its
     ;; macros and requires.
-    (when (w :evaluate) (%native-evaluate form))))
+    (when (fasl/fasl-writer-evaluate w) (%native-evaluate form))))
 
 (def (library-file! w path)
   (fasl/namespace! w 'otium.core)
@@ -129,7 +129,7 @@
 ;; Compile a program into w, in the user namespace, evaluating it as it goes.
 (def (program! w path)
   (let ((saved (current-ns)))
-    (put! w :evaluate #t)
+    (fasl/set-fasl-writer-evaluate! w #t)
     (fasl/source! w path)
     (fasl/namespace! w 'user)
     (%set-namespace 'user)

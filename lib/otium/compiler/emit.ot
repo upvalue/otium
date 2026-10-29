@@ -54,17 +54,20 @@
 
 ;; --- Bytes -------------------------------------------------------------------
 
-(def (make-buffer) {:bytes (make-bytevector 1024 0) :n 0})
+;; Bytes written so far: the first n of bytes.
+(defrecord ByteBuffer (bytes n))
+
+(def (make-buffer) (make-byte-buffer :bytes (make-bytevector 1024 0) :n 0))
 
 (def (byte! buf b)
-  (let ((bytes (buf :bytes)) (n (buf :n)))
+  (let ((bytes (byte-buffer-bytes buf)) (n (byte-buffer-n buf)))
     (when (= n (bytevector-length bytes))
       (let ((bigger (make-bytevector (* 2 n) 0)))
         (bytevector-copy! bigger 0 bytes)
-        (put! buf :bytes bigger)
+        (set-byte-buffer-bytes! buf bigger)
         (set! bytes bigger)))
     (bytevector-u8-set! bytes n b)
-    (put! buf :n (+ n 1))))
+    (set-byte-buffer-n! buf (+ n 1))))
 
 (def (unsigned! buf n)
   (if (< n 128)
@@ -83,7 +86,7 @@
           (byte! buf (+ 128 low))
           (signed! buf rest)))))
 
-(def (buffer-bytes buf) (bytevector-copy (buf :bytes) 0 (buf :n)))
+(def (buffer-bytes buf) (bytevector-copy (byte-buffer-bytes buf) 0 (byte-buffer-n buf)))
 
 ;; --- Operands ----------------------------------------------------------------
 

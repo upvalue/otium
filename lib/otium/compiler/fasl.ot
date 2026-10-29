@@ -24,11 +24,15 @@
 (ns otium.compiler.fasl
   (:require (otium.compiler.emit :as emit)))
 
-(def (make-writer) {:buf (emit/make-buffer)})
+;; A fasl file being written. compile, when set, takes each form instead of
+;; the compiler; evaluate, when true, runs each form after compiling it.
+(defrecord FaslWriter (buf compile evaluate))
 
-(def (u8! w b) (emit/byte! (w :buf) b))
+(def (make-writer) (make-fasl-writer :buf (emit/make-buffer)))
 
-(def (count! w n) (emit/unsigned! (w :buf) n))
+(def (u8! w b) (emit/byte! (fasl-writer-buf w) b))
+
+(def (count! w n) (emit/unsigned! (fasl-writer-buf w) n))
 
 (def (bytes! w bv)
   (count! w (bytevector-length bv))
@@ -41,7 +45,7 @@
         ((eq? x #t) (u8! w 1))
         ((eq? x #f) (u8! w 2))
         ((null? x) (u8! w 3))
-        ((int? x) (u8! w 4) (emit/signed! (w :buf) x))
+        ((int? x) (u8! w 4) (emit/signed! (fasl-writer-buf w) x))
         ((float? x) (u8! w 5) (text! w (number->string x)))
         ((char? x) (u8! w 6) (count! w (char->integer x)))
         ((string? x) (u8! w 7) (text! w x))
@@ -107,4 +111,4 @@
 ;; The finished file's bytes.
 (def (finish w)
   (u8! w 0)
-  (bytevector-append (string->utf8 "OTFASL01") (emit/buffer-bytes (w :buf))))
+  (bytevector-append (string->utf8 "OTFASL01") (emit/buffer-bytes (fasl-writer-buf w))))

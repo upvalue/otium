@@ -115,7 +115,7 @@
 
 (def (writer)
   (let ((w (fasl/make-writer)))
-    (put! w :compile check-form)
+    (fasl/set-fasl-writer-compile! w check-form)
     w))
 
 (def (finish)

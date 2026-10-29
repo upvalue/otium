@@ -48,8 +48,9 @@
 (def offset-array-length 24)
 (def offset-float 16)
 (def header-bytes 16)
-;; OTI_LARGE_MIN in c/src/heap.h, for the 64-bit hosts native code runs on.
-(def large-object-bytes 8192)
+;; The smallest OTI_LARGE_MIN in c/src/heap.h, so native code is right for
+;; either collector profile.
+(def large-object-bytes 2048)
 (def offset-kind 12)
 (def offset-car 16)
 (def offset-cdr 24)

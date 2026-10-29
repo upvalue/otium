@@ -97,6 +97,7 @@ typedef void (*oti_weak_hook)(void* data);
 
 typedef struct oti_chunk oti_chunk;
 typedef struct oti_large oti_large;
+typedef struct oti_mark_segment oti_mark_segment;
 
 typedef struct {
   unsigned char** items;
@@ -133,8 +134,9 @@ typedef struct {
   /* The current mark: 1, 2 or 3. An object or line is marked when it holds
    * the current value. */
   uint32_t epoch;
-  ot_value* stack;
-  size_t stack_count, stack_capacity;
+  /* The mark stack: one segment kept from initialization, and more borrowed
+   * from free blocks while marking, so collection doesn't need malloc. */
+  oti_mark_segment* marks;
   /* Statistics. allocated_bytes counts finished holes, overflow and large
    * objects; the current hole's share is start + used - hole_start. */
   unsigned char* hole_start;

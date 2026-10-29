@@ -172,6 +172,33 @@ TEST(evacuation_moves_survivors_out_of_sparse_blocks) {
   oti_heap_destroy(&h);
 }
 
+/* Marking a wide object queues every field, far past one segment of mark
+ * stack. Free blocks hold the rest and go back on the free list after. */
+TEST(mark_stack_borrows_free_blocks) {
+  oti_heap h;
+  CHECK(oti_heap_init(&h, 16 << 20));
+  enum { WIDTH = 100000 };
+  ot_value live[] = {OT_NIL};
+  oti_roots roots;
+  oti_roots_push(&h, &roots, live, 1);
+  live[0] = oti_heap_alloc(&h, 2, WIDTH, 0);
+  CHECK(live[0]);
+  for (size_t i = 0; i < WIDTH; i++) {
+    ot_value leaf = oti_heap_alloc(&h, 1, 1, 0);
+    CHECK(leaf);
+    object_fields(leaf)[0] = ot_int((intptr_t)i);
+    object_fields(live[0])[i] = leaf;
+  }
+  oti_heap_collect(&h);
+  size_t free_blocks = h.free_blocks.count;
+  oti_heap_collect(&h);
+  CHECK_EQ_INT(h.free_blocks.count, free_blocks);
+  for (size_t i = 0; i < WIDTH; i++)
+    CHECK(ot_to_int(object_fields(object_fields(live[0])[i])[0]) == (intptr_t)i);
+  oti_roots_pop(&h, &roots);
+  oti_heap_destroy(&h);
+}
+
 static const test_case tests[] = {
     TEST_ENTRY(integer_range),
     TEST_ENTRY(collection_keeps_roots_and_exhaustion_recovers),
@@ -179,6 +206,7 @@ static const test_case tests[] = {
     TEST_ENTRY(holes_are_reused),
     TEST_ENTRY(medium_objects_survive),
     TEST_ENTRY(evacuation_moves_survivors_out_of_sparse_blocks),
+    TEST_ENTRY(mark_stack_borrows_free_blocks),
 };
 
 TEST_SUITE(heap, tests);

@@ -40,6 +40,11 @@ endif
 if get_option('vm_switch')
   runtime_args += '-DOTIUM_VM_SWITCH'
 endif
+if get_option('gc_profile') == 'large'
+  runtime_args += '-DOTIUM_GC_LARGE'
+elif get_option('gc_profile') == 'small'
+  runtime_args += '-DOTIUM_GC_SMALL'
+endif
 # Native code needs one of sljit's backends and the trampolines in
 # native-<machine>.inc.
 native_supported = host_machine.cpu_family() in ['x86_64', 'aarch64'] and \

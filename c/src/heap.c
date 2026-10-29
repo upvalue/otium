@@ -313,18 +313,52 @@ static unsigned char* heap_place(oti_heap* h, size_t size) {
 
 /* --- Collection -------------------------------------------------------------- */
 
-static void heap_push(oti_heap* h, ot_value v) {
-  if (h->stack_count == h->stack_capacity) {
-    size_t capacity = h->stack_capacity ? h->stack_capacity * 2 : 1024;
-    ot_value* stack = realloc(h->stack, capacity * sizeof(*stack));
-    if (!stack) {
-      fputs("otium: out of memory while collecting\n", stderr);
-      abort();
-    }
-    h->stack = stack;
-    h->stack_capacity = capacity;
+/* A block's worth of mark stack. The first is malloc'd when the heap is made
+ * and kept. The rest are free blocks, borrowed until marking is done, or
+ * malloc'd if there are none. */
+struct oti_mark_segment {
+  oti_mark_segment* previous;
+  size_t count;
+  bool borrowed;
+};
+
+#define SEGMENT_ITEMS ((OTI_BLOCK - sizeof(oti_mark_segment)) / sizeof(ot_value))
+
+static inline ot_value* heap_segment_items(oti_mark_segment* s) { return (ot_value*)(s + 1); }
+
+static oti_mark_segment* heap_new_segment(oti_heap* h) {
+  oti_mark_segment* s = NULL;
+  bool borrowed = h->free_blocks.count || heap_add_chunk(h);
+  if (borrowed) {
+    unsigned char* block = h->free_blocks.items[--h->free_blocks.count];
+    heap_block_info(block)->state = BLOCK_QUARANTINE;
+    s = (oti_mark_segment*)block;
+  } else if (!(s = malloc(OTI_BLOCK))) {
+    fputs("otium: out of memory while collecting\n", stderr);
+    abort();
   }
-  h->stack[h->stack_count++] = v;
+  *s = (oti_mark_segment){h->marks, 0, borrowed};
+  return s;
+}
+
+static void heap_push(oti_heap* h, ot_value v) {
+  if (h->marks->count == SEGMENT_ITEMS) h->marks = heap_new_segment(h);
+  heap_segment_items(h->marks)[h->marks->count++] = v;
+}
+
+/* Take the next object to trace, giving back segments as they empty. */
+static bool heap_pop(oti_heap* h, ot_value* v) {
+  while (!h->marks->count) {
+    oti_mark_segment* s = h->marks;
+    if (!s->previous) return false;
+    h->marks = s->previous;
+    if (s->borrowed) {
+      heap_block_info(s)->state = BLOCK_FREE;
+      h->free_blocks.items[h->free_blocks.count++] = (unsigned char*)s;
+    } else free(s);
+  }
+  *v = heap_segment_items(h->marks)[--h->marks->count];
+  return true;
 }
 
 /* Mark the object v, the lines it covers and its block, and queue it to have
@@ -410,8 +444,8 @@ static inline void heap_trace(oti_heap* h, ot_value* slot) {
 static void heap_trace_root(void* context, ot_value* slot) { heap_trace(context, slot); }
 
 static void heap_drain(oti_heap* h) {
-  while (h->stack_count) {
-    ot_value v = h->stack[--h->stack_count];
+  ot_value v;
+  while (heap_pop(h, &v)) {
     ot_value* fields = object_fields(v);
     for (uint32_t i = 0, n = heap_header(v)->fields; i < n; i++) heap_trace(h, &fields[i]);
   }
@@ -627,7 +661,8 @@ static size_t heap_round_capacity(size_t bytes) { return bytes & ~(size_t)7; }
 
 bool oti_heap_init(oti_heap* h, size_t capacity) {
   *h = (oti_heap){.epoch = 1};
-  if (capacity > SIZE_MAX / 2) return false;
+  if (capacity > SIZE_MAX / 2 || !(h->marks = malloc(OTI_BLOCK))) return false;
+  *h->marks = (oti_mark_segment){NULL, 0, false};
   h->capacity = h->limit = heap_round_capacity(capacity);
   return true;
 }
@@ -654,7 +689,7 @@ void oti_heap_destroy(oti_heap* h) {
 #ifdef OTIUM_CHECK_ROOTS
   for (size_t i = 0; i < OTI_QUARANTINE; i++) free(h->quarantine[i].items);
 #endif
-  free(h->stack);
+  free(h->marks);
   *h = (oti_heap){0};
 }
 

@@ -1,0 +1,19 @@
+;; Calls to small core builtins in a hot loop: type predicates, a string
+;; length, list building and table lookups. Measures what a call into C costs
+;; compiled code, direct or through dispatch.
+(let ((items (list 'a "bc" 3 :d '(e)))
+      (table {:a 1 :b 2})
+      (count 0)
+      (i 0))
+  (while (< i 2000000)
+    (let ((x (get [1 2 3] (remainder i 3))))
+      (for-each (fn (item)
+                  (when (symbol? item) (set! count (+ count 1)))
+                  (when (string? item) (set! count (+ count (string-length item))))
+                  (when (keyword? item) (set! count (+ count (get table :b)))))
+                items)
+      (set! count (+ count (length (list x x))))
+      (set! i (+ i 1))))
+  (if (= count 14000000)
+      nil
+      (error "builtin-calls: wrong count" count)))

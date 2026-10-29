@@ -123,10 +123,18 @@
 (def (new-site func env tail definitions top ctx)
   (make-site :fn func :env env :tail tail :loops '() :definitions definitions :top top :ctx ctx))
 
-(def (non-tail site) (with-site site :tail #f :loops '() :definitions #f))
+(def (non-tail site)
+  (let ((copied (copy site)))
+    (set-site-tail! copied #f)
+    (set-site-loops! copied '())
+    (set-site-definitions! copied #f)
+    copied))
 
 ;; A nested scope, such as a let body: definitions there are local.
-(def (scope site) (with-site site :top #f))
+(def (scope site)
+  (let ((copied (copy site)))
+    (set-site-top! copied #f)
+    copied))
 
 (def (expression form site off)
   (let ((off (offset-of form off)))
@@ -583,6 +591,9 @@
                   (= (length args) (length ((var-loop var) :vars))))
              [:recur off (var-loop var) (list-to-array (map (fn (a) (expression a (non-tail site) off))
                                                          args))])
+            ((and (symbol? head) (not var) (record-construction (%native-cell head) args)
+                  (options/rewrite? "records:make" off))
+             (expression (record-construction (%native-cell head) args) site off))
             ((and (symbol? head) (not var))
              (let ((cell (%native-cell head)))
                (let ((builtin (%native-cell-builtin cell))
@@ -633,6 +644,38 @@
 (def (transform? name names-it cell suits off)
   (and names-it suits (%native-core-cell? cell) (%core-locked?)
        (options/enabled? (str "transform:" name)) (options/rewrite? (str "transform:" name) off)))
+
+;; (make-x :field value ...) of a constructor defrecord defined, with field
+;; keywords in the order the record declares them, as (record-new X value
+;; ...) with nil for the fields not given: the values still run in the
+;; order written, and nothing parses keywords. Otherwise nil.
+(def (record-construction cell args)
+  (let ((entry (get otium.core/%record-constructors cell)))
+    (when (and entry (%core-locked?) (options/enabled? "records") (even? (length args)))
+      (let ((keys (get entry 1)) (values []))
+        (let loop ((rest args) (i 0))
+          (cond
+            ((null? rest)
+             (while (< (length values) (length keys)) (push! values nil))
+             (let ((name (%native-cell-name (get entry 0))))
+               (cons 'otium.core/record-new
+                     (cons (string->symbol (str (car name) "/" (cdr name))) (array-to-list values)))))
+            ((>= i (length keys)) nil)
+            ((eq? (keyword-form (car rest)) (get keys i))
+             (push! values (car (cdr rest)))
+             (loop (cdr (cdr rest)) (+ i 1)))
+            ((keyword-form (car rest))
+             (push! values nil)
+             (loop rest (+ i 1)))
+            (else nil)))))))
+
+;; The keyword a form stands for, :k or (quote :k) as the expander leaves it,
+;; or nil.
+(def (keyword-form form)
+  (cond ((keyword? form) form)
+        ((and (pair? form) (eq? (car form) 'quote) (pair? (cdr form)) (keyword? (car (cdr form))))
+         (car (cdr form)))
+        (else nil)))
 
 ;; record-get or record-set! for a call of a reader or writer defrecord
 ;; defined, with its number of arguments, or nil. Only defrecord can change

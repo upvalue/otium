@@ -52,3 +52,15 @@
 ;; The same declaration again keeps the functions working.
 (defrecord Point (x y))
 (show "again" (list (point-x p) (y-of p)))
+
+;; Constructors with fields in declared order compile to record-new; out of
+;; order they go through the constructor. Values run in the order written.
+(defrecord Triple (a b c))
+(def (logged log tag value) (push! log tag) value)
+(def (in-order log) (make-triple :a (logged log :a 1) :c (logged log :c 3)))
+(def (out-of-order log) (make-triple :c (logged log :c 3) :a (logged log :a 1)))
+(show "in order" (let ((log [])) (let ((t (in-order log))) (list (triple-a t) (triple-b t) (triple-c t) log))))
+(show "out of order" (let ((log [])) (let ((t (out-of-order log))) (list (triple-a t) (triple-b t) (triple-c t) log))))
+(show "none given" (let ((t (make-triple))) (list (triple-a t) (triple-c t))))
+(attempt "repeated field" (fn () (make-triple :a 1 :a 2)))
+(attempt "value missing" (fn () (make-triple :a)))

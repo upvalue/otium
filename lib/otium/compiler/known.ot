@@ -191,6 +191,8 @@
 
 (defknown copy (any) any :flags (:allocates :direct))
 
+(defknown record-new rest record :flags (:allocates :direct))
+
 (defknown record-ref (record keyword) any :flags (:direct))
 
 (defknown record-set! (record keyword any) any :flags (:direct))

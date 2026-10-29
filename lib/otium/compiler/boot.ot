@@ -111,6 +111,8 @@
     (put! %inline-bodies name nil))
   (for ((cell :in (keys %record-accessors)))
     (put! %record-accessors cell nil))
+  (for ((cell :in (keys %record-constructors)))
+    (put! %record-constructors cell nil))
   (let ((w (fasl/make-writer)))
     (boot! w library primitives modules)
     (let ((port (open-binary-output-file out)))

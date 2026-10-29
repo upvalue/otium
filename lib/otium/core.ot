@@ -1254,10 +1254,13 @@ Includes runtime builtins, special forms, and the Otium prelude."
           descriptor))))
 
 ;; The readers and writers defrecord defines, by cell: [type-cell index
-;; writer?]. The native compiler reads and writes fields in place for calls
-;; of them. A boot build clears it and fills it again as it expands each
-;; defrecord, since it doesn't run what it compiles.
+;; writer?]; and its constructors, by cell: [type-cell field-keywords]. The
+;; native compiler reads and writes fields in place for calls of them, and
+;; makes records without parsing keywords. A boot build clears both and
+;; fills them again as it expands each defrecord, since it doesn't run what
+;; it compiles.
 (def %record-accessors {})
+(def %record-constructors {})
 
 ;; LayoutStyle as layout-style.
 (def- (record-prefix name)
@@ -1282,7 +1285,9 @@ Includes runtime builtins, special forms, and the Otium prelude."
 ;; Note the cells of a record's readers and writers in %record-accessors,
 ;; in the current namespace.
 (def- (note-record-accessors! name prefix fields immutable?)
-  (let ((type-cell (%native-cell-define name)))
+  (let ((type-cell (%native-cell-define name)) (keys []))
+    (each-field fields (fn (field _i) (push! keys (keyword (symbol->string field)))))
+    (put! %record-constructors (%native-cell-define (string->symbol (str "make-" prefix))) [type-cell keys])
     (each-field fields
                 (fn (field i)
                   (put! %record-accessors (%native-cell-define (string->symbol (str prefix "-" field)))

@@ -1,0 +1,22 @@
+;; A named let whose name is assigned inside its own body.
+
+(def (f n)
+  (let loop ((i n))
+    (if (= i 0)
+        (begin
+          (set! loop nil)
+          (list i loop))
+        (loop (- i 1)))))
+
+(write (f 3))
+(newline)
+
+(def (g n)
+  (let ((calls 0))
+    (let loop ((i n))
+      (set! calls (+ calls 1))
+      (when (= i 1) (set! loop (fn (j) (list :replaced j calls))))
+      (if (= i 0) calls (loop (- i 1))))))
+
+(write (g 4))
+(newline)

@@ -396,9 +396,19 @@
     v))
 
 (def (bind-let fc node)
-  (let ((vars (get node 2)) (inits (get node 3)))
+  (let ((vars (get node 2)) (inits (get node 3)) (offset (node-offset node)))
     (for ((i :range (length vars)))
-      (bind-var fc (get vars i) (value fc (get inits i)) (node-offset node)))))
+      (let ((var (get vars i)) (init (get inits i)))
+        (if (self-capture? var init)
+            ;; A function that captures the variable it's bound to, as for
+            ;; a named let whose name is assigned: the box comes first.
+            (let ((b (make-box fc [:imm word-unbound] offset)))
+              (put! (fc :locs) (var :id) [:box b])
+              (emit! fc [:mov [:mem b offset-box] (in-vreg fc (value fc init))]))
+            (bind-var fc var (value fc init) offset))))))
+
+(def (self-capture? var init)
+  (and (boxed? var) (eq? (get init 0) :fn) (find (fn (v) (eq? v var)) ((get init 2) :captures)) #t))
 
 ;; Deliver node's value to target: nil returns it from the function, [r label]
 ;; puts it in r and jumps to label.

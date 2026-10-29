@@ -578,3 +578,62 @@ def eval_targets_per_client(t):
         c.send(4, 'abort', eval=1)
         t.check_in(':ok #t', c.response(4))
         t.check_in(':ok #f', c.response(1))
+
+
+FRAME_PROGRAM = '''(require (otium.dev :as dev) (otium.thread :as thread))
+(def state :idle)
+(def frames 0)
+(dev/frame-loop! #t)
+(let loop ()
+  (dev/between-frames!)
+  (dev/enter-frame!)
+  (set! state :drawing)
+  ;; Long enough to be preempted inside the frame.
+  (let spin ((i 0)) (when (< i 30000000) (spin (+ i 1))))
+  (set! frames (+ frames 1))
+  (set! state :idle)
+  (dev/leave-frame!)
+  (thread/sleep 0.001)
+  (loop))
+'''
+
+
+@test('dev evaluations land between frames')
+def evaluations_between_frames(t):
+    if os.environ.get('OTIUM_VM'):
+        raise Skip('threads need native code')
+    script = t.scratch / 'frames.ot'
+    script.write_text(FRAME_PROGRAM)
+    server = Server(t, script, watchdog=0)
+    client = server.client
+    seen = set()
+    for ident in range(1, 41):
+        client.send(ident, 'eval', code='state')
+        seen.add(re.search(r':value "([^"]*)"', client.response(ident)).group(1))
+    t.check(seen == {':idle'}, 'an evaluation ran inside a frame', seen)
+    concurrent = set()
+    for ident in range(41, 81):
+        client.send(ident, 'eval', code='state', concurrent=True)
+        concurrent.add(re.search(r':value "([^"]*)"', client.response(ident)).group(1))
+    t.check(':drawing' in concurrent, ':concurrent evaluation still waited for frames', concurrent)
+    client.send(300, 'eval', code='frames')
+    first = int(re.search(r':value "(\d+)"', client.response(300)).group(1))
+    time.sleep(.1)
+    client.send(301, 'eval', code='frames')
+    second = int(re.search(r':value "(\d+)"', client.response(301)).group(1))
+    t.check(second > first, 'frames stopped', first, second)
+    client.send(302, 'eval', code='(let loop () (loop))')
+    time.sleep(.05)
+    client.send(303, 'interrupt', eval=302)
+    t.check_in(':event :paused', client.read())
+    client.response(303)
+    client.send(304, 'eval', code='frames', concurrent=True)
+    paused_at = int(re.search(r':value "(\d+)"', client.response(304)).group(1))
+    client.send(305, 'eval', code='(+ 1 2)')
+    t.check_in(':value "3"', client.response(305))
+    client.send(306, 'eval', code='frames', concurrent=True)
+    later = int(re.search(r':value "(\d+)"', client.response(306)).group(1))
+    t.check(later > paused_at, 'a paused evaluation kept the frame lock', paused_at, later)
+    client.send(307, 'abort', eval=302)
+    client.response(307)
+    t.check_in(':ok #f', client.response(302))

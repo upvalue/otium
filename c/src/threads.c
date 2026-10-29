@@ -109,6 +109,14 @@ struct oti_threads {
   oti_thread** polled_threads;
   size_t polled_capacity;
   int poll_error;
+  /* When fds were last polled, in real time: with runnable threads they are
+   * polled at most once a millisecond, not at every switch. */
+  uint64_t last_poll;
+  /* Whether any thread may have a watchdog deadline, to skip the scan. */
+  bool watchdogs;
+  /* Keywords the scheduler compares and returns, interned once: interning
+   * scans every runtime constant, too slow for each switch. */
+  ot_value deadlock, timeout;
   _Atomic sig_atomic_t preempt;
   pthread_t ticker;
   _Atomic bool stop;
@@ -290,6 +298,8 @@ static void visit_thread(ot_state* rt, oti_thread* t, oti_root_visitor visit, vo
 void oti_visit_threads(ot_state* rt, oti_root_visitor visit, void* context) {
   oti_threads* ts = rt->threads;
   if (!ts) return;
+  visit(context, &ts->deadlock);
+  visit(context, &ts->timeout);
   for (size_t i = 0; i < ts->count; i++) visit_thread(rt, ts->all[i], visit, context);
 }
 
@@ -388,6 +398,7 @@ static bool setup(ot_state* rt) {
     return oti_error(rt, "out of host memory");
   }
   ts->capacity = 8;
+  ts->deadlock = ts->timeout = OT_NIL;
   rt->threads = ts;
   primordial->object = primordial->entry = primordial->args = OT_NIL;
   primordial->wake_value = primordial->kill_reason = OT_NIL;
@@ -415,6 +426,8 @@ static bool setup(ot_state* rt) {
   ot_value name = keyword(rt, ":main");
   if (!name) return false;
   as_thread(primordial->object)->name = name;
+  if (!(ts->deadlock = keyword(rt, ":deadlock")) || !(ts->timeout = keyword(rt, ":timeout")))
+    return false;
   return true;
 }
 
@@ -481,17 +494,22 @@ static bool loading_module(ot_state* rt) { return oti_module_depth(rt) > 0; }
 /* Wake threads whose deadline has passed, with :timeout. */
 static void expire(ot_state* rt) {
   oti_threads* ts = rt->threads;
-  uint64_t real = now(NULL);
-  for (size_t i = 0; i < ts->count; i++) {
-    oti_thread* thread = ts->all[i];
-    if (thread->watchdog_at && real >= thread->watchdog_at) {
-      thread->watchdog_at = 0;
-      if (thread->interrupt == OT_NIL) thread->interrupt = thread->watchdog;
-      wake(rt, thread, OT_NIL);
+  if (ts->watchdogs) {
+    uint64_t real = now(NULL);
+    bool pending = false;
+    for (size_t i = 0; i < ts->count; i++) {
+      oti_thread* thread = ts->all[i];
+      if (thread->watchdog_at && real >= thread->watchdog_at) {
+        thread->watchdog_at = 0;
+        if (thread->interrupt == OT_NIL) thread->interrupt = thread->watchdog;
+        wake(rt, thread, OT_NIL);
+      }
+      pending |= thread->watchdog_at != 0;
     }
+    ts->watchdogs = pending;
   }
   if (!ts->timer_count || ts->timers[0]->deadline > now(ts)) return;
-  ot_value timeout = keyword(rt, ":timeout");
+  ot_value timeout = rt->threads->timeout;
   uint64_t t = now(ts);
   while (ts->timer_count && ts->timers[0]->deadline <= t) wake(rt, ts->timers[0], timeout);
 }
@@ -541,6 +559,7 @@ static void poll_fds(ot_state* rt, int timeout_ms) {
   }
   if (rt->interrupt_flag && *rt->interrupt_flag) timeout_ms = 0;
   int ready = poll(ts->polled, (nfds_t)n, timeout_ms);
+  ts->last_poll = now(NULL);
   if (ts->polled[0].revents) oti_drain_wake(rt);
   if (rt->interrupt_flag && *rt->interrupt_flag) wake(rt, ts->primordial, OT_NIL);
   if (ready < 0 && errno != EINTR) {
@@ -567,7 +586,7 @@ static int idle_timeout(oti_threads* ts) {
     delay = deadline > t ? deadline - t : 0;
   }
   t = now(NULL);
-  for (size_t i = 0; i < ts->count; i++) {
+  for (size_t i = 0; ts->watchdogs && i < ts->count; i++) {
     uint64_t deadline = ts->all[i]->watchdog_at;
     if (deadline) {
       uint64_t left = deadline > t ? deadline - t : 0;
@@ -608,7 +627,7 @@ static bool checks(ot_state* rt, oti_thread* t) {
     if (!oti_failed(rt)) oti_error(rt, "exit requested");
     return false;
   }
-  if (t->resume == R_REDISPATCH && t->wake_value == keyword(rt, ":deadlock"))
+  if (t->resume == R_REDISPATCH && t->wake_value == rt->threads->deadlock)
     return oti_coded_error(rt, "E0503", "deadlock: no thread can run and none is sleeping");
   return true;
 }
@@ -738,7 +757,8 @@ static _Noreturn void schedule(ot_state* rt) {
   }
   for (;;) {
     expire(rt);
-    poll_fds(rt, 0);
+    if (!ts->fd_waiters || !ts->run.head || ts->test || now(NULL) - ts->last_poll >= 1000000u)
+      poll_fds(rt, 0);
     oti_thread* next = pick(ts);
     if (next) {
       ts->preempt = 0;
@@ -771,7 +791,7 @@ static _Noreturn void schedule(ot_state* rt) {
       continue;
     }
     if (ts->primordial->state != T_WAITING) abort();
-    wake(rt, ts->primordial, keyword(rt, ":deadlock"));
+    wake(rt, ts->primordial, rt->threads->deadlock);
   }
 }
 
@@ -1130,7 +1150,7 @@ static ot_value wait_fds_builtin(ot_state* rt, size_t first, size_t count) {
     int timeout = 0;
     if (blocking) {
       uint64_t t = now(ts);
-      if (deadline && t >= deadline) return keyword(rt, ":timeout");
+      if (deadline && t >= deadline) return rt->threads->timeout;
       /* Short slices, so an interrupt is noticed. */
       timeout =
           deadline && deadline - t < 10000000u ? (int)((deadline - t + 999999u) / 1000000u) : 10;
@@ -1139,7 +1159,7 @@ static ot_value wait_fds_builtin(ot_state* rt, size_t first, size_t count) {
     if (ready > 0) break;
     if (ready < 0 && errno != EINTR) return oti_fail(rt, "fd poll failed");
     if (!blocking) {
-      if (deadline && now(ts) >= deadline) return keyword(rt, ":timeout");
+      if (deadline && now(ts) >= deadline) return rt->threads->timeout;
       ot_value result = wait_on(rt, NULL, deadline);
       if (result == OTI_PARKED) {
         me->fd_waiting = true;
@@ -1177,7 +1197,7 @@ static ot_value join_builtin(ot_state* rt, size_t first, size_t count) {
   oti_thread* t = as_thread(v)->thread;
   if (!t || !rt->threads) return OT_TRUE;
   if (t == rt->threads->current) return oti_fail(rt, "a thread cannot join itself");
-  if (deadline && now(rt->threads) >= deadline) return keyword(rt, ":timeout");
+  if (deadline && now(rt->threads) >= deadline) return rt->threads->timeout;
   return wait_on(rt, &t->joiners, deadline);
 }
 
@@ -1284,6 +1304,7 @@ static ot_value watchdog_builtin(ot_state* rt, size_t first, size_t count) {
   if (ms && !start_ticker(rt)) return 0;
   me->watchdog_at = (uint64_t)ms * 1000000u;
   me->watchdog = rt->stack[first + 1];
+  if (ms) rt->threads->watchdogs = true;
   return OT_NIL;
 }
 
@@ -1357,7 +1378,9 @@ ot_value oti_thread_current(ot_state* rt) {
   return rt->threads ? rt->threads->current->object : OT_NIL;
 }
 
-bool oti_thread_can_wait(ot_state* rt) { return rt->threads && can_switch(rt); }
+/* Port I/O parks only where waiting would not break an atomic section; there
+ * it blocks the process, as it always has. */
+bool oti_thread_can_wait(ot_state* rt) { return rt->threads && !rt->atomic && can_switch(rt); }
 
 bool oti_thread_parked(ot_state* rt) {
   return rt->threads && rt->threads->current->state == T_WAITING;
@@ -1466,7 +1489,7 @@ static ot_value mailbox_next_builtin(ot_state* rt, size_t first, size_t count) {
   oti_thread* me = ts->current;
   retried(rt, NULL);
   if (me->cursor < me->mailbox_count) return me->mailbox[me->cursor++];
-  if (deadline && now(ts) >= deadline) return keyword(rt, ":timeout");
+  if (deadline && now(ts) >= deadline) return rt->threads->timeout;
   ot_value result = wait_on(rt, NULL, deadline);
   if (result == OTI_PARKED) me->mail_waiting = true;
   return result;

@@ -330,26 +330,31 @@ follow the swapchain's vsync rather than the poll interval."
 (def (run)
   (unless running?
     (set! running? #t)
+    (dev/frame-loop! #t)
     (unwind-protect
       (while (pair? (ui/windows))
-        (unless dev/%threaded (dev/service!))
-        (for-each (fn (window)
-                    (unless (get window :closed?)
-                      (dev/begin!)
-                      (unwind-protect
-                        (try
-                          (frame! window)
-                          (catch c
-                            (when (or (get (get window :options) :fail-fast?) (eq? (condition-type c) 'ui-teardown))
-                              (error c))
-                            (put! window :dirty? #f :paint-dirty? #f)
-                            (put! window :revision dev/revision)
-                            (let ((key (list dev/revision (condition-type c) (condition-message c))))
-                              (unless (equal? key (get window :last-error))
-                                (set! (window :last-error) key)
-                                (dev/frame-error! c)))))
-                        (dev/end!))))
-                  (ui/windows))
+        (dev/between-frames!)
+        (dev/enter-frame!)
+        (unwind-protect
+          (for-each (fn (window)
+                      (unless (get window :closed?)
+                        (dev/begin!)
+                        (unwind-protect
+                          (try
+                            (frame! window)
+                            (catch c
+                              (when (or (get (get window :options) :fail-fast?) (eq? (condition-type c) 'ui-teardown))
+                                (error c))
+                              (put! window :dirty? #f :paint-dirty? #f)
+                              (put! window :revision dev/revision)
+                              (let ((key (list dev/revision (condition-type c) (condition-message c))))
+                                (unless (equal? key (get window :last-error))
+                                  (set! (window :last-error) key)
+                                  (dev/frame-error! c)))))
+                          (dev/end!))))
+                    (ui/windows))
+          (dev/leave-frame!))
         (when (pair? (ui/windows)) (sdl/wait-event-timeout ffi/null (wait-ms))))
+      (dev/frame-loop! #f)
       (set! running? #f)
       (for-each close! (ui/windows)))))

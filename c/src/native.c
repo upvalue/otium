@@ -1726,8 +1726,11 @@ static W h_poll(ot_state* rt) {
   /* Past the limit only ever at a function's entry, where its frame can
    * move to a new segment. */
   if (rt->native.sp < rt->native.base_limit && !grow_frame(rt)) oti_native_raise(rt);
-  if (__atomic_exchange_n(&rt->poll_limit, rt->native.base_limit, __ATOMIC_RELAXED) !=
-      rt->native.base_limit) {
+  /* A plain load and store, not a locked exchange: this runs at every stack
+   * segment crossing. A tick landing after a tripped load is handled by this
+   * poll, and one after an untripped load is left for the next. */
+  if (__atomic_load_n(&rt->poll_limit, __ATOMIC_RELAXED) != rt->native.base_limit) {
+    __atomic_store_n(&rt->poll_limit, rt->native.base_limit, __ATOMIC_RELAXED);
     if (!oti_interrupt_point(rt)) oti_native_raise(rt);
     if (rt->threads && !oti_thread_poll(rt)) oti_native_raise(rt);
   }

@@ -4,6 +4,7 @@
 #ifndef OTIUM_FREESTANDING
 #include <fcntl.h>
 #include <poll.h>
+#include <sys/socket.h>
 #include <sys/stat.h>
 #include <unistd.h>
 #endif
@@ -18,8 +19,10 @@ typedef struct {
   ot_value buffer, transfer, flush, close, name, waitq, writer;
   size_t position, length, capacity, offset;
   unsigned kind;
-  bool input, closed, eof, busy, poll_reads;
-  size_t write_chunk;
+  bool input, closed, eof, busy, poll_reads, may_block, socket;
+  /* The most one write takes once the fd is ready, and how many bytes the
+   * last readiness check still covers. */
+  size_t write_chunk, write_room;
   ot_io_host host;
   void* userdata;
   intptr_t handle;
@@ -28,6 +31,9 @@ typedef struct {
 OTI_LAYOUT(oti_port_obj, 7, position);
 
 static inline oti_port_obj* port_object(ot_value p) { return OTI_CAST(oti_port_obj, K_PORT, p); }
+
+/* Whether a port call may park; without threads, no call into them. */
+static inline bool can_wait(ot_state* rt) { return rt->threads && oti_thread_can_wait(rt); }
 
 void oti_port_repr(FILE* out, ot_value p) {
   if (port_object(p)->kind == 3 || port_object(p)->kind == 4) {
@@ -132,16 +138,28 @@ static void port_host(ot_state* rt, ot_value port) {
   port_object(port)->userdata = rt->io_host_set ? rt->io_userdata : NULL;
 }
 
-/* Regular files keep their direct read path. Pipes and terminals wait on
- * the signal pipe as well, closing the check-before-read interrupt race. */
+/* Regular files never wait, so they keep their direct path, as does output
+ * to other character devices than terminals, such as /dev/null. Pipes and
+ * terminals wait on the signal pipe as well, closing the check-before-read
+ * interrupt race. After readiness a pipe or terminal takes PIPE_BUF bytes
+ * without blocking (a stalled terminal, or another process writing the same
+ * pipe, can still hold it briefly), and small writes share that one check.
+ * Sockets take MSG_DONTWAIT transfers instead, other kinds a byte at a time. */
 static void port_readiness(ot_value port) {
 #ifndef OTIUM_FREESTANDING
   oti_port_obj* p = port_object(port);
   if (p->host.read == posix_read && p->host.write == posix_write) {
     struct stat st;
     if (!fstat((int)p->handle, &st)) {
-      p->poll_reads = p->input && !S_ISREG(st.st_mode);
-      p->write_chunk = S_ISFIFO(st.st_mode) ? PIPE_BUF : S_ISREG(st.st_mode) ? SIZE_MAX : 1;
+      bool regular = S_ISREG(st.st_mode),
+           terminal = S_ISCHR(st.st_mode) && isatty((int)p->handle),
+           device = S_ISCHR(st.st_mode) && !terminal && !p->input;
+      p->may_block = !regular && !device;
+      p->poll_reads = p->input && !regular;
+      p->socket = S_ISSOCK(st.st_mode);
+      p->write_chunk = regular || device || p->socket       ? SIZE_MAX
+                       : S_ISFIFO(st.st_mode) || terminal ? PIPE_BUF
+                                                          : 1;
     }
   }
 #else
@@ -229,6 +247,37 @@ static void host_error(ot_state* rt, ot_value* port, const char* op, int error) 
   else oti_io_error(rt, ":other");
 }
 
+#ifndef OTIUM_FREESTANDING
+/* Park the calling thread until the port's fd is ready; the call retries. A
+ * writer parked partway through owns the port's output until it finishes. */
+static long park_on_fd(ot_state* rt, ot_value* port, bool writing) {
+  if (port_object(*port)->waitq == OT_NIL) {
+    ot_value queue = oti_thread_make_waitq(rt);
+    if (!queue) return -1;
+    port_object(*port)->waitq = queue;
+  }
+  if (writing && port_object(*port)->writer == OT_NIL)
+    port_object(*port)->writer = oti_thread_current(rt);
+  oti_thread_io_wait(rt, port_object(*port)->waitq, (int)port_object(*port)->handle, writing);
+  return -1;
+}
+
+/* A socket transfer that never blocks: a count, or -errno, with -EAGAIN
+ * when it would block; LONG_MIN when the runtime failed. */
+static long socket_transfer(ot_state* rt, ot_value* port, bool writing, size_t start,
+                            size_t length) {
+  oti_port_obj* p = port_object(*port);
+  unsigned char* bytes = oti_bytes_data(p->buffer) + start;
+  host_begin(rt, *port);
+  ssize_t n = writing ? send((int)p->handle, bytes, length, MSG_DONTWAIT)
+                      : recv((int)p->handle, bytes, length, MSG_DONTWAIT);
+  int error = n < 0 ? errno : 0;
+  if (!host_end(rt, *port)) return LONG_MIN;
+  if (n >= 0) return (long)n;
+  return error == EWOULDBLOCK ? -EAGAIN : -error;
+}
+#endif
+
 static long transfer(ot_state* rt, ot_value* port, bool writing, size_t start, size_t length) {
   /* A blocking read is a safe place to run an interrupt handler; a write may
    * be partway through the buffer. */
@@ -236,25 +285,41 @@ static long transfer(ot_state* rt, ot_value* port, bool writing, size_t start, s
   for (;;) {
     if (!interrupt_poll(rt)) return -1;
 #ifndef OTIUM_FREESTANDING
-    if (port_object(*port)->host.read == posix_read && oti_thread_can_wait(rt)) {
+    bool waits = port_object(*port)->may_block && port_object(*port)->host.read == posix_read &&
+                 can_wait(rt);
+    if (waits && port_object(*port)->socket) {
+      /* Try first: MSG_DONTWAIT leaves the shared file flags alone. */
+      long n = socket_transfer(rt, port, writing, start, length);
+      if (n == LONG_MIN) return -1;
+      if (n == -EAGAIN) return park_on_fd(rt, port, writing);
+      if (n == -EINTR) continue;
+      if (n < 0) {
+        host_error(rt, port, writing ? "write" : "read", n < -INT_MAX ? EIO : (int)-n);
+        return -1;
+      }
+      if (writing && !n) {
+        oti_error(rt, "invalid host write count");
+        return -1;
+      }
+      return n;
+    }
+    if (waits && writing && length > port_object(*port)->write_chunk)
+      length = port_object(*port)->write_chunk;
+    bool ready = false;
+    if (waits && !(writing && length <= port_object(*port)->write_room)) {
       struct pollfd fd = {.fd = (int)port_object(*port)->handle,
                           .events = writing ? POLLOUT : POLLIN};
-      int ready = poll(&fd, 1, 0);
-      if (ready < 0 && errno != EINTR) {
+      int polled = poll(&fd, 1, 0);
+      if (polled < 0 && errno != EINTR) {
         host_error(rt, port, writing ? "write" : "read", errno);
         return -1;
       }
-      if (ready <= 0) {
-        if (port_object(*port)->waitq == OT_NIL) {
-          ot_value queue = oti_thread_make_waitq(rt);
-          if (!queue) return -1;
-          port_object(*port)->waitq = queue;
-        }
-        oti_thread_io_wait(rt, port_object(*port)->waitq, fd.fd, writing);
-        return -1;
-      }
+      if (polled <= 0) return park_on_fd(rt, port, writing);
+      if (writing) port_object(*port)->write_room = port_object(*port)->write_chunk;
+      ready = true;
     }
-    if (!writing && port_object(*port)->poll_reads) {
+    /* Input known to be ready can't block, so there is no race to close. */
+    if (!writing && !ready && port_object(*port)->poll_reads) {
       struct pollfd fds[] = {{.fd = (int)port_object(*port)->handle, .events = POLLIN},
                              {.fd = rt->wake_pipe[0], .events = POLLIN}};
       int ready = poll(fds, 2, -1);
@@ -268,14 +333,12 @@ static long transfer(ot_state* rt, ot_value* port, bool writing, size_t start, s
     }
 #endif
     oti_port_obj* p = port_object(*port);
-    if (writing && oti_thread_can_wait(rt) && p->write_chunk && length > p->write_chunk)
-      length = p->write_chunk;
     unsigned char* bytes = oti_bytes_data(port_object(*port)->buffer) + start;
     host_begin(rt, *port);
     long n = writing ? p->host.write(p->userdata, p->handle, bytes, length)
                      : p->host.read(p->userdata, p->handle, bytes, length);
     if (!host_end(rt, *port)) return -1;
-    if ((n == -EAGAIN || n == -EWOULDBLOCK) && oti_thread_can_wait(rt)) continue;
+    if ((n == -EAGAIN || n == -EWOULDBLOCK) && can_wait(rt)) continue;
     if (n == -EINTR) {
       if (!interrupt_poll(rt)) return -1;
       continue;
@@ -288,37 +351,35 @@ static long transfer(ot_state* rt, ot_value* port, bool writing, size_t start, s
       oti_error(rt, writing ? "invalid host write count" : "invalid host read count");
       return -1;
     }
+    if (writing) {
+      p = port_object(*port);
+      p->write_room = p->write_room > (size_t)n ? p->write_room - (size_t)n : 0;
+    }
     return n;
   }
 }
 
+/* Output is owned only by a writer parked partway through a call (see
+ * park_on_fd): a call that never parks can't be interleaved, since nothing
+ * preempts a builtin. Other writers wait for the owner to finish. */
 static bool write_lock(ot_state* rt, ot_value* port) {
   oti_port_obj* p = port_object(*port);
-  ot_value self = oti_thread_current(rt);
-  if (p->writer != OT_NIL && p->writer != self) {
-    if (!oti_thread_can_wait(rt)) return oti_error(rt, "output port is owned by another thread");
-    oti_thread_io_wait(rt, p->waitq, -1, false);
-    return false;
-  }
-  if (oti_thread_can_wait(rt) && p->writer == OT_NIL) {
-    if (p->waitq == OT_NIL) {
-      ot_value q = oti_thread_make_waitq(rt);
-      if (!q) return false;
-      p = port_object(*port);
-      p->waitq = q;
-    }
-    p->writer = oti_thread_current(rt);
-  }
-  return true;
+  if (p->writer == OT_NIL || p->writer == oti_thread_current(rt)) return true;
+  if (!can_wait(rt)) return oti_error(rt, "output port is owned by another thread");
+  oti_thread_io_wait(rt, p->waitq, -1, false);
+  return false;
 }
 
 static void write_unlock(ot_state* rt, ot_value port, bool failed) {
   if (!oti_kind(port, K_PORT)) return;
   oti_port_obj* p = port_object(port);
-  if (rt->pending_output == port) rt->pending_output = OT_NIL;
+  bool pending = rt->pending_output == port;
+  if (pending) rt->pending_output = OT_NIL;
+  /* A failed call drops only its own unwritten bytes; the rest of the buffer
+   * belongs to calls that completed. */
+  if (failed && pending) p->offset = p->length = 0;
   if (p->writer == OT_NIL || p->writer != oti_thread_current(rt)) return;
   p->writer = OT_NIL;
-  if (failed) p->offset = p->length = 0;
   oti_thread_io_wake(rt, p->waitq);
 }
 
@@ -327,10 +388,10 @@ void oti_ports_abandon(ot_state* rt, ot_value owner) {
     oti_port_obj* p = port_object(rt->open_ports[i]);
     if (p->writer != owner) continue;
     p->writer = OT_NIL;
-    rt->pending_output = OT_NIL;
-    p->offset = p->length = 0;
+    if (rt->pending_output == rt->open_ports[i]) p->offset = p->length = 0;
     oti_thread_io_wake(rt, p->waitq);
   }
+  rt->pending_output = OT_NIL;
 }
 
 static bool flush(ot_state* rt, ot_value* port) {
@@ -655,7 +716,7 @@ static ot_value read_datum(ot_state* rt, ot_value* port) {
   enum { NORMAL, ATOM, STRING, ESCAPE, COMMENT, CHAR_FIRST, CHAR_TOKEN } mode = NORMAL;
 
   size_t depth = 0, length = 0, capacity = 0, token = 0, ahead = 0;
-  bool transaction = oti_thread_can_wait(rt);
+  bool transaction = can_wait(rt);
   char closers[512];
   bool started = false, comma = false, done = false;
   char* source = NULL;
@@ -746,15 +807,41 @@ static ot_value read_datum(ot_state* rt, ot_value* port) {
   return result;
 }
 
+/* With threads, a call's bytes enter the buffer whole under the port's
+ * writer ownership, so concurrent calls never split one another. Standard
+ * ports still flush every call and other ports when full, as without threads.
+ * pending_output marks bytes a call appended before parking in its flush; a
+ * call larger than the buffer is the only other one appended before a flush. */
+static bool append_owned(ot_state* rt, ot_value* port, const char* bytes, size_t n,
+                         bool waits) {
+  if (!write_lock(rt, port)) return false;
+  if (waits && rt->pending_output == *port) return flush(rt, port);
+  oti_port_obj* p = port_object(*port);
+  if (n > p->capacity - p->length && p->length && !flush(rt, port)) return false;
+  p = port_object(*port);
+  bool large = n > p->capacity - p->length;
+  if (large) {
+    ot_value data = oti_bytes_new(rt, n);
+    if (!data) return false;
+    p = port_object(*port);
+    p->buffer = data;
+    p->capacity = n;
+  }
+  memcpy(oti_bytes_data(p->buffer) + p->length, bytes, n);
+  p->length += n;
+  if (p->kind != 2 && !large) return true;
+  if (waits) rt->pending_output = *port;
+  return flush(rt, port);
+}
+
 static bool append(ot_state* rt, ot_value* port, const char* bytes, size_t n) {
   if (!check(rt, (*port), false)) return false;
-  bool threaded = port_object(*port)->kind >= 2 &&
-                  (oti_thread_can_wait(rt) || port_object(*port)->writer != OT_NIL);
-  if (threaded) {
-    if (!write_lock(rt, port)) return false;
-    if (oti_thread_can_wait(rt) && rt->pending_output == *port) return flush(rt, port);
+  if (port_object(*port)->kind >= 2) {
+    bool waits = can_wait(rt);
+    if (waits || port_object(*port)->writer != OT_NIL)
+      return append_owned(rt, port, bytes, n, waits);
   }
-  if (port_object(*port)->kind >= 2 && !threaded) {
+  if (port_object(*port)->kind >= 2) {
     while (n) {
       if (port_object(*port)->length == port_object(*port)->capacity && !flush(rt, port))
         return false;
@@ -777,35 +864,24 @@ static bool append(ot_state* rt, ot_value* port, const char* bytes, size_t n) {
     else capacity *= 2;
     if (capacity < 64) capacity = 64;
     if (capacity < length + n) capacity = length + n;
-    ot_value data =
-        threaded ? oti_bytes_new(rt, capacity) : oti_alloc(rt, K_BUFFER_DATA, 0, capacity);
+    ot_value data = oti_alloc(rt, K_BUFFER_DATA, 0, capacity);
     if (data) {
       if (length)
-        memcpy(threaded ? oti_bytes_data(data) : oti_as_buffer_data(data)->bytes,
-               threaded ? oti_bytes_data(port_object(*port)->buffer)
-                        : oti_as_buffer_data(port_object(*port)->buffer)->bytes,
-               length);
+        memcpy(oti_as_buffer_data(data)->bytes,
+               oti_as_buffer_data(port_object(*port)->buffer)->bytes, length);
       port_object(*port)->buffer = data;
       port_object(*port)->capacity = capacity;
     }
     if (!data) return false;
   }
-  if (n)
-    memcpy((threaded ? oti_bytes_data(port_object(*port)->buffer)
-                     : oti_as_buffer_data(port_object(*port)->buffer)->bytes) +
-               length,
-           bytes, n);
+  if (n) memcpy(oti_as_buffer_data(port_object(*port)->buffer)->bytes + length, bytes, n);
   port_object(*port)->length += n;
-  if (threaded) {
-    if (oti_thread_can_wait(rt)) rt->pending_output = *port;
-    return flush(rt, port);
-  }
   return true;
 }
 
 static ot_value port_print_values(ot_state* rt, ot_value p, size_t first, size_t count,
-                                  bool write) {
-  oti_thread_io_retry(rt);
+                                  bool write, bool line) {
+  if (rt->threads) oti_thread_io_retry(rt);
   if (!p || !check(rt, p, false)) return 0;
   char* bytes = NULL;
   size_t length = 0;
@@ -816,22 +892,23 @@ static ot_value port_print_values(ot_state* rt, ot_value p, size_t first, size_t
     if (write) ot_write(rt, stream, rt->stack[first + i]);
     else ot_print(rt, stream, rt->stack[first + i]);
   }
+  if (line) fputc('\n', stream);
   bool ok = !ferror(stream);
   if (fclose(stream)) ok = false;
   oti_roots root;
   oti_roots_push(&rt->heap, &root, &p, 1);
   if (ok) ok = append(rt, &p, bytes, length);
   else oti_error(rt, "cannot format port output");
-  if (oti_thread_can_wait(rt) && !oti_thread_parked(rt)) write_unlock(rt, p, !ok);
+  if (ok || !oti_thread_parked(rt)) write_unlock(rt, p, !ok);
   oti_roots_pop(&rt->heap, &root);
   free(bytes);
   return !ok && oti_thread_parked(rt) ? OTI_PARKED : ok ? OT_NIL : 0;
 }
 
 /* display-to and write-to */
-static ot_value port_print_to(ot_state* rt, size_t first, size_t count, bool write) {
+static ot_value port_print_to(ot_state* rt, size_t first, size_t count, bool write, bool line) {
   if (!count) return oti_fail(rt, "output needs a port");
-  return port_print_values(rt, rt->stack[first], first + 1, count - 1, write);
+  return port_print_values(rt, rt->stack[first], first + 1, count - 1, write, line);
 }
 
 static bool range(ot_state* rt, size_t first, size_t count, size_t n, size_t* start, size_t* end) {
@@ -1074,7 +1151,7 @@ static bool port_read_items(ot_state* rt, ot_value live[2], port_reading how, si
                             size_t start, char** out, size_t* length, size_t* read) {
   char* bytes = NULL;
   size_t n = 0, capacity = 0, items = 0, ahead = 0;
-  bool transaction = oti_thread_can_wait(rt);
+  bool transaction = can_wait(rt);
   while (items < limit) {
     if (!ot_poll_interrupt(rt)) {
       free(bytes);
@@ -1229,11 +1306,17 @@ static ot_value port_skip_while(ot_state* rt, size_t first, size_t count, ot_val
 }
 
 static ot_value port_display_to_builtin(ot_state* rt, size_t first, size_t count) {
-  return port_print_to(rt, first, count, false);
+  return port_print_to(rt, first, count, false, false);
+}
+
+/* (%display-line-to port value ...): display-to and a newline, appended as
+ * one write so concurrent lines stay whole. println uses it. */
+static ot_value port_display_line_to_builtin(ot_state* rt, size_t first, size_t count) {
+  return port_print_to(rt, first, count, false, true);
 }
 
 static ot_value port_write_to_builtin(ot_state* rt, size_t first, size_t count) {
-  return port_print_to(rt, first, count, true);
+  return port_print_to(rt, first, count, true, false);
 }
 
 static ot_value port_p_builtin(ot_state* rt, size_t first, size_t count) {
@@ -1277,11 +1360,11 @@ static ot_value port_stderr_builtin(ot_state* rt, size_t first, size_t count) {
     ot_value live[2] = {OT_NIL, OT_NIL};                                                           \
     oti_roots roots;                                                                               \
     oti_roots_push(&rt->heap, &roots, live, 2);                                                    \
-    oti_thread_io_retry(rt);                                                                      \
+    if (rt->threads) oti_thread_io_retry(rt);                                                      \
     ot_value result = call;                                                                        \
-    if (oti_thread_can_wait(rt) && !oti_thread_parked(rt)) write_unlock(rt, live[0], !result);    \
+    if (result || !oti_thread_parked(rt)) write_unlock(rt, live[0], !result);                      \
     oti_roots_pop(&rt->heap, &roots);                                                              \
-    return !result && oti_thread_parked(rt) ? OTI_PARKED : result;                                \
+    return !result && oti_thread_parked(rt) ? OTI_PARKED : result;                                 \
   }
 
 PORT_LIVE(port_open_input_string, port_open_memory(rt, first, count, live, true, true))
@@ -1345,6 +1428,7 @@ const oti_builtin_def oti_port_builtins[] = {
     {B_FLUSH_PORT, "flush-output-port", port_flush_builtin},
     {B_DISPLAY_TO, "display-to", port_display_to_builtin},
     {B_WRITE_TO, "write-to", port_write_to_builtin},
+    {B_DISPLAY_LINE_TO, "%display-line-to", port_display_line_to_builtin},
     {B_READ_UNTIL, "read-until", port_read_until_builtin},
     {B_READ_WHILE, "read-while", port_read_while_builtin},
     {B_SKIP_WHILE, "skip-while", port_skip_while_builtin},

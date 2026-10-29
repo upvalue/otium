@@ -1,0 +1,21 @@
+(require otium.thread :as thread :refer (spawn))
+
+;; A write inside an atomic section blocks rather than parks, so the counter
+;; can't run in the middle of the section.
+(def ticks 0)
+
+(def counter
+  (spawn (fn ()
+           (let loop ()
+             (set! ticks (+ ticks 1))
+             (thread/yield)
+             (loop)))))
+
+(thread/sleep 0.01)
+(thread/atomically (let ((before ticks))
+                     (write-string (string-repeat "x" 100000))
+                     (write-string (if (= before ticks)
+                                       "atomic\n"
+                                       "broken\n")
+                                   (current-error-port))))
+(thread/kill! counter)

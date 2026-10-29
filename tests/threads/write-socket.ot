@@ -1,0 +1,10 @@
+(require otium.thread :as thread :refer (spawn sleep))
+
+;; stdout is a socket here: a large write parks instead of blocking the worker.
+(def worker
+  (spawn (fn ()
+           (sleep 0.01)
+           (write-string "ready\n" (current-error-port)))))
+
+(write-string (string-repeat "x" 4000000))
+(thread/join worker)

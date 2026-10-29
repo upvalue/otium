@@ -461,6 +461,77 @@
              %foreground
              (let ((state (context-for %foreground))) (and (or (not paused-only?) (get state :paused)) state))))))
 
+;; The frame lock. A native UI loop draws holding it and passes it on between
+;; frames, so evaluations land between frames as service! once made them,
+;; yet can still park. Only evaluations started while a frame loop runs take
+;; it, and a request with :concurrent #t doesn't. It is reentrant, so a UI
+;; loop can run inside an evaluation, and a paused thread lends it out.
+(defonce %frame nil)
+
+(def- (frame)
+  (or %frame
+      (begin
+        (set! %frame {:owner nil :depth 0 :loops 0 :waiters (%make-waitq)})
+        %frame)))
+
+(def- (frame-acquire! depth)
+  (let ((f (frame))
+        (me (thread/self)))
+    (thread/atomically (let loop ()
+                         (cond
+                           ((nil? (f :owner)) (put! f :owner me :depth depth))
+                           ((eq? (f :owner) me) (put! f :depth (+ (f :depth) depth)))
+                           (else (%park (f :waiters) nil) (loop)))))))
+
+(def- (frame-release!)
+  "Release one level of this thread's hold on the frame lock."
+  (let ((f (frame)))
+    (thread/atomically (when (eq? (f :owner) (thread/self))
+                         (put! f :depth (- (f :depth) 1))
+                         (when (= (f :depth) 0)
+                           (put! f :owner nil)
+                           (%wake-one (f :waiters)))))))
+
+(def- (frame-lend!)
+  "Release this thread's whole hold on the frame lock, returning its depth."
+  (let ((f (frame)))
+    (thread/atomically (if (eq? (f :owner) (thread/self))
+                           (let ((depth (f :depth)))
+                             (put! f :owner nil :depth 0)
+                             (%wake-one (f :waiters))
+                             depth)
+                           0))))
+
+(def- (frame-reclaim! depth)
+  (when (> depth 0) (frame-acquire! depth)))
+
+(def (frame-loop! running?)
+  "A UI loop calls this with #t as it starts and #f as it stops."
+  (when %threaded
+    (let ((f (frame)))
+      (thread/atomically (put! f
+                               :loops (+ (f :loops)
+                                         (if running?
+                                             1
+                                             -1)))))))
+
+(def (enter-frame!)
+  "A UI loop calls this before drawing; dev evaluations wait until leave-frame!."
+  (when %threaded (frame-acquire! 1)))
+
+(def (leave-frame!)
+  "A UI loop calls this after drawing, however drawing exits."
+  (when %threaded (frame-release!)))
+
+(def (between-frames!)
+  "A UI loop calls this between frames: waiting dev evaluations run here."
+  (if %threaded
+      (let ((held (frame-lend!)))
+        ;; Run whatever release woke; it holds the lock until it finishes.
+        (thread/yield)
+        (frame-reclaim! held))
+      (legacy-service!)))
+
 (def- (pause-thread! state reason acknowledged)
   (put! state :paused #t :action #f)
   (end!)
@@ -471,11 +542,13 @@
            :ns (str (current-ns))})
   (when acknowledged (acknowledged))
   (defer
-    (begin
+    (let ((held (frame-lend!)))
+      ;; Requests run while paused, as they did in the legacy pause loop.
       (thread/atomically (let loop ()
                            (unless (get state :action)
                              (%park (get state :waiters) nil)
                              (loop))))
+      (frame-reclaim! held)
       (eq? (get state :action) :abort))
     (put! state :paused #f)
     (event! {:event :resumed :eval (get state :id)})
@@ -493,9 +566,9 @@
 (def- (resume-request! client request)
   (let ((state (select-context client request #t)))
     (unless state (error "program is not paused"))
-    (thread/atomically (reply! client {:id (get request :id) :ok #t :value "nil" :output ""})
-                       (put! state :action (get request :op))
-                       (%wake-one (get state :waiters)))))
+    ;; Reply first: it may print, which must not happen inside the atomic section.
+    (reply! client {:id (get request :id) :ok #t :value "nil" :output ""})
+    (thread/atomically (put! state :action (get request :op)) (%wake-one (get state :waiters)))))
 
 (def- (finish-evaluation!)
   (end!)
@@ -503,10 +576,19 @@
                        (set! %evaluations (filter (fn (state) (not (eq? (get state :thread) self))) %evaluations))
                        (put! %contexts self nil))))
 
+(def- (framed-handle! client request)
+  (if (and (> ((frame) :loops) 0) (not (get request :concurrent)))
+      (begin
+        (frame-acquire! 1)
+        (defer
+          (handle! client request)
+          (frame-release!)))
+      (handle! client request)))
+
 (def- (start-evaluation! client request)
   (thread/atomically (let ((worker (thread/spawn-named :dev-eval (fn ()
                                                                    (defer
-                                                                     (handle! client request)
+                                                                     (framed-handle! client request)
                                                                      (finish-evaluation!)))))
                            (state (context-for worker)))
                        (put! state :id (get request :id) :client client)

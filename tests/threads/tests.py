@@ -3,6 +3,7 @@ is checked."""
 import os
 import select
 import signal
+import socket
 
 from harness import Skip, test
 
@@ -281,3 +282,53 @@ def formatted_output_retry(t):
                 expected = '"' + expected + '"'
             t.check(process.returncode == 0 and stdout == expected,
                     f'{mode} lost output or retained a wake result, seed {seed}', stderr)
+
+
+@threads_test('threads atomic section blocks on output')
+def atomic_write(t):
+    """A full pipe holds the whole process inside an atomic section."""
+    process = t.spawn(t.command('tests/threads/atomic-write.ot'), text=True)
+    stdout, stderr = process.communicate(timeout=10)
+    t.check(process.returncode == 0 and stdout == 'x' * 100000 and stderr == 'atomic\n',
+            'another thread ran inside the atomic section', stderr)
+
+
+@threads_test('threads file lines')
+def file_lines(t):
+    path = t.scratch / 'lines.txt'
+    for seed in (None, *SEEDS):
+        result = t.otium('tests/threads/file-lines.ot', '--', path,
+                         env={'OTIUM_SCHED': seed} if seed else {})
+        t.check(result.status == 0 and result.stdout == '6001\n(#t #t #t)\n',
+                f'file lines split or lost, seed {seed}', result.stdout, result.stderr)
+
+
+@threads_test('threads socket output parks')
+def socket_output(t):
+    ours, theirs = socket.socketpair()
+    process = t.spawn(t.command('tests/threads/write-socket.ot'), text=True,
+                      stdout=theirs.fileno())
+    theirs.close()
+    ready, _, _ = select.select([process.stderr], [], [], 10)
+    t.check(ready and process.stderr.readline() == 'ready\n', 'worker blocked behind socket')
+    received = bytearray()
+    while chunk := ours.recv(65536):
+        received += chunk
+    ours.close()
+    process.wait(timeout=10)
+    t.check(process.returncode == 0 and received == b'x' * 4000000, 'socket write lost or duplicated')
+
+
+@threads_test('threads socket input parks')
+def socket_input(t):
+    ours, theirs = socket.socketpair()
+    process = t.spawn(t.command('tests/threads/read-socket.ot'), text=True,
+                      stdin=theirs.fileno())
+    theirs.close()
+    ours.sendall(b'x' * 5000)
+    ready, _, _ = select.select([process.stderr], [], [], 10)
+    t.check(ready and process.stderr.readline() == 'ready\n', 'worker blocked behind socket')
+    ours.sendall(b'\n')
+    ours.close()
+    stdout, stderr = process.communicate(timeout=10)
+    t.check(process.returncode == 0 and stdout == '5000\n', 'socket input lost', stdout, stderr)

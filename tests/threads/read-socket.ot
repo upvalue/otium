@@ -1,0 +1,12 @@
+(require otium.thread :as thread :refer (spawn sleep))
+
+;; stdin is a socket here: a partial line parks the reader, not the worker.
+(def worker
+  (spawn (fn ()
+           (sleep 0.05)
+           (write-string "ready\n" (current-error-port)))))
+
+(def line (read-line))
+
+(println (length line))
+(thread/join worker)

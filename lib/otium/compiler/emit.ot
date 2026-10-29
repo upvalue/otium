@@ -66,6 +66,10 @@
 ;; Bytes written so far: the first n of bytes.
 (defrecord ByteBuffer (bytes n))
 
+;; Emitting a unit: the unit, the stream, the function being emitted and the
+;; label its wrong argument counts go to, and the condition codes.
+(defrecord Emitter (unit buf conditions fc arity-label))
+
 (def (make-buffer) (make-byte-buffer :bytes (make-bytevector 1024 0) :n 0))
 
 (def (byte! buf b)
@@ -419,10 +423,6 @@
     (let ((descriptors (unit-descriptors (emitter-unit e))))
       (push! descriptors [nil [] nil])
       (op! e ns-ccall h-arity 2 (- (length descriptors) 1)))))
-
-;; Emitting a unit: the unit, the stream, the function being emitted and the
-;; label its wrong argument counts go to, and the condition codes.
-(defrecord Emitter (unit buf conditions fc arity-label))
 
 ;; The stream and tables of a unit, from its allocated function contexts.
 (def (emit-unit u contexts)

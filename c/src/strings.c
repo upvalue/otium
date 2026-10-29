@@ -79,7 +79,6 @@ static bool append_buffer(ot_state* rt, ot_value* buffer, const char* bytes, siz
       memcpy(oti_as_buffer_data(data)->bytes, oti_as_buffer_data(info->data)->bytes, info->length);
     info->data = data;
     info->capacity = capacity;
-    oti_write(rt, *buffer);
   }
   if (n) memcpy(oti_as_buffer_data(info->data)->bytes + info->length, bytes, n);
   info->length = needed;
@@ -204,10 +203,7 @@ static ot_value string_to_list(ot_state* rt, size_t first, size_t count) {
     oti_as_pair(pair)->car = ((ot_value)cp << 8) | TAG_CHAR;
     oti_as_pair(pair)->cdr = OT_EMPTY;
     if (roots[1] == OT_EMPTY) roots[1] = pair;
-    else {
-      oti_as_pair(roots[2])->cdr = pair;
-      oti_write(rt, roots[2]);
-    }
+    else oti_as_pair(roots[2])->cdr = pair;
     roots[2] = pair;
   }
   ot_value result = roots[1];

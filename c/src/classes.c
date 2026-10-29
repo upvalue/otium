@@ -49,14 +49,12 @@ bool oti_classes_init(ot_state* rt) {
       break;
     }
     oti_as_class(rt->classes[i])->name = name;
-    oti_write(rt, rt->classes[i]);
     ot_value owner = oti_intern(rt, K_SYMBOL, "otium.generic", 13);
     if (!owner) {
       ok = false;
       break;
     }
     oti_as_class(rt->classes[i])->owner = owner;
-    oti_write(rt, rt->classes[i]);
     uint32_t global = oti_global(rt, names[i], strlen(names[i]));
     if (global == UINT32_MAX) {
       ok = false;
@@ -219,10 +217,7 @@ static ot_value copy_signature(ot_state* rt, ot_value source) {
       break;
     }
     if (slots[1] == OT_EMPTY) slots[1] = node;
-    else {
-      oti_as_pair(slots[2])->cdr = node;
-      oti_write(rt, slots[2]);
-    }
+    else oti_as_pair(slots[2])->cdr = node;
     slots[2] = node;
     slots[0] = oti_cdr(slots[0]);
   }
@@ -354,14 +349,12 @@ static ot_value class_define_method(ot_state* rt, size_t first, size_t count) {
   for (ot_value p = oti_as_generic(slots[0])->methods; p != OT_EMPTY; p = oti_cdr(p))
     if (class_same_method(oti_car(p), slots[1], around)) {
       oti_as_pair(p)->car = slots[2];
-      oti_write(rt, p);
       result = slots[0];
       goto done;
     }
   slots[3] = cons(rt, slots[2], oti_as_generic(slots[0])->methods);
   if (!slots[3]) goto done;
   oti_as_generic(slots[0])->methods = slots[3];
-  oti_write(rt, slots[0]);
   result = slots[0];
 done:
   oti_roots_pop(&rt->heap, &roots);
@@ -394,10 +387,8 @@ static ot_value class_remove_method(ot_state* rt, size_t first, size_t count) {
   result = OT_FALSE;
   for (ot_value p = oti_as_generic(slots[0])->methods; p != OT_EMPTY; p = oti_cdr(p)) {
     if (class_same_method(oti_car(p), slots[1], around)) {
-      ot_value holder = previous == OT_NIL ? slots[0] : previous;
       if (previous == OT_NIL) oti_as_generic(slots[0])->methods = oti_cdr(p);
       else oti_as_pair(previous)->cdr = oti_cdr(p);
-      oti_write(rt, holder);
       result = OT_TRUE;
       break;
     }

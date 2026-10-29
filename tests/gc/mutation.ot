@@ -1,8 +1,8 @@
 ;; Every kind of store into an object that has survived collections, of a
-;; value made since, with enough garbage in between for minor collections to
-;; run. Run with OTIUM_GC_GENERATIONAL=1 OTIUM_GC_VERIFY=1, a missed write
-;; barrier aborts with the kinds involved; otherwise a lost value shows up as
-;; a wrong answer here.
+;; value made since, with enough garbage in between for collections to run and
+;; evacuate. Run with OTIUM_GC_VERIFY=1, a slot the collector didn't update
+;; aborts with the kinds involved; otherwise a lost value shows up as a wrong
+;; answer here.
 
 (defrecord Cell (value))
 (defclass Holder (item :init nil))

@@ -207,77 +207,6 @@ TEST(mark_stack_borrows_free_blocks) {
   oti_heap_destroy(&h);
 }
 
-/* A minor collection doesn't trace old objects, so a young value stored into
- * one survives only because the write barrier remembered the old object. */
-TEST(minor_collections_trace_remembered_objects) {
-#ifdef OTIUM_CHECK_ROOTS
-  /* Root-checking builds make every collection full and evacuate it all. */
-  return;
-#endif
-  oti_heap h;
-  CHECK(oti_heap_init(&h, 4 << 20));
-  oti_heap_set_generational(&h, true);
-  ot_value live[] = {OT_NIL, OT_NIL};
-  oti_roots roots;
-  oti_roots_push(&h, &roots, live, 2);
-  live[0] = oti_heap_alloc(&h, 1, 2, 0);
-  oti_heap_collect_full(&h);
-  CHECK(((oti_object_header*)live[0])->gc & OTI_GC_UNLOGGED);
-  ot_value young = oti_heap_alloc(&h, 1, 1, 0);
-  object_fields(young)[0] = ot_int(7);
-  object_fields(live[0])[0] = young;
-  oti_heap_write(&h, live[0]);
-  CHECK_EQ_INT(h.remembered_count, 1);
-  CHECK(!(((oti_object_header*)live[0])->gc & OTI_GC_UNLOGGED));
-  oti_heap_write(&h, live[0]);
-  CHECK_EQ_INT(h.remembered_count, 1);
-  live[1] = oti_heap_alloc(&h, 1, 1, 0);
-  CHECK(oti_heap_alloc(&h, 1, 1, 0));
-  size_t minors = h.minor_collections, used = oti_heap_used(&h);
-  oti_heap_collect(&h);
-  CHECK_EQ_INT(h.minor_collections, minors + 1);
-  CHECK_EQ_INT(h.remembered_count, 0);
-  CHECK(oti_heap_used(&h) < used);
-  /* Young survivors may have moved; the old object and the root follow. */
-  young = object_fields(live[0])[0];
-  CHECK((((oti_object_header*)young)->gc & OTI_GC_EPOCH) == h.epoch);
-  CHECK((((oti_object_header*)live[1])->gc & OTI_GC_EPOCH) == h.epoch);
-  CHECK(ot_to_int(object_fields(young)[0]) == 7);
-  /* Promoted, so unlogged until the next store. */
-  CHECK(((oti_object_header*)young)->gc & OTI_GC_UNLOGGED);
-  oti_roots_pop(&h, &roots);
-  oti_heap_destroy(&h);
-}
-
-/* Promoted garbage stays until a full collection, which comes once promotions
- * pass the threshold the last full one set. */
-TEST(minor_collections_give_way_to_full_ones) {
-#ifdef OTIUM_CHECK_ROOTS
-  /* Root-checking builds make every collection full and evacuate it all. */
-  return;
-#endif
-  oti_heap h;
-  CHECK(oti_heap_init(&h, 1 << 20));
-  oti_heap_set_generational(&h, true);
-  enum { KEPT = 512 };
-  static ot_value kept[KEPT];
-  oti_roots roots;
-  for (size_t i = 0; i < KEPT; i++) kept[i] = OT_NIL;
-  oti_roots_push(&h, &roots, kept, KEPT);
-  size_t before = h.collections, minors = h.minor_collections;
-  for (size_t round = 0; round < 400; round++) {
-    for (size_t i = 0; i < KEPT; i++) {
-      kept[i] = oti_heap_alloc(&h, 1, 2, 64);
-      CHECK(kept[i]);
-    }
-  }
-  size_t collections = h.collections - before, minor = h.minor_collections - minors;
-  CHECK(minor > 0 && minor < collections);
-  CHECK(h.capacity == 1 << 20);
-  oti_roots_pop(&h, &roots);
-  oti_heap_destroy(&h);
-}
-
 static const test_case tests[] = {
     TEST_ENTRY(integer_range),
     TEST_ENTRY(collection_keeps_roots_and_exhaustion_recovers),
@@ -286,8 +215,6 @@ static const test_case tests[] = {
     TEST_ENTRY(medium_objects_survive),
     TEST_ENTRY(evacuation_moves_survivors_out_of_sparse_blocks),
     TEST_ENTRY(mark_stack_borrows_free_blocks),
-    TEST_ENTRY(minor_collections_trace_remembered_objects),
-    TEST_ENTRY(minor_collections_give_way_to_full_ones),
 };
 
 TEST_SUITE(heap, tests);

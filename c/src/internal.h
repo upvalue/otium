@@ -941,12 +941,6 @@ bool oti_grow(ot_state* rt, void** data, size_t* capacity, size_t needed, size_t
 bool oti_stack(ot_state* rt, size_t needed);
 ot_value oti_alloc_slow(ot_state* rt, uint32_t kind, uint32_t fields, size_t bytes);
 
-/* Tell the collector that a value was stored into object. Every store into a
- * managed object goes through this unless the object was allocated after the
- * last allocation before the store, so no collection can have seen it, or the
- * value is not a pointer. */
-static inline void oti_write(ot_state* rt, ot_value object) { oti_heap_write(&rt->heap, object); }
-
 /* Allocate by bumping the heap pointer into space the heap has already filled
  * with nil. Running out of filled space, collection, interrupts, stress GC and
  * host IO all go through oti_alloc_slow, as do large objects, which the heap

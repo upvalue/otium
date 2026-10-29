@@ -2,8 +2,6 @@ option('runtime_checks', type: 'combo', choices: ['none', 'kinds', 'roots'], val
   description: 'kinds checks the kind behind object casts; roots also moves the heap and stack so missed roots fault')
 option('gc_profile', type: 'combo', choices: ['auto', 'large', 'small'], value: 'auto',
   description: 'Collector block and line sizes; auto picks large on 64-bit and small on 32-bit')
-option('gc_generational', type: 'boolean', value: false,
-  description: 'Collect generationally by default; OTIUM_GC_GENERATIONAL=0 or 1 overrides at run time')
 option('vm_switch', type: 'boolean', value: false,
   description: 'Build the VM with portable switch dispatch instead of computed goto')
 option('ui', type: 'feature', value: 'auto', description: 'SDL3, SDL3_ttf and Yoga UI bridge')

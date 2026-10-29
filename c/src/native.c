@@ -1654,12 +1654,6 @@ static W h_alloc(ot_state* rt, W kind, W fields, W bytes) {
   return v;
 }
 
-/* The write barrier's slow path: object goes to the remembered set. */
-static W h_remember(ot_state* rt, W object) {
-  oti_heap_remember(&rt->heap, (ot_value)object);
-  return 0;
-}
-
 static ot_value builtin_on_stack(ot_state* rt, unsigned id, ot_value a, ot_value b, size_t n) {
   size_t first = rt->sp;
   if (!oti_stack(rt, first + 2)) oti_native_raise(rt);
@@ -1926,8 +1920,7 @@ static W h_evaluator(ot_state* rt, W name) {
   X(H_END_RESTARTS, h_end_restarts)  \
   X(H_RESTART_APPLY, h_restart_apply)  \
   X(H_EVALUATOR, h_evaluator)  \
-  X(H_POP_CLEANUP, h_pop_cleanup)  \
-  X(H_REMEMBER, h_remember)
+  X(H_POP_CLEANUP, h_pop_cleanup)
 
 enum {
 #define HELPER_ID(id, fn) id,

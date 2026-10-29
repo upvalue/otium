@@ -89,10 +89,6 @@ typedef void (*oti_weak_hook)(void* data);
 #define OTI_CHUNK_BITS 22
 #define OTI_LARGE_MIN 8192
 #endif
-/* Whether collection is generational unless OTIUM_GC_GENERATIONAL says. */
-#ifndef OTI_GENERATIONAL_DEFAULT
-#define OTI_GENERATIONAL_DEFAULT 0
-#endif
 #define OTI_LINE ((size_t)1 << OTI_LINE_BITS)
 #define OTI_BLOCK ((size_t)1 << OTI_BLOCK_BITS)
 #define OTI_CHUNK ((size_t)1 << OTI_CHUNK_BITS)
@@ -141,15 +137,8 @@ typedef struct {
   /* The mark stack: one segment kept from initialization, and more borrowed
    * from free blocks while marking, so collection doesn't need malloc. */
   oti_mark_segment* marks;
-  /* With generational, most collections are minor: they keep the epoch, so
-   * whatever survived an earlier one still looks marked and isn't traced,
-   * and they trace from the roots and the remembered objects, old objects
-   * stored into since the last collection. A full collection comes when
-   * live_bytes passes major_live, or the remembered set couldn't grow. */
-  bool generational, remembered_overflow, verify;
-  ot_value* remembered;
-  size_t remembered_count, remembered_capacity, major_live, minor_collections;
-  size_t minor_backoff, majors_before_minor;
+  /* Check every collection against a separate trace (OTIUM_GC_VERIFY). */
+  bool verify;
   /* Time spent collecting, and the longest collection, in nanoseconds. */
   uint64_t pause_nanoseconds, longest_pause;
   /* Statistics. allocated_bytes counts finished holes, overflow and large
@@ -192,11 +181,6 @@ static inline void oti_heap_set_ready(oti_heap* h, size_t ready) {
 }
 
 void oti_heap_collect(oti_heap* h);
-/* A collection that finds everything live, never a partial one. */
-void oti_heap_collect_full(oti_heap* h);
-/* Turn generational collection on or off; off makes every collection full. */
-void oti_heap_set_generational(oti_heap* h, bool generational);
-void oti_heap_remember(oti_heap* h, ot_value object);
 /* Inside the weak hook: where v lives now, or 0 if it died. */
 ot_value oti_heap_survivor(oti_heap* h, ot_value v);
 /* Whether v is the address of memory the heap manages. For assertions. */
@@ -221,10 +205,9 @@ typedef struct {
  * address over fields and kind. Reclaim marks what oti_reclaim reached; the
  * collection that follows clears it on every object it keeps. */
 #define OTI_GC_EPOCH 3u
-#define OTI_GC_UNLOGGED 4u
-#define OTI_GC_PINNED 8u
-#define OTI_GC_FORWARDED 16u
-#define OTI_GC_RECLAIM 32u
+#define OTI_GC_PINNED 4u
+#define OTI_GC_FORWARDED 8u
+#define OTI_GC_RECLAIM 16u
 
 /* Closures keep their code, a word the collector skips, ahead of their
  * captured values. internal.h checks that K_CLOSURE has this number. */
@@ -254,14 +237,6 @@ static inline uint32_t object_identity(ot_value object) {
     o->kind |= identity << 8;
   }
   return identity;
-}
-
-/* The write barrier, for after storing a value into object. An object a
- * collection has seen is unlogged until the first store into it, which puts it
- * in the remembered set for the next minor collection to trace. Objects
- * allocated since the last collection are traced anyway. */
-static inline void oti_heap_write(oti_heap* h, ot_value object) {
-  if (((oti_object_header*)object)->gc & OTI_GC_UNLOGGED) oti_heap_remember(h, object);
 }
 
 /* A pinned object stays where it is. Large objects never move anyway. */

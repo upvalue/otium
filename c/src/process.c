@@ -107,10 +107,7 @@ static ot_value process_arguments(ot_state* rt, size_t first, size_t count) {
     oti_as_pair(pair)->car = oti_car(live[0]);
     oti_as_pair(pair)->cdr = OT_EMPTY;
     if (live[1] == OT_EMPTY) live[1] = pair;
-    else {
-      oti_as_pair(live[2])->cdr = pair;
-      oti_write(rt, live[2]);
-    }
+    else oti_as_pair(live[2])->cdr = pair;
     live[2] = pair;
     live[0] = oti_cdr(live[0]);
   }

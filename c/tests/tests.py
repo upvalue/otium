@@ -106,9 +106,8 @@ def gc_stats(t):
     line = next(line for line in result.stderr.splitlines() if line.startswith('OTIUM_GC_STATS '))
     fields = json.loads(line.removeprefix('OTIUM_GC_STATS '))
     # Capacity and limit count object bytes; copied bytes are what evacuation moved.
-    expected = set('''collections minor_collections allocated_bytes copied_bytes reclaimed_bytes
-        used_bytes peak_used_bytes capacity_bytes limit_bytes gc_microseconds
-        gc_longest_microseconds'''.split())
+    expected = set('''collections allocated_bytes copied_bytes reclaimed_bytes used_bytes
+        peak_used_bytes capacity_bytes limit_bytes gc_microseconds gc_longest_microseconds'''.split())
     t.check(set(fields) == expected, 'GC stats fields differ', sorted(set(fields) ^ expected))
     t.check(all(isinstance(value, int) and value >= 0 for value in fields.values()), fields)
 

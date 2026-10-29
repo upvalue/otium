@@ -561,9 +561,6 @@ ot_state* ot_create(size_t bytes, size_t stack_limit) {
   rt->interrupt_flag = &rt->interrupt_word;
   const char* stress = getenv("OTIUM_GC_STRESS");
   rt->stress_gc = stress && *stress && strcmp(stress, "0");
-  const char* generational = getenv("OTIUM_GC_GENERATIONAL");
-  rt->heap.generational =
-      generational && *generational ? strcmp(generational, "0") != 0 : OTI_GENERATIONAL_DEFAULT;
   const char* verify = getenv("OTIUM_GC_VERIFY");
   rt->heap.verify = verify && *verify && strcmp(verify, "0");
   rt->required_namespace = UINT32_MAX;
@@ -1186,7 +1183,6 @@ size_t ot_error_offset(const ot_state* rt) { return rt->error.offset; }
 ot_stats ot_get_stats(const ot_state* rt) {
   const oti_heap* h = &rt->heap;
   ot_stats stats = {.collections = h->collections,
-                    .minor_collections = h->minor_collections,
                     .gc_microseconds = (size_t)(h->pause_nanoseconds / 1000),
                     .gc_longest_microseconds = (size_t)(h->longest_pause / 1000),
                     .max_frames = rt->max_frames,

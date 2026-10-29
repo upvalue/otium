@@ -144,9 +144,9 @@ bool oti_reclaim(ot_state* rt) {
     rt->constant_roots.count = rt->constant_count;
     rt->constant_free = rt->function_free = 0;
   }
-  /* A full collection also clears the reclaim marks, including those left by
+  /* The collection also clears the reclaim marks, including those left by
    * a mark that failed partway. */
-  oti_heap_collect_full(&rt->heap);
+  oti_heap_collect(&rt->heap);
   if (rt->stack_stale > rt->sp) rt->stack_stale = rt->sp;
   oti_foreign_collect(rt);
   free(m.functions);

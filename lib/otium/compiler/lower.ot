@@ -84,7 +84,6 @@
 (def h-restart-apply 22)
 (def h-evaluator 23)
 (def h-pop-cleanup 24)
-(def h-remember 25)
 
 ;; State fields.
 (def sf-heap-end 0)
@@ -258,33 +257,15 @@
     (cold! fc [:label slow])
     (cold-ccall! fc h-uninitialized [[:imm captured]] nil offset)))
 
-;; The write barrier, after a store into object o. An object a collection has
-;; seen is unlogged, bit 2 of its gc word, the high half of the first header
-;; word, until the first store into it sends it to the remembered set.
-(def gc-unlogged 17179869184)
-
-(def (write-barrier fc o offset)
-  (let ((w (raw! fc)) (slow (label! fc)) (join (label! fc)))
-    (emit! fc [:mov w [:mem o 0]])
-    (emit! fc [:op2u :and :zero w [:imm gc-unlogged]])
-    (emit! fc [:jcond :nonzero slow])
-    (emit! fc [:label join])
-    (cold! fc [:label slow])
-    (cold-ccall! fc h-remember [o] nil offset)
-    (cold! fc [:jump join])))
-
-(def (write-var fc var value offset)
+(def (write-var fc var value)
   (let ((loc (var-loc fc var)))
     (case (get loc 0)
       ((:reg) (emit! fc [:mov (get loc 1) value]))
-      ((:box)
-       (emit! fc [:mov [:mem (get loc 1) offset-box] (in-vreg fc value)])
-       (write-barrier fc (get loc 1) offset))
+      ((:box) (emit! fc [:mov [:mem (get loc 1) offset-box] (in-vreg fc value)]))
       (else
        (let ((b (vreg! fc)) (v (in-vreg fc value)))
          (emit! fc [:mov b (capture-mem fc (get loc 1))])
-         (emit! fc [:mov [:mem b offset-box] v])
-         (write-barrier fc b offset))))))
+         (emit! fc [:mov [:mem b offset-box] v]))))))
 
 ;; Bind var to a value just computed: in a box when it needs one.
 (def (bind-var fc var value offset)
@@ -351,7 +332,7 @@
       ((:unbound) [:imm word-unbound])
       ((:lref) (read-var fc (get node 2) (get node 3) offset))
       ((:lset)
-       (write-var fc (get node 2) (value fc (get node 3)) offset)
+       (write-var fc (get node 2) (value fc (get node 3)))
        [:imm word-nil])
       ((:gref) (global-ref fc (get node 2) offset))
       ((:gdef)
@@ -659,10 +640,8 @@
             (emit! fc [:op2 :add 0 at at [:mem a offset-array-data]])
             (if (eq? name 'get)
                 (emit! fc [:mov r [:mem at 12]])
-                (let ((data (raw! fc)))
+                (begin
                   (emit! fc [:mov [:mem at 12] (get args 2)])
-                  (emit! fc [:mov data [:mem a offset-array-data]])
-                  (write-barrier fc data offset)
                   (emit! fc [:mov r a]))))))
     (emit! fc [:label join])
     (cold! fc [:label slow])

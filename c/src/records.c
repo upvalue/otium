@@ -64,7 +64,6 @@ static ot_value record_make_type(ot_state* rt, size_t first, size_t count) {
           break;
         }
       oti_as_record_type(live[0])->keys[i] = key;
-      oti_write(rt, live[0]);
     }
     live[1] = oti_cdr(live[1]);
   }
@@ -123,9 +122,7 @@ static ot_value record_set(ot_state* rt, size_t first, size_t count) {
   size_t index = field_index(type, rt->stack[first + 1]);
   if (index == SIZE_MAX) return oti_fail(rt, "unknown record field");
   if (*oti_record_type_immutable(type)) return oti_fail(rt, "cannot mutate immutable record");
-  oti_as_record(record)->values[index] = rt->stack[first + 2];
-  oti_write(rt, record);
-  return rt->stack[first + 2];
+  return oti_as_record(record)->values[index] = rt->stack[first + 2];
 }
 
 const oti_builtin_def oti_record_builtins[] = {

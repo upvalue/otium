@@ -6,7 +6,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* Each semispace starts at 1 MB and can grow to 16 MB. */
+/* The heap starts at 1 MB of objects and can grow to 16 MB. */
 #define HEAP_INITIAL (1024u * 1024u)
 #define HEAP_LIMIT (16u * 1024u * 1024u)
 /* VM value slots. */

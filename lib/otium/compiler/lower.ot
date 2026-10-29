@@ -84,6 +84,7 @@
 (def h-restart-apply 22)
 (def h-evaluator 23)
 (def h-pop-cleanup 24)
+(def h-builtin 25)
 
 ;; State fields.
 (def sf-heap-end 0)
@@ -368,6 +369,7 @@
        (let ((r (vreg! fc)))
          (call fc node r #f)
          r))
+      ((:known) (direct-builtin fc node offset))
       (else (via-target fc node)))))
 
 ;; Nodes with control flow deliver their value to a target: a register and a
@@ -738,6 +740,18 @@
       (else
        (let ((args (arguments fc (get node 3))))
          (emit! fc [:call :imm (get node 2) args dst tail (fc :handlers) offset (get node 6)]))))))
+
+;; A call to a builtin of locked core: the arguments go to native.args and
+;; a helper runs the builtin, skipping the call_other stub and dispatch. The
+;; call keeps its caller's frame, so errors point at the call.
+(def (direct-builtin fc node offset)
+  (let ((ops (map (fn (op) (in-vreg-or-imm fc op)) (arguments fc (get node 4))))
+        (u (fc :u)) (r (vreg! fc)))
+    (when (> (length ops) (or (u :max-args) 0)) (put! u :max-args (length ops)))
+    (store-args fc ops)
+    (ccall! fc h-builtin [[:imm (builtin-id (symbol->string (get node 2)))] [:imm (length ops)]] r
+            offset)
+    r))
 
 ;; Builtins the compiler calls itself, and core builtins convert marked, keep
 ;; their caller's frame, so errors point at the call.

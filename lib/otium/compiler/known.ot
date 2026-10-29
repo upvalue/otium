@@ -1,0 +1,228 @@
+;; known.ot -- what the compiler knows about core functions.
+;;
+;; One entry per core function the compiler knows something about, by the
+;; name of the builtin or core function the cell holds. See
+;; scratch/optimizer-design.md, section 5.2.
+;;
+;;   (defknown name argument-types result-type :flags (flag ...) :narrows type)
+;;
+;; Argument types are a list, one per required argument, or rest for any
+;; number. Flags:
+;;
+;;   :foldable            with constant arguments it can run at compile time
+;;   :flushable           an unused call can be dropped: no effects, no raise
+;;   :flushable-if-typed  flushable once its arguments have the accepted types
+;;   :allocates           may allocate
+;;   :calls-back          may run Otium code
+;;   :fast-path           lower has inline code for it
+;;   :direct              a C builtin that compiled code may call directly:
+;;                        it never waits for another thread, and isn't apply
+;;                        or eval, which dispatch treats specially
+;;
+;; :narrows, for predicates, is the type the argument has when the result is
+;; true.
+
+(ns otium.compiler.known)
+
+(def known {})
+
+(defmacro defknown (name args result & options)
+  (let loop ((o options)
+             (fields (list :name (list 'quote name) :args (list 'quote args) :result (list 'quote result))))
+    (if (null? o)
+        #`(put! known ',name (table ,@fields))
+        (loop (cdr (cdr o)) (append fields (list (car o) (list 'quote (car (cdr o)))))))))
+
+(def (entry name)
+  (get known name))
+
+(def (flag? name flag)
+  (let ((e (get known name))) (and e (memq flag (or (e :flags) '())) #t)))
+
+;; Whether a call to the builtin named name may skip dispatch.
+(def (direct? name)
+  (flag? name :direct))
+
+;; --- Pairs and lists ---------------------------------------------------------
+
+(defknown car (pair) any :flags (:flushable-if-typed :fast-path))
+
+(defknown cdr (pair) any :flags (:flushable-if-typed :fast-path))
+
+(defknown cons (any any) pair :flags (:flushable :allocates :fast-path))
+
+(defknown list rest list :flags (:foldable :flushable :allocates :direct))
+
+(defknown set-car! (pair any) nil :flags (:direct))
+
+(defknown set-cdr! (pair any) nil :flags (:direct))
+
+;; --- Predicates ----------------------------------------------------------------
+
+(defknown null? (any) boolean :flags (:foldable :flushable :fast-path) :narrows empty)
+
+(defknown pair? (any) boolean :flags (:foldable :flushable :fast-path) :narrows pair)
+
+(defknown not (any) boolean :flags (:foldable :flushable :fast-path))
+
+(defknown eq? (any any) boolean :flags (:foldable :flushable :fast-path))
+
+(defknown nil? (any) boolean :flags (:foldable :flushable :direct) :narrows nil)
+
+(defknown symbol? (any) boolean :flags (:foldable :flushable :direct) :narrows symbol)
+
+(defknown keyword? (any) boolean :flags (:foldable :flushable :direct) :narrows keyword)
+
+(defknown string? (any) boolean :flags (:foldable :flushable :direct) :narrows string)
+
+(defknown char? (any) boolean :flags (:foldable :flushable :direct) :narrows char)
+
+(defknown boolean? (any) boolean :flags (:foldable :flushable :direct) :narrows boolean)
+
+(defknown number? (any) boolean :flags (:foldable :flushable :direct) :narrows number)
+
+(defknown integer? (any) boolean :flags (:foldable :flushable :direct))
+
+(defknown int? (any) boolean :flags (:foldable :flushable :direct) :narrows fixnum)
+
+(defknown float? (any) boolean :flags (:foldable :flushable :direct) :narrows float)
+
+(defknown array? (any) boolean :flags (:foldable :flushable :direct) :narrows array)
+
+(defknown table? (any) boolean :flags (:foldable :flushable :direct) :narrows table)
+
+(defknown procedure? (any) boolean :flags (:flushable :direct))
+
+(defknown list? (any) boolean :flags (:flushable :direct))
+
+(defknown record? (any) boolean :flags (:flushable :direct) :narrows record)
+
+(defknown eof-object? (any) boolean :flags (:foldable :flushable :direct))
+
+(defknown equal? (any any) boolean :flags (:foldable :flushable :direct))
+
+;; --- Numbers -----------------------------------------------------------------------
+
+(defknown + (number number) number :flags (:foldable :flushable-if-typed :fast-path))
+
+(defknown - (number number) number :flags (:foldable :flushable-if-typed :fast-path))
+
+(defknown * (number number) number :flags (:foldable :flushable-if-typed :fast-path))
+
+(defknown < (number number) boolean :flags (:foldable :flushable-if-typed :fast-path))
+
+(defknown <= (number number) boolean :flags (:foldable :flushable-if-typed :fast-path))
+
+(defknown > (number number) boolean :flags (:foldable :flushable-if-typed :fast-path))
+
+(defknown >= (number number) boolean :flags (:foldable :flushable-if-typed :fast-path))
+
+(defknown = (number number) boolean :flags (:foldable :flushable-if-typed :fast-path))
+
+(defknown quotient (number number) number :flags (:foldable :direct))
+
+(defknown remainder (number number) number :flags (:foldable :direct))
+
+(defknown modulo (number number) number :flags (:foldable :direct))
+
+(defknown abs (number) number :flags (:foldable :flushable-if-typed :direct))
+
+(defknown min rest number :flags (:foldable :direct))
+
+(defknown max rest number :flags (:foldable :direct))
+
+(defknown pos? (number) boolean :flags (:foldable :flushable-if-typed :direct))
+
+(defknown neg? (number) boolean :flags (:foldable :flushable-if-typed :direct))
+
+(defknown floor (number) number :flags (:foldable :flushable-if-typed :direct))
+
+(defknown ceiling (number) number :flags (:foldable :flushable-if-typed :direct))
+
+(defknown round (number) number :flags (:foldable :flushable-if-typed :direct))
+
+(defknown truncate (number) number :flags (:foldable :flushable-if-typed :direct))
+
+(defknown sqrt (number) number :flags (:foldable :flushable-if-typed :direct))
+
+(defknown exact (number) number :flags (:foldable :direct))
+
+(defknown inexact (number) float :flags (:foldable :flushable-if-typed :direct))
+
+(defknown bitwise-and rest fixnum :flags (:foldable :direct))
+
+(defknown bitwise-ior rest fixnum :flags (:foldable :direct))
+
+(defknown bitwise-xor rest fixnum :flags (:foldable :direct))
+
+(defknown bitwise-not (fixnum) fixnum :flags (:foldable :flushable-if-typed :direct))
+
+(defknown bitwise-arithmetic-shift (fixnum fixnum) fixnum :flags (:foldable :direct))
+
+;; --- Collections -----------------------------------------------------------------
+
+(defknown get rest any :flags (:fast-path))
+
+(defknown put! (any any any) any :flags (:fast-path))
+
+(defknown length (sequence) fixnum :flags (:flushable-if-typed :fast-path))
+
+(defknown array rest array :flags (:flushable :allocates :direct))
+
+(defknown push! (array any) array :flags (:allocates :direct))
+
+(defknown pop! (array) any :flags (:direct))
+
+(defknown keys (table) list :flags (:allocates :direct))
+
+(defknown values (table) list :flags (:allocates :direct))
+
+(defknown copy (any) any :flags (:allocates :direct))
+
+(defknown record-ref (record keyword) any :flags (:direct))
+
+(defknown record-set! (record keyword any) any :flags (:direct))
+
+(defknown bytevector-length (bytevector) fixnum :flags (:flushable-if-typed :direct))
+
+(defknown bytevector-u8-ref (bytevector fixnum) fixnum :flags (:direct))
+
+(defknown bytevector-u8-set! (bytevector fixnum fixnum) nil :flags (:direct))
+
+;; --- Strings, symbols and characters -------------------------------------------------
+
+(defknown string-length (string) fixnum :flags (:foldable :flushable-if-typed :direct))
+
+(defknown string-ref (string fixnum) char :flags (:foldable :direct))
+
+(defknown substring rest string :flags (:foldable :allocates :direct))
+
+(defknown string-append rest string :flags (:foldable :allocates :direct))
+
+(defknown str rest string :flags (:allocates :direct))
+
+(defknown string<? (string string) boolean :flags (:foldable :direct))
+
+(defknown string->symbol (string) symbol :flags (:foldable :allocates :direct))
+
+(defknown symbol->string (symbol) string :flags (:foldable :allocates :direct))
+
+(defknown string->list (string) list :flags (:foldable :allocates :direct))
+
+(defknown number->string rest string :flags (:foldable :allocates :direct))
+
+(defknown string->number rest any :flags (:foldable :direct))
+
+(defknown char->integer (char) fixnum :flags (:foldable :flushable-if-typed :direct))
+
+(defknown integer->char (fixnum) char :flags (:foldable :direct))
+
+(defknown char-upcase (char) char :flags (:foldable :flushable-if-typed :direct))
+
+(defknown char-downcase (char) char :flags (:foldable :flushable-if-typed :direct))
+
+(defknown char-whitespace? (char) boolean :flags (:foldable :flushable-if-typed :direct))
+
+(defknown char-alphabetic? (char) boolean :flags (:foldable :flushable-if-typed :direct))
+
+(defknown char-numeric? (char) boolean :flags (:foldable :flushable-if-typed :direct))

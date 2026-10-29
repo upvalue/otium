@@ -1675,6 +1675,29 @@ static W h_prim2(ot_state* rt, W id, W a, W b) {
   return builtin_on_stack(rt, (unsigned)id, a, b, 2);
 }
 
+/* A direct call from compiled code to builtin id, with its argc arguments
+ * in native.args: what dispatch does for a builtin, without the stub or the
+ * checks on what kind of callee it has. Compiled code only calls builtins
+ * this way that never park the thread, since a parked call is resumed in the
+ * call_other stub. */
+static W h_builtin(ot_state* rt, W id, W argc) {
+  size_t base = rt->sp;
+  if (base + argc > rt->stack_room && !oti_stack(rt, base + argc)) {
+    if (!oti_failed(rt)) oti_error(rt, "VM stack limit exceeded");
+    oti_native_raise(rt);
+  }
+  if (argc) memcpy(rt->stack + base, rt->native.args, argc * sizeof(ot_value));
+  rt->sp = base + argc;
+  ot_value result = rt->builtin_run[id](rt, base, argc);
+  rt->sp = base;
+  if (result == OTI_PARKED) {
+    oti_error(rt, "native compiler: a builtin called directly tried to wait");
+    oti_native_raise(rt);
+  }
+  if (!result || oti_failed(rt)) oti_native_raise(rt);
+  return result;
+}
+
 static W h_arity(ot_state* rt, W closure, W argc) {
   const oti_function* fn = oti_closure_fn(rt, closure);
   if (fn) oti_arity_error(rt, fn, argc);
@@ -1926,7 +1949,8 @@ static W h_evaluator(ot_state* rt, W name) {
   X(H_END_RESTARTS, h_end_restarts)  \
   X(H_RESTART_APPLY, h_restart_apply)  \
   X(H_EVALUATOR, h_evaluator)  \
-  X(H_POP_CLEANUP, h_pop_cleanup)
+  X(H_POP_CLEANUP, h_pop_cleanup)  \
+  X(H_BUILTIN, h_builtin)
 
 enum {
 #define HELPER_ID(id, fn) id,

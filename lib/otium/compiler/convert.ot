@@ -10,7 +10,7 @@
 ;;   [:if off test then else]    [:seq off nodes]         [:let off vars inits body]
 ;;   [:fn off info]              [:call off f args tail?]
 ;;   [:gcall off cell args tail? check? tail-position?]
-;;   [:gprim off name cell args]
+;;   [:gprim off name cell args]                         [:known off name cell args tail?]
 ;;   [:bcall off builtin args tail?]                      [:prim off name args]
 ;;   [:loop off loop inits body] [:recur off loop args]   [:while off test body]
 ;;   [:try off body var clauses] [:cleanup off fn outcome? body]
@@ -23,7 +23,9 @@
 ;; initialized. Names are resolved here as compiler.c resolves them, and
 ;; error messages match it.
 
-(ns otium.compiler.convert)
+(ns otium.compiler.convert
+  (:require (otium.compiler.known :as known)
+            (otium.compiler.options :as options)))
 
 ;; --- Variables and functions ----------------------------------------------
 
@@ -583,6 +585,8 @@
                        ;; still holds the builtin.
                        ((and builtin (= (or (get guarded-arities builtin) -1) (length nodes)))
                         [:gprim off builtin cell nodes])
+                       ((and builtin (direct-builtin? builtin cell))
+                        [:known off builtin cell nodes (site :tail)])
                        ;; A builtin of core in tail position runs in its caller's frame, as in
                        ;; the VM, so errors point at the call. apply stays a tail call.
                        ((and builtin (site :tail) (not (eq? builtin 'apply)) (%native-core-cell? cell))
@@ -595,6 +599,11 @@
              (let ((f (expression head (non-tail site) off)))
                [:call off f (list-to-array (map (fn (a) (expression a (non-tail site) off)) args))
                 (site :tail)]))))))
+
+;; A call to a core builtin that compiled code may call without going
+;; through its cell, since locked core can't change.
+(def (direct-builtin? builtin cell)
+  (and (known/direct? builtin) (%native-core-cell? cell) (%core-locked?) (options/enabled? "direct")))
 
 ;; Builtins whose globals can be redefined, inlined behind a check that the
 ;; global still holds them.

@@ -1,0 +1,25 @@
+;; options.ot -- switching optimizer components on and off.
+;;
+;; OTIUM_OPT is all (the default), none, or a comma-separated list of
+;; components to switch off, such as -direct,-inline. It's read when this
+;; module loads. See scratch/optimizer-design.md, section 9.1.
+
+(ns otium.compiler.options)
+
+(def- setting
+  (let ((value (otium.process/getenv "OTIUM_OPT")))
+    (if (or (nil? value) (equal? value "") (equal? value "all"))
+        ""
+        value)))
+
+(def- off
+  (let ((t {}))
+    (unless (equal? setting "none")
+      (for ((part :in (string-split setting ",")))
+        (when (and (> (string-length part) 1) (equal? (substring part 0 1) "-"))
+          (put! t (substring part 1 (string-length part)) #t))))
+    t))
+
+;; Whether the component named name, a string, is switched on.
+(def (enabled? name)
+  (and (not (equal? setting "none")) (not (get off name))))

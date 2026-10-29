@@ -498,7 +498,9 @@ static void protect(void* start, size_t size, int prot) {
 
 void* oti_code_space_alloc(void* space, size_t size) {
   oti_native_runtime* n = space;
-  size = (size + 15) & ~(size_t)15;
+  /* Each unit starts a cache line, so a function's code lines up the same
+   * way whatever was compiled before it. */
+  size = (size + 63) & ~(size_t)63;
   oti_code_chunk* c = n->chunks;
   if (!c || c->size - c->used < size) {
     size_t bytes = size > CODE_CHUNK ? (size + page_size() - 1) & ~(page_size() - 1) : CODE_CHUNK;

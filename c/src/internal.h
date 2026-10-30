@@ -421,7 +421,7 @@ enum {
 };
 
 /* Register VM opcodes. Register r of a frame is stack[base + r]; register 0
- * holds the running closure. See vm-design.md for operand conventions. */
+ * holds the running closure. */
 typedef enum {
   OP_MOVE,
   OP_IMM,
@@ -726,7 +726,7 @@ typedef struct {
   uintptr_t entry;
   uintptr_t stack_top;
   /* Arguments past the fifth, and every argument where C hands a call to
-   * native code or back. Not a root; see oti_native_visit_roots. */
+   * native code or back. Not a root; see oti_native_visit_exec. */
   ot_value* args;
   size_t depth;
   /* A callee and argument count that C asks a stub to enter. Rooted. */
@@ -870,8 +870,8 @@ struct ot_state {
   uintptr_t native_stubs[4];
   /* The boot file a native process started from (fasl.c). */
   oti_boot* boot;
-  /* Native code runs on Otium stacks and calls C through oti_c_bridge,
-   * which switches to native_c_sp on the C stack. Each oti_native_enter
+  /* Native code runs on Otium stacks and calls C through the oti_bridge_*
+   * stubs, which switch to native_c_sp on the C stack. Each oti_native_enter
    * moves it below its own frame; native_c_base is its value under the
    * outermost one. While they differ, C is waiting on Otium code it called
    * (a callback), and threads don't switch. */
@@ -1603,8 +1603,6 @@ extern const oti_builtin_def oti_bytes_builtins[], oti_class_builtins[], oti_col
 /* Plain helpers other modules use in place of calling a builtin. */
 ot_value oti_table_new(ot_state* rt);
 ot_value oti_array_from(ot_state* rt, size_t first, size_t count);
-/* Whether target is reachable from from through pairs, arrays and tables: 1 if
- * so, 0 if not, -1 if host memory ran out. Never allocates on the managed heap. */
 ot_value oti_list_from(ot_state* rt, size_t first, size_t count);
 bool oti_procedure(ot_value v);
 

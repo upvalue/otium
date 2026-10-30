@@ -8,11 +8,11 @@
 #include <sys/mman.h>
 #endif
 
-/* A mark-region heap after Immix (Blackburn and McKinley, PLDI 2008); see
- * scratch/immix-gc.md. Allocation bumps through holes, runs of free lines in
- * blocks. A collection marks live objects and the lines they cover, then
- * sweeps the line marks to find free blocks and holes for the next round.
- * Dead objects are never visited. */
+/* A mark-region heap after Immix (Blackburn and McKinley, PLDI 2008).
+ * Allocation bumps through holes, runs of free lines in blocks. A collection
+ * marks live objects and the lines they cover, then sweeps the line marks to
+ * find free blocks and holes for the next round. Dead objects are never
+ * visited. */
 
 _Static_assert(sizeof(oti_object_header) == 16, "object header");
 _Static_assert(OTI_LARGE_MIN <= OTI_BLOCK / 2, "medium objects fit a block");
@@ -746,10 +746,6 @@ static void heap_verify(oti_heap* h) {
 
 /* --- Policy ---------------------------------------------------------------- */
 
-/* The allocator's hole and overflow block survive a collection: nothing past
- * the cursor was allocated, so it is still free. A collection may evacuate the
- * sparsest blocks if the last one called for it; a defragmenting one considers
- * every block. Root-checking builds move everything. */
 static uint64_t heap_nanoseconds(void) {
   struct timespec t;
   return clock_gettime(CLOCK_MONOTONIC, &t)
@@ -757,6 +753,10 @@ static uint64_t heap_nanoseconds(void) {
              : (uint64_t)t.tv_sec * 1000000000u + (uint64_t)t.tv_nsec;
 }
 
+/* The allocator's hole and overflow block survive a collection: nothing past
+ * the cursor was allocated, so it is still free. A collection may evacuate the
+ * sparsest blocks if the last one called for it; a defragmenting one considers
+ * every block. Root-checking builds move everything. */
 static void heap_collect(oti_heap* h, bool defragment) {
   uint64_t began = heap_nanoseconds();
   unsigned char *cursor = h->start ? h->start + h->used : NULL, *hole_end = h->hole_end;

@@ -5,8 +5,7 @@
 
 /* Error locations and reports. Errors record where they happened as source
  * ids and byte offsets, without touching the managed heap; ot_report_error
- * turns them into a diagnostic table and renders it with otium.diagnostics.
- * See the Errors section of scratch/runtime-rewrite.md. */
+ * turns them into a diagnostic table and renders it with otium.diagnostics. */
 
 static char* copy_string(const char* s) {
   if (!s) return NULL;

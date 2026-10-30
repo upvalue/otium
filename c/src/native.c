@@ -6,8 +6,7 @@
  * functions and frame descriptors. This file turns units into machine code,
  * keeps the code objects, and provides what that code calls: the entry
  * trampoline, stubs for every callee that isn't a closure, the unwinder, and
- * helpers for allocation, slow paths and control forms. See
- * scratch/native-compiler-design.md, sections 6 to 9. What depends on the
+ * helpers for allocation, slow paths and control forms. What depends on the
  * machine is in native-x86-64.inc and native-arm64.inc.
  *
  * Registers, in sljit's names: S0 holds the state and S1 the allocation
@@ -520,7 +519,7 @@ void* oti_code_space_alloc(void* space, size_t size) {
   return p;
 }
 
-/* Code memory is kept for now; reclaimed code objects only free their
+/* Code memory is never returned; reclaimed code objects only free their
  * metadata. */
 void oti_code_space_free(void* space, void* code) {
   (void)space;

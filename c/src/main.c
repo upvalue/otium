@@ -374,8 +374,9 @@ static bool start_dev(ot_state* rt, const options* o, bool native) {
       !ot_set_load_hook(rt, "otium.dev/record-load!"))
     return false;
   if (native) return true;
-  /* The VM keeps the legacy service hook. The tick counts process CPU time,
-   * so it never interrupts a blocking call and costs nothing while waiting. */
+  /* Under the VM a timer tick interrupts running code to service the server.
+   * It counts process CPU time, so it never interrupts a blocking call and
+   * costs nothing while waiting. */
   struct sigaction action = {0};
   action.sa_handler = tick_handler;
   action.sa_flags = SA_RESTART | SA_ONSTACK;

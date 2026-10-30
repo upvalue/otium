@@ -1,7 +1,6 @@
 #include "internal.h"
 
-/* Green threads: many threads of Otium code on one native thread. See
- * scratch/green-threads.md and scratch/segmented-stacks.md.
+/* Green threads: many threads of Otium code on one native thread.
  *
  * Native code runs on Otium stacks, one per thread, and all C runs on the
  * one C stack (native.c). A thread is switched only when it has no C frames
@@ -114,8 +113,7 @@ struct oti_threads {
   uint64_t last_poll;
   /* Whether any thread may have a watchdog deadline, to skip the scan. */
   bool watchdogs;
-  /* Keywords the scheduler compares and returns, interned once: interning
-   * scans every runtime constant, too slow for each switch. */
+  /* Keywords the scheduler compares and returns, interned once at setup. */
   ot_value deadlock, timeout;
   _Atomic sig_atomic_t preempt;
   pthread_t ticker;

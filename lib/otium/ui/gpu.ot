@@ -14,7 +14,7 @@
 
 (def- (allocate-node)
   (let ((p (native/node-new)))
-    (when (ffi/null? p) (error "Cannot allocate Yoga node"))
+    (when (ffi/null-pointer? p) (error "Cannot allocate Yoga node"))
     p))
 
 (def- (eased-size! node axis target pass)
@@ -565,7 +565,7 @@ changes; see ui/paint-key."
                                    (ui/limit-ref limits :width -1)
                                    -1)
                                (ui/limit-ref limits :scale 1))))
-    (when (ffi/null? text) (error "Text measurement failed" (native/text-error)))
+    (when (ffi/null-pointer? text) (error "Text measurement failed" (native/text-error)))
     (ui/size (/ (native/text-size text native/TEXT_WIDTH) (ui/limit-ref limits :scale 1))
              (/ (native/text-size text native/TEXT_HEIGHT) (ui/limit-ref limits :scale 1)))))
 
@@ -652,7 +652,7 @@ changes; see ui/paint-key."
         (buffer (ffi/alloc 'float count)))
     (unwind-protect
       (let ((run (native/text-get text (gfx/font-index font) size -1 scale)))
-        (when (ffi/null? run) (error "Text field measurement failed" (native/text-error)))
+        (when (ffi/null-pointer? run) (error "Text field measurement failed" (native/text-error)))
         (unless (native/text-carets run buffer count) (error "Text caret measurement failed" (native/text-error)))
         (dotimes (i count)
           (push! positions (/ (ffi/ref buffer 'float i) scale)))

@@ -280,7 +280,7 @@ length-delimited data use a pointer and length, including embedded zero bytes.
 
 `ffi/null` is the dedicated null pointer value. It is a pointer
 value, distinct from integer zero, `#f`, `nil`, and any empty string. It is
-truthy; `(ffi/null? value)` is the test, returning false for every other value.
+truthy; `(ffi/null-pointer? value)` is the test, returning false for every other value.
 `(ffi/pointer? value)` is true for every pointer value, including `ffi/null`,
 callbacks and pointers whose allocation has been released, and false otherwise.
 Integers, `#f`, and `nil` are not accepted in its place. No change to language

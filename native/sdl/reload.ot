@@ -64,7 +64,7 @@
   (and status-path
        (let ((temporary (str status-path ".tmp"))
              (file (host-fopen temporary "wb")))
-         (when (ffi/null? file) (error "Cannot write SDL status"))
+         (when (ffi/null-pointer? file) (error "Cannot write SDL status"))
          (defer
            (let ((text (str (string-join " "
                                          (list frames

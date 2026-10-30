@@ -104,7 +104,7 @@
   (check "blob copied" 255 (ffi/ref blob 'u8 0))
   (check "blob trailing byte" 128 (ffi/ref blob 'u8 2)))
 (check "null type" sql/NULL (sql/column-type query 4))
-(check "null pointer" #t (ffi/null? (sql/column-text query 4)))
+(check "null pointer" #t (ffi/null-pointer? (sql/column-text query 4)))
 (check "close with statement" sql/BUSY (sql/close db))
 (require otium.sqlite.raw :as sql :reload)
 (check "handle survives reload" sql/ROW (sql/step query))
@@ -125,7 +125,7 @@
       (check "tail" " select 2" (ffi/read-utf8 (ffi/ref tail 'pointer 0) 10))
       (ok "finalize tail" (sql/finalize (ffi/ref out 'pointer 0)))
       (ok "empty statement" (sql/prepare-v2 db source 0 out ffi/null))
-      (check "empty statement pointer" #t (ffi/null? (ffi/ref out 'pointer 0))))
+      (check "empty statement pointer" #t (ffi/null-pointer? (ffi/ref out 'pointer 0))))
     (ffi/free! source)
     (ffi/free! out)
     (ffi/free! tail)))
@@ -134,7 +134,7 @@
   (defer
     (begin
       (check "prepare error" sql/ERROR (sql/prepare-v2 db source -1 out ffi/null))
-      (check "failed statement" #t (ffi/null? (ffi/ref out 'pointer 0)))
+      (check "failed statement" #t (ffi/null-pointer? (ffi/ref out 'pointer 0)))
       (check "error code" sql/ERROR (sql/errcode db))
       (check "message" #t (string? (sql/errmsg db))))
     (ffi/free! out)
@@ -143,7 +143,7 @@
   (defer
     (begin
       (check "exec error" sql/ERROR (sql/exec db "invalid sql" ffi/null ffi/null out))
-      (check "allocated error" #f (ffi/null? (ffi/ref out 'pointer 0)))
+      (check "allocated error" #f (ffi/null-pointer? (ffi/ref out 'pointer 0)))
       (sql/free (ffi/ref out 'pointer 0)))
     (ffi/free! out)))
 (let ((stmt (prepare db "select ?"))
@@ -159,7 +159,7 @@
       (callback (ffi/callback '(pointer int pointer pointer)
                               'int
                               (fn (context count values names)
-                                (check "callback context" #t (ffi/null? context))
+                                (check "callback context" #t (ffi/null-pointer? context))
                                 (check "callback columns" 1 count)
                                 (check "callback value" "42" (ffi/read-utf8 (ffi/ref values 'pointer 0) 3))
                                 (check "callback name" "answer" (ffi/read-utf8 (ffi/ref names 'pointer 0) 7))
@@ -172,7 +172,7 @@
     (ffi/free-callback! callback)))
 (let ((destination (database))
       (backup (sql/backup-init destination "main" db "main")))
-  (check "backup initialized" #f (ffi/null? backup))
+  (check "backup initialized" #f (ffi/null-pointer? backup))
   (check "backup copied" sql/DONE (sql/backup-step backup -1))
   (check "backup remaining" 0 (sql/backup-remaining backup))
   (ok "backup finish" (sql/backup-finish backup))
@@ -187,7 +187,7 @@
       (check "open failure"
              sql/CANTOPEN
              (sql/open-v2 "/no/such/otium-sqlite-directory/database" out sql/OPEN_READONLY ffi/null))
-      (check "error handle" #f (ffi/null? (ffi/ref out 'pointer 0)))
+      (check "error handle" #f (ffi/null-pointer? (ffi/ref out 'pointer 0)))
       (ok "close error handle" (sql/close (ffi/ref out 'pointer 0))))
     (ffi/free! out)))
 (ok "begin" (exec db "begin"))

@@ -86,7 +86,7 @@
         ;; Allocate before spawning so allocation failure cannot orphan a child.
         (put! pty :output (ffi/alloc 'pointer 1))
         (let ((reader (%reader-start (pty :fd))))
-          (when (ffi/null? reader) (error "pty: reader failed to start"))
+          (when (ffi/null-pointer? reader) (error "pty: reader failed to start"))
           (put! pty :reader reader))
         (let ((slave (check! "open" (%open (pty :tty) (+ O_RDWR O_NOCTTY)))))
           (defer

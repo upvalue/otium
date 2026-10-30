@@ -66,7 +66,7 @@ full-size bitmap of the Dock icon: 40 MB for a 1024-pixel image, 10 MB at 512."
 
 (def- (metal-drawables view)
   (let ((layer (objc/send view "layer")))
-    (if (and (not (ffi/null? layer)) (objc/send-as 'bool layer "isKindOfClass:" (objc/class "CAMetalLayer")))
+    (if (and (not (ffi/null-pointer? layer)) (objc/send-as 'bool layer "isKindOfClass:" (objc/class "CAMetalLayer")))
         (objc/send-as 'ulong layer "maximumDrawableCount")
         (let ((subviews (objc/send view "subviews")))
           (let loop ((i 0))
@@ -79,7 +79,7 @@ full-size bitmap of the Dock icon: 40 MB for a 1024-pixel image, 10 MB at 512."
     (let ((ns-window (sdl/get-pointer-property (sdl/get-window-properties (window :window))
                                                "SDL.window.cocoa.window"
                                                ffi/null)))
-      (unless (ffi/null? ns-window) (metal-drawables (objc/send ns-window "contentView"))))))
+      (unless (ffi/null-pointer? ns-window) (metal-drawables (objc/send ns-window "contentView"))))))
 
 (def (graphics-buffers window)
   "Bytes in the window's swapchain and renderer buffers, by label."
@@ -162,8 +162,8 @@ full-size bitmap of the Dock icon: 40 MB for a 1024-pixel image, 10 MB at 512."
           (set! success? #t)
           handle))
       (unless success?
-        (unless (ffi/null? renderer) (native/gpu-free renderer))
-        (unless (ffi/null? window) (sdl/destroy-window window))
+        (unless (ffi/null-pointer? renderer) (native/gpu-free renderer))
+        (unless (ffi/null-pointer? window) (sdl/destroy-window window))
         (when first? (sdl/quit))))))
 
 (def (close! window)

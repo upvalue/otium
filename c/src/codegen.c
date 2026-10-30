@@ -38,7 +38,7 @@ static ot_value codegen_cell(ot_state* rt, size_t first, size_t count) {
 
 /* The name of the builtin a cell holds, when it is that builtin's own cell
  * in otium.core, else #f. Inlined builtins' own cells can't be redefined.
- * Other namespaces' builtins can share a core name (otium.ffi's null?). */
+ * Other namespaces' builtins can share a core name. */
 static ot_value codegen_cell_builtin(ot_state* rt, size_t first, size_t count) {
   uint32_t cell = 0;
   if (!oti_check_arity(rt, "%native-cell-builtin", count, 1, 1) ||

@@ -1623,7 +1623,7 @@ static ot_value ffi_pointer_builtin(ot_state* rt, size_t first, size_t count) {
 }
 
 static ot_value ffi_null_builtin(ot_state* rt, size_t first, size_t count) {
-  return foreign_run(rt, "null?", foreign_null_p, first, count);
+  return foreign_run(rt, "null-pointer?", foreign_null_p, first, count);
 }
 
 static ot_value ffi_pointer_eq_builtin(ot_state* rt, size_t first, size_t count) {
@@ -1707,7 +1707,7 @@ static ot_value ffi_callback_count_builtin(ot_state* rt, size_t first, size_t co
 }
 
 static ot_value ffi_raw_null_builtin(ot_state* rt, size_t first, size_t count) {
-  return foreign_run(rt, "null?", foreign_raw_null, first, count);
+  return foreign_run(rt, "%null", foreign_raw_null, first, count);
 }
 
 static ot_value ffi_raw_size_builtin(ot_state* rt, size_t first, size_t count) {
@@ -1763,7 +1763,7 @@ const oti_builtin_def oti_foreign_builtins[] = {
     {B_FFI_BIND, "otium.ffi/bind", ffi_bind_builtin},
     {B_FFI_HAS_SYMBOL, "otium.ffi/has-symbol?", ffi_has_symbol_builtin},
     {B_FFI_POINTER, "otium.ffi/pointer?", ffi_pointer_builtin},
-    {B_FFI_NULL, "otium.ffi/null?", ffi_null_builtin},
+    {B_FFI_NULL, "otium.ffi/null-pointer?", ffi_null_builtin},
     {B_FFI_POINTER_EQ, "otium.ffi/pointer=?", ffi_pointer_eq_builtin},
     {B_FFI_ALLOC, "otium.ffi/alloc", ffi_alloc_builtin},
     {B_FFI_FREE, "otium.ffi/free!", ffi_free_builtin},

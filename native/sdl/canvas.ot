@@ -22,7 +22,7 @@
       (error (SDL_GetError))))
 
 (def (sdl-pointer value)
-  (if (ffi/null? value)
+  (if (ffi/null-pointer? value)
       (error (SDL_GetError))
       value))
 
@@ -34,7 +34,7 @@
   (sdl-own (ffi/alloc type count) ffi/free!))
 
 (def (sdl-close!)
-  (if (ffi/null? sdl-window)
+  (if (ffi/null-pointer? sdl-window)
       #f
       (SDL_StopTextInput sdl-window))
   (let loop ()

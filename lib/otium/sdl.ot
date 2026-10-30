@@ -48,7 +48,7 @@
   value)
 
 (def (pointer value)
-  (when (ffi/null? value) (error (get-error)))
+  (when (ffi/null-pointer? value) (error (get-error)))
   value)
 
 (def (flag-set? flags flag)

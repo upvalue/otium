@@ -33,7 +33,7 @@
 (def (class name)
   "The class named name. Errors when there is none."
   (let ((c ((binding "objc_getClass" '(utf8) 'pointer) name)))
-    (when (ffi/null? c) (error "No Objective-C class" name))
+    (when (ffi/null-pointer? c) (error "No Objective-C class" name))
     c))
 
 (def (selector name)

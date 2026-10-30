@@ -119,7 +119,7 @@ TEST(scalar_text_and_pointer_conversions) {
   check_error(rt, "((otium.ffi/bind extra \"lowest_integer\" '() 'i64 #t))", "range");
   check_printed(rt, "(text \"héllo 🌍\")", "héllo 🌍");
   check_printed(rt, "(text \"\")", "");
-  check_true(rt, "(otium.ffi/null? (text otium.ffi/null))");
+  check_true(rt, "(otium.ffi/null-pointer? (text otium.ffi/null))");
   check_error(rt, "(text #f)", "string");
   check_error(rt, "(text \"a\\0b\")", "embedded NUL");
   check_error(rt, "((otium.ffi/bind lib \"bad_utf8\" '() 'utf8 #t))", "encoding");
@@ -133,11 +133,11 @@ TEST(scalar_text_and_pointer_conversions) {
   check_error(rt, "((otium.ffi/bind extra \"offset_text\" '(utf8) 'pointer #t) \"hello\")",
               "temporary UTF-8");
 
-  check_true(rt, "(otium.ffi/null? otium.ffi/null)");
-  CHECK(eval(rt, "(otium.ffi/null? 0)") == OT_FALSE);
+  check_true(rt, "(otium.ffi/null-pointer? otium.ffi/null)");
+  CHECK(eval(rt, "(otium.ffi/null-pointer? 0)") == OT_FALSE);
   check_true(rt, "(otium.ffi/pointer? otium.ffi/null)");
   check_true(rt, "(if otium.ffi/null #t #f)");
-  check_true(rt, "(otium.ffi/null? (pointer otium.ffi/null))");
+  check_true(rt, "(otium.ffi/null-pointer? (pointer otium.ffi/null))");
   check_error(rt, "(pointer 0)", "pointer");
   check_true(
       rt, "((otium.ffi/bind lib \"null_callback\" '(callback-pointer) 'bool #t) otium.ffi/null)");

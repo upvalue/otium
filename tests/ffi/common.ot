@@ -69,9 +69,9 @@
 
 (def pointer-call (ffi/bind lib "echo_pointer" '(pointer) 'pointer #t))
 
-(check #t (ffi/null? ffi/null))
-(check #f (ffi/null? #f))
-(check #f (ffi/null? 0))
+(check #t (ffi/null-pointer? ffi/null))
+(check #f (ffi/null-pointer? #f))
+(check #f (ffi/null-pointer? 0))
 (check #t (ffi/pointer? ffi/null))
 (check #f (ffi/pointer? 0))
 (check #f (ffi/pointer? "text"))
@@ -80,7 +80,7 @@
        (if ffi/null
            #t
            #f))
-(check #t (ffi/null? (pointer-call ffi/null)))
+(check #t (ffi/null-pointer? (pointer-call ffi/null)))
 (check 'type (reason (fn () (pointer-call 0))))
 (check 'type (reason (fn () (pointer-call #f))))
 (check #t ((ffi/bind lib "null_callback" '(callback-pointer) 'bool #t) ffi/null))
@@ -89,7 +89,7 @@
 
 (check "héllo 🌍" (utf8-call "héllo 🌍"))
 (check "" (utf8-call ""))
-(check #t (ffi/null? (utf8-call ffi/null)))
+(check #t (ffi/null-pointer? (utf8-call ffi/null)))
 (check 'type (reason (fn () (utf8-call #f))))
 (check 'encoding (reason (fn () ((ffi/bind lib "bad_utf8" '() 'utf8 #t)))))
 
@@ -172,7 +172,7 @@
 
 (def slots (ffi/alloc 'pointer 1))
 
-(check #t (ffi/null? (ffi/ref slots 'pointer 0)))
+(check #t (ffi/null-pointer? (ffi/ref slots 'pointer 0)))
 ((ffi/bind lib "pointer_out" '(pointer pointer) 'void #t) slots slots)
 (check #t (ffi/pointer=? slots (ffi/ref slots 'pointer 0)))
 (ffi/free! slots)

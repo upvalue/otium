@@ -361,18 +361,9 @@ static ot_value support_string_ref(ot_state* rt, size_t first, size_t count) {
   if (!oti_check_arity(rt, "string-ref", count, 2, 2)) return 0;
   ot_value v = rt->stack[first];
   if (!oti_kind(v, K_STRING)) return oti_fail(rt, "expected string");
-  size_t n;
-  const char* s = oti_text_bytes(v, &n);
   if (!ot_is_int(rt->stack[first + 1])) return oti_fail(rt, "expected string index");
-  intptr_t index = ot_to_int(rt->stack[first + 1]);
-  if (index < 0) return oti_fail(rt, "string index out of bounds");
-  size_t length = 0;
-  uint32_t cp;
-  for (size_t pos = 0; pos < n; length++) {
-    pos = oti_utf8_next(s, n, pos, &cp);
-    if (length == (size_t)index) return ((ot_value)cp << 8) | TAG_CHAR;
-  }
-  return oti_fail(rt, "string index out of bounds");
+  ot_value c = oti_string_get(v, rt->stack[first + 1], OT_NIL);
+  return c == OT_NIL ? oti_fail(rt, "string index out of bounds") : c;
 }
 
 static ot_value support_substring(ot_state* rt, size_t first, size_t count) {

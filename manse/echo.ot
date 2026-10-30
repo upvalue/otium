@@ -1,0 +1,19 @@
+(ns manse.echo)
+(require manse.tty :as tty)
+
+;; Repeats each line typed into it. Ctrl+D ends it.
+
+(def (run t)
+  (tty/write! t "Echo. Each line you type comes back. Ctrl+D ends.\n")
+  (prompt t))
+
+;; Each line calls prompt again by name, so a reloaded definition takes over.
+(def (prompt t)
+  (tty/write! t "> ")
+  (let ((line (tty/read-line t)))
+    (when line
+      (tty/write! t (str line "\n"))
+      (prompt t))))
+
+(def (start)
+  (tty/start (fn (t) (run t)) "echo"))

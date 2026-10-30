@@ -11,7 +11,7 @@
 
 (def w (ui/open {:title "paint" :width width-px :height height-px :headless #t :scale 2}))
 
-(def s (sessions/open! 1 "/bin/sh" (list "sh" "-c" "sleep 100")))
+(def s (sessions/open! 1 (sessions/pty-backend "/bin/sh" (list "sh" "-c" "sleep 100"))))
 
 (def term (s :term))
 

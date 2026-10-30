@@ -1,0 +1,66 @@
+;; Programs on a Tty: cooked-mode editing, echo, end of input, interrupts and failures.
+(require manse.tty :as tty)
+(require manse.echo :as echo)
+(require manse.backend :as backend)
+(require otium.thread :as thread)
+(require otium.test :refer (check report))
+
+(def (type! t text)
+  (backend/write! t (string->utf8 text))
+  ;; Let the program take the input, as the UI loop does after a frame.
+  (thread/sleep 0.01))
+
+(def (shown t)
+  (apply str (array-to-list (tty/drain! t))))
+
+(def t (echo/start))
+
+(thread/sleep 0.01)
+(check "the program writes CR LF" "Echo. Each line you type comes back. Ctrl+D ends.\r\n> " (shown t))
+(type! t "hi")
+(check "typing is echoed before Enter" "hi" (shown t))
+(type! t "\r")
+(check "Enter ends the line and the program answers" "\r\nhi\r\n> " (shown t))
+(type! t "ab\x7f;c\r")
+(check "Backspace erases on screen and in the line" "ab\x8; \x8;c\r\nac\r\n> " (shown t))
+(type! t "é\x7f;x\r")
+(check "Backspace takes a whole UTF-8 character" "é\x8; \x8;x\r\nx\r\n> " (shown t))
+(type! t "\x1b;\x7f;\x15;\r")
+(check "control characters echo as two and erase as two" "^[\x8; \x8;\x8; \x8;\r\n\r\n> " (shown t))
+(type! t "abc\x15;\r")
+(check "Ctrl+U erases the line" "abc\x8; \x8;\x8; \x8;\x8; \x8;\r\n\r\n> " (shown t))
+(check "running" nil (backend/status t))
+(type! t "\x04;")
+(check "Ctrl+D on an empty line ends input" 0 ((backend/status t) :exit))
+
+(def t (echo/start))
+
+(thread/sleep 0.01)
+(shown t)
+(type! t "\x03;")
+(check "Ctrl+C echoes" "^C\r\n" (shown t))
+(check "Ctrl+C interrupts" 2 ((backend/status t) :signal))
+
+(def t (tty/start (fn (_) (car 1)) "broken"))
+
+(thread/sleep 0.01)
+(check "a failure exits 1" 1 ((backend/status t) :exit))
+(check "and says why" #t (string-contains? (shown t) "broken: "))
+
+(def t
+  (tty/start (fn (t)
+               (tty/raw! t #t)
+               (tty/write! t (str "<" (tty/read t) ">\n")))
+             "raw"))
+
+(thread/sleep 0.01)
+(type! t "\x1b;[A")
+(check "raw mode passes bytes both ways" "<\x1b;[A>\n" (shown t))
+
+(def t (echo/start))
+
+(thread/sleep 0.01)
+(backend/close! t)
+(thread/sleep 0.01)
+(check "closing kills the program" :killed (thread/status (t :thread)))
+(report "tty")

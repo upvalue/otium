@@ -1,56 +1,95 @@
 (ns manse.session)
 (require otium.time :as time)
+(require otium.ffi :as ffi)
+(require manse.backend :as backend)
 (require manse.ghostty :as g)
 (require manse.pty :as pty)
 
-(def (open! id path args)
-  (let ((term (g/new 80 24))
-        (success? #f))
-    (unwind-protect
-      (let ((session {:id id :term term :pty (pty/spawn path args 80 24)}))
-        (put! term
-              :on-reply (fn (data len)
-                          (unless (or (session :closed?) (session :exit))
-                            (pty/write-pointer! (session :pty) data len))))
-        (set! success? #t)
-        session)
-      (unless success? (g/free! term)))))
+(defclass PtyBackend
+  :is backend/Backend
+  pty)
+
+(def (pty-backend path args)
+  "A child started from path (absolute) with args, argv[0] included."
+  (make PtyBackend :pty (pty/spawn path args 80 24)))
+
+(defmethod (backend/write! (b PtyBackend) bytes)
+  (pty/write-bytes! (b :pty) bytes))
+
+(defmethod (backend/resize! (b PtyBackend) cols rows)
+  (pty/resize! (b :pty) cols rows))
+
+(defmethod (backend/pump! (b PtyBackend) term deadline)
+  (let ((p (b :pty)))
+    (let loop ((changed? #f))
+      (let ((n (pty/output p)))
+        (cond
+          ((not n) :eof)
+          ((= n 0) changed?)
+          (else (g/write-bytes! term (pty/output-data p) n)
+                (pty/consume! p)
+                ;; Over budget, paint now and come straight back for the rest.
+                (if (< (time/seconds) deadline)
+                    (loop #t)
+                    (begin
+                      (pty/wake! p)
+                      #t))))))))
+
+(defmethod (backend/status (b PtyBackend))
+  (pty/status (b :pty)))
+
+(defmethod (backend/info (b PtyBackend))
+  {:pid ((b :pty) :pid) :tty ((b :pty) :tty)})
+
+(defmethod (backend/close! (b PtyBackend))
+  (pty/close! (b :pty)))
+
+(def (open! id backend)
+  "A terminal for backend, which the session owns from here."
+  (let ((term (try
+                (g/new 80 24)
+                (catch c
+                  (backend/close! backend)
+                  (error c))))
+        (session {:id id :backend backend}))
+    (put! session :term term)
+    (put! term
+          :on-reply (fn (data len)
+                      (unless (or (session :closed?) (session :exit))
+                        (backend/write! backend (ffi/read-bytes data len)))))
+    session))
 
 (def parse-budget
   "Seconds pump! may spend parsing before the frame paints."
   0.008)
 
 (def (pump! session)
-  "Parse the output the PTY's reader thread has gathered, up to parse-budget, including output left after child exit."
+  "Pass the program's output to the terminal, up to parse-budget, including output left after it exits."
   (unless (session :closed?)
-    (let ((p (session :pty))
-          (term (session :term))
-          (deadline (+ (time/seconds) parse-budget))
+    (let ((term (session :term))
           (changed? #f))
-      (let loop ()
-        (unless (session :eof?)
-          (let ((n (pty/output p)))
-            (cond
-              ((not n) (put! session :eof? #t) (set! changed? #t))
-              ((> n 0)
-               (g/write-bytes! term (pty/output-data p) n)
-               (pty/consume! p)
-               (set! changed? #t)
-               ;; Over budget, paint now and come straight back for the rest.
-               (if (< (time/seconds) deadline)
-                   (loop)
-                   (pty/wake! p)))))))
+      (unless (session :eof?)
+        (let ((result (backend/pump! (session :backend) term (+ (time/seconds) parse-budget))))
+          (when (eq? result :eof) (put! session :eof? #t))
+          (when result (set! changed? #t))))
       (when changed? (g/update! term))
       (unless (session :exit)
-        (let ((status (pty/status p)))
+        (let ((status (backend/status (session :backend))))
           (when status
             (put! session :exit status)
             (set! changed? #t))))
       changed?)))
 
+(def (send! session bytes)
+  "Pass bytes, typed or encoded from keys, to the program."
+  (backend/write! (session :backend) bytes))
+
+(def (resize! session cols rows)
+  (backend/resize! (session :backend) cols rows))
+
 (def (close! session)
   (unless (session :closed?)
     (put! session :closed? #t)
     (unwind-protect
-      (pty/close! (session :pty))
+      (backend/close! (session :backend))
       (g/free! (session :term)))))

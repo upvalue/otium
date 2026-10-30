@@ -2,6 +2,7 @@
 (require manse.terminal :as terminal)
 (require manse.ghostty :as g)
 (require manse.pty :as pty)
+(require manse.session :as sessions)
 (require otium.test :refer (check report))
 
 (def written [])
@@ -13,7 +14,7 @@
     (dotimes (i 5)
       (g/write! t (str "\r\n" i)))
     (g/update! t)
-    {:term t :pty {} :cell-w 10 :cell-h 18 :cols 4 :rows 2}))
+    {:term t :backend (make sessions/PtyBackend :pty {}) :cell-w 10 :cell-h 18 :cols 4 :rows 2}))
 
 (def (wheel! session dy &optional (dx 0))
   (terminal/wheel! session {:kind :wheel :dx dx :dy dy :local-x 15 :local-y 25}))

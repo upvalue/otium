@@ -58,8 +58,8 @@
 ;; Size the PTYs, fill each terminal with coloured output and wait for it.
 (frame!)
 (for-each (fn (session)
-            (pty/write! (session :pty)
-                        "printf '\\033[3%dm%s\\033[0m %s\\n' $(for i in $(seq 1 60); do echo $((i % 7 + 1)) line$i /usr/lib/item/$i; done)\r"))
+            (sessions/send! session
+                        (string->utf8 "printf '\\033[3%dm%s\\033[0m %s\\n' $(for i in $(seq 1 60); do echo $((i % 7 + 1)) line$i /usr/lib/item/$i; done)\r"))
           (sessions))
 (let ((deadline (+ (* 1000 (time/seconds)) 1500)))
   (while (< (* 1000 (time/seconds)) deadline)

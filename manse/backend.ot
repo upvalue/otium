@@ -1,0 +1,21 @@
+(ns manse.backend)
+
+;; The program at the other end of a terminal: a child on a PTY, or Otium code
+;; on a green thread inside Manse.
+
+(defabstract Backend)
+
+(defgeneric (write! backend bytes))
+
+(defgeneric (resize! backend cols rows))
+
+(defgeneric (pump! backend term deadline))
+
+(defgeneric (status backend))
+
+(defgeneric (info backend))
+
+(defgeneric (close! backend))
+
+(defmethod (info (backend Backend))
+  {})

@@ -5,8 +5,8 @@
 (require otium.ui.native :as native)
 (require otium.process :as process)
 (require manse.apps :as apps)
+(require manse.backend :as backend)
 (require manse.ghostty :as g)
-(require manse.pty :as pty)
 (require manse.session :as sessions)
 (require manse.settings :as settings)
 (require manse.fonts :as fonts)
@@ -16,24 +16,29 @@
   :is apps/App
   session)
 
-(def (open! id shell)
-  (make TerminalApp :session (sessions/open! id shell (list shell))))
+(def (open! id backend)
+  "A terminal for backend, a manse.backend/Backend."
+  (make TerminalApp :session (sessions/open! id backend)))
+
+(def (open-shell! id shell)
+  (open! id (sessions/pty-backend shell (list shell))))
 
 (defmethod (apps/info (app TerminalApp))
-  (let ((session (app :session)))
-    {:kind :terminal
-     :status (cond
-               ((session :closed?) :closed)
-               ((session :exit) :exited)
-               (else :running))
-     :pid ((session :pty) :pid)
-     :tty ((session :pty) :tty)
-     :cols (get session :cols 80)
-     :rows (get session :rows 24)
-     :exit (if (session :exit)
-               (copy (session :exit))
-               #f)
-     :eof? (get session :eof? #f)}))
+  (let ((session (app :session))
+        (info {:kind :terminal
+               :status (cond
+                         ((session :closed?) :closed)
+                         ((session :exit) :exited)
+                         (else :running))
+               :cols (get session :cols 80)
+               :rows (get session :rows 24)
+               :exit (if (session :exit)
+                         (copy (session :exit))
+                         #f)
+               :eof? (get session :eof? #f)}))
+    (for ((k v :in (backend/info (session :backend))))
+      (put! info k v))
+    info))
 
 (defmethod (apps/step! (app TerminalApp))
   (let ((session (app :session)))
@@ -125,7 +130,7 @@ advance, and its line height times :line-height."
     (when bytes
       (unless (= (bytevector-length bytes) 0)
         (follow! session)
-        (pty/write-bytes! (session :pty) bytes))
+        (sessions/send! session bytes))
       :handled)))
 
 ;; Logical pixels per unit of wheel motion, as ui/Scroll uses.
@@ -164,7 +169,7 @@ advance, and its line height times :line-height."
         (col (clamp (floor (/ (- (get event :local-x 0) (padding)) cw)) 0 (- (session :cols) 1)))
         (row (clamp (floor (/ (- (get event :local-y 0) (padding)) ch)) 0 (- (session :rows) 1)))
         (bytes (g/encode-wheel (session :term) (exact col) (exact row) up? (round cw) (round ch))))
-    (unless (= (bytevector-length bytes) 0) (pty/write-bytes! (session :pty) bytes))))
+    (unless (= (bytevector-length bytes) 0) (sessions/send! session bytes))))
 
 ;; The widget
 
@@ -195,7 +200,7 @@ advance, and its line height times :line-height."
       ;; An exited terminal's history can still be read.
       ((eq? kind :wheel) (wheel! session event))
       ((session :exit) :handled)
-      ((eq? kind :text-input) (follow! session) (pty/write! (session :pty) (get event :text)) :handled)
+      ((eq? kind :text-input) (follow! session) (sessions/send! session (string->utf8 (get event :text))) :handled)
       ((eq? kind :key-down) (key! session event))
       (else nil))))
 
@@ -241,7 +246,7 @@ advance, and its line height times :line-height."
         (rows (max 1 (floor (/ (- (bounds :height) (* 2 (padding))) (session :cell-h))))))
     (unless (and (= cols (get session :cols 0)) (= rows (get session :rows 0)))
       (g/resize! (session :term) cols rows (round (session :cell-w)) (round (session :cell-h)))
-      (unless (session :exit) (pty/resize! (session :pty) cols rows))
+      (unless (session :exit) (sessions/resize! session cols rows))
       (g/update! (session :term))
       (put! session :cols cols :rows rows))))
 

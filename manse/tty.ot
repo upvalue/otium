@@ -1,0 +1,171 @@
+(ns manse.tty)
+(require otium.thread :as thread)
+(require otium.ui :as ui)
+(require manse.backend :as backend)
+(require manse.ghostty :as g)
+
+;; Programs that run inside Manse on a green thread, with a terminal and no
+;; PTY. The kernel's terminal driver isn't there, so Tty does its work in
+;; Otium. In cooked mode, the default, input is held until Enter, with
+;; Backspace and Ctrl+U editing the line, typed text is echoed, Ctrl+D at the
+;; start of a line is the end of input, Ctrl+C interrupts the program, and
+;; written newlines become CR LF. Raw mode passes bytes both ways untouched.
+;;
+;; The program is called with the Tty on its own thread, and uses read-line,
+;; read, write!, raw! and size. Its return ends it with status 0.
+
+(defclass Tty
+  :is backend/Backend
+  (name :init "program")
+  (thread :init nil)
+  (mode :init :cooked)
+  (line :init [])
+  (output :init [])
+  (cols :init 80)
+  (rows :init 24)
+  (status :init nil))
+
+(def- (run tty program)
+  (try
+    (begin
+      (program tty)
+      (set! (tty :status) {:exit 0}))
+    (catch c
+      (if (eq? (condition-type c) 'interrupt)
+          (set! (tty :status) {:signal 2})
+          (begin
+            (write! tty (str "\n" (tty :name) ": " (condition-message c) "\n"))
+            (set! (tty :status) {:exit 1}))))))
+
+(def (start program &optional (name "program"))
+  "Run (program tty) on a new thread. The Tty is a backend for manse.session."
+  (let ((tty (make Tty :name name)))
+    (set! (tty :thread) (thread/spawn-named name run tty program))
+    tty))
+
+;; The program's side
+
+(def- (take tty)
+  (thread/receive ({:tty (== tty) :input input} input)))
+
+(def (read tty)
+  "The next line in cooked mode, newline included, or the bytes typed since the last read in raw mode, as a string. nil at the end of input."
+  (let ((input (take tty)))
+    (if (eq? input :eof)
+        nil
+        input)))
+
+(def (read-line tty)
+  "The next line without its newline, or nil at the end of input."
+  (let ((input (read tty)))
+    (if (and input (string-ends-with? input "\n"))
+        (substring input 0 (- (string-length input) 1))
+        input)))
+
+(def (write! tty text)
+  (let ((text (if (eq? (tty :mode) :raw)
+                  text
+                  (string-replace text "\n" "\r\n"))))
+    (thread/atomically (push! (tty :output) text))
+    (ui/wake!)
+    nil))
+
+(def (raw! tty on?)
+  "Switch between raw and cooked mode."
+  (set! (tty :mode)
+        (if on?
+            :raw
+            :cooked)))
+
+(def (size tty)
+  "The terminal's columns and rows, as a list."
+  (list (tty :cols) (tty :rows)))
+
+;; Manse's side
+
+(def- (deliver! tty input)
+  (when (memq (thread/status (tty :thread)) '(:runnable :waiting)) (thread/send (tty :thread) {:tty tty :input input})))
+
+(def- (interrupt! tty)
+  (when (memq (thread/status (tty :thread)) '(:runnable :waiting))
+    (thread/interrupt! (tty :thread) (fn () (error {:type 'interrupt :message "interrupted"})))))
+
+(def- (bytes->string bytes)
+  (utf8->string (apply bytevector (array-to-list bytes))))
+
+(def- (continuation? byte)
+  (= (bitwise-and byte 0xC0) 0x80))
+
+(def- (control? byte)
+  (and (< byte 32) (not (= byte 9))))
+
+(def- (erase! tty echo)
+  "Remove the last character from the line and from the screen. Control
+characters were echoed as two, like ^A."
+  (let ((line (tty :line)))
+    (when (> (length line) 0)
+      (let ((byte (let loop ()
+                    (let ((byte (pop! line)))
+                      (if (and (continuation? byte) (> (length line) 0))
+                          (loop)
+                          byte)))))
+        (dotimes (_ (if (control? byte)
+                        2
+                        1))
+          (for-each (fn (b) (push! echo b)) '(8 32 8)))))))
+
+(def- (cooked! tty byte echo)
+  "Edit the line with byte, adding what to show to echo."
+  (let ((line (tty :line)))
+    (cond
+      ((or (= byte 13) (= byte 10))
+       (push! line 10)
+       (push! echo 13)
+       (push! echo 10)
+       (deliver! tty (bytes->string line))
+       (set! (tty :line) []))
+      ((= byte 3) (for-each (fn (b) (push! echo b)) '(94 67 13 10)) (set! (tty :line) []) (interrupt! tty))
+      ((= byte 4)
+       (deliver! tty
+                 (if (= (length line) 0)
+                     :eof (bytes->string line)))
+       (set! (tty :line) []))
+      ((or (= byte 127) (= byte 8)) (erase! tty echo))
+      ((= byte 21) (while (> (length (tty :line)) 0) (erase! tty echo)))
+      ((control? byte) (push! line byte) (push! echo 94) (push! echo (+ byte 64)))
+      (else (push! line byte) (push! echo byte)))))
+
+(defmethod (backend/write! (tty Tty) bytes)
+  (if (eq? (tty :mode) :raw)
+      (deliver! tty (utf8->string bytes))
+      (let ((echo []))
+        (dotimes (i (bytevector-length bytes))
+          (cooked! tty (bytevector-u8-ref bytes i) echo))
+        (when (> (length echo) 0) (let ((text (bytes->string echo))) (thread/atomically (push! (tty :output) text)))))))
+
+(defmethod (backend/resize! (tty Tty) cols rows)
+  (set! (tty :cols) cols)
+  (set! (tty :rows) rows))
+
+(def (drain! tty)
+  "Take the text written since the last drain, in order."
+  (thread/atomically (let ((output (tty :output)))
+                       (set! (tty :output) [])
+                       output)))
+
+(defmethod (backend/pump! (tty Tty) term deadline)
+  (let ((output (drain! tty)))
+    (for-each (fn (text) (g/write! term text)) output)
+    (cond
+      ((> (length output) 0) #t)
+      ((tty :status) :eof)
+      (else #f))))
+
+(defmethod (backend/status (tty Tty))
+  (tty :status))
+
+(defmethod (backend/info (tty Tty))
+  {:program (tty :name)})
+
+(defmethod (backend/close! (tty Tty))
+  (when (memq (thread/status (tty :thread)) '(:runnable :waiting)) (thread/kill! (tty :thread))))

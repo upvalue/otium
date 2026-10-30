@@ -14,9 +14,9 @@
     "-c"
     "stty raw -echo; exec /usr/bin/python3 -u -c 'import os; print(\"READY\", flush=True)\nwhile True:\n b=os.read(0,1)\n if b==b\"!\": break\n print(b.hex(), flush=True)'"))
 
-(def first (sessions/open! 1 "/bin/sh" args))
+(def first (sessions/open! 1 (sessions/pty-backend "/bin/sh" args)))
 
-(def second (sessions/open! 2 "/bin/sh" args))
+(def second (sessions/open! 2 (sessions/pty-backend "/bin/sh" args)))
 
 (def tree (ui/root))
 

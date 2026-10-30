@@ -3,9 +3,11 @@
 (require otium.process :as process)
 (require otium.sdl :as sdl)
 (require manse.apps :as apps)
+(require manse.session :as sessions)
 (require manse.strip :as strip)
 (require manse.sysinfo :as sysinfo)
 (require manse.terminal :as terminal)
+(require manse.echo :as echo)
 (require manse.pty :as pty)
 (require manse.settings :as settings)
 (require manse.theme :as theme)
@@ -40,7 +42,11 @@
 
 (def (new-terminal!)
   (let ((id ((workspace :apps) :next-id)))
-    (add-app! (str "Terminal " id) (terminal/open! id (or (workspace :shell) (process/getenv "SHELL") "/bin/sh")))))
+    (add-app! (str "Terminal " id)
+              (terminal/open-shell! id (or (workspace :shell) (process/getenv "SHELL") "/bin/sh")))))
+
+(def (new-echo!)
+  (add-app! "Echo" (terminal/open! ((workspace :apps) :next-id) (echo/start))))
 
 (def (terminal-sessions)
   (map (fn (entry) ((entry :app) :session))
@@ -51,6 +57,7 @@
 (def bindings
   "Key, label for the help panel, action and description."
   [["Meta+T" "Cmd+T" :new "New terminal to the right"]
+   ["Meta+E" "Cmd+E" :echo "New echo program to the right"]
    ["Meta+W" "Cmd+W" :close "Close the focused column"]
    ["Meta+Left" "Cmd+Left" :left "Focus the column to the left"]
    ["Meta+Right" "Cmd+Right" :right "Focus the column to the right"]
@@ -80,6 +87,7 @@
         (case action
           ((:cancel) (strip/hints-cancel! s))
           ((:new) (new-terminal!))
+          ((:echo) (new-echo!))
           ((:close) (put! workspace :closed-column? #t) (when (strip/focused s) (close-app! (strip/focused s))))
           ((:left) (strip/focus-move! s -1))
           ((:right) (strip/focus-move! s 1))
@@ -113,7 +121,7 @@ MANSE_KEYS runs actions by key name, separated by spaces, at iteration 40."
                   (let ((text (process/getenv (if (= (session :id) 1)
                                                   "MANSE_TYPE"
                                                   "MANSE_TYPE_2"))))
-                    (when (and text (not (session :exit))) (pty/write! (session :pty) text))))
+                    (when (and text (not (session :exit))) (sessions/send! session (string->utf8 text)))))
                 (terminal-sessions)))
     (when (and (= frame 40) (process/getenv "MANSE_KEYS"))
       (for-each (fn (name) (let ((action (get (keymap) name))) (when action (action! action))))

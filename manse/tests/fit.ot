@@ -2,10 +2,11 @@
 (require manse.terminal :as terminal)
 (require manse.ghostty :as g)
 (require manse.pty :as pty)
+(require manse.session :as sessions)
 (require otium.ui :as ui)
 (require otium.test :refer (check report))
 
-(def session {:cell-w 10 :cell-h 20 :cols 1 :rows 1})
+(def session {:backend (make sessions/PtyBackend :pty {}) :cell-w 10 :cell-h 20 :cols 1 :rows 1})
 
 (def area (ui/bounds 0 0 200 200))
 

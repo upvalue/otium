@@ -104,3 +104,23 @@
                             (set! column (+ column 1))))
                       (string->list (node :text)))
             (list line column)))))
+
+(def (line-starts text)
+  "An array of the character offset where each line of text starts, counted from zero."
+  (let ((starts [0])
+        (i 0))
+    (for-each (fn (c)
+                (set! i (+ i 1))
+                (when (eq? c #\newline) (push! starts i)))
+              (string->list text))
+    starts))
+
+(def (offset-line starts offset)
+  "The line, counted from zero, that holds character offset, given starts from line-starts."
+  (let loop ((low 0) (high (- (length starts) 1)))
+    (if (>= low high)
+        low
+        (let ((mid (quotient (+ low high 1) 2)))
+          (if (<= (get starts mid) offset)
+              (loop mid high)
+              (loop low (- mid 1)))))))

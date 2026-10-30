@@ -24,20 +24,10 @@
 
 ;; --- context ---------------------------------------------------------------------
 
-(def- (line-starts text)
-  ;; Character offset of the start of each line, counted from zero.
-  (let ((starts [0]))
-    (let ((i 0))
-      (for-each (fn (c)
-                  (set! i (+ i 1))
-                  (when (eq? c #\newline) (push! starts i)))
-                (string->list text)))
-    starts))
-
 (def- (make-context text path options)
   {:text text
    :path path
-   :starts (line-starts text)
+   :starts (syntax/line-starts text)
    :levels (get options :levels {})
    :found []
    :directives []

@@ -4,20 +4,13 @@
 ;; closures inside loops, and core functions that weren't inlined. Only
 ;; definitions, ns and require are run, so later forms can use them; the
 ;; program itself doesn't run.
-(require otium.process (otium.compiler :as nc) (otium.compiler.options :as options))
+(require otium.process (otium.syntax :as syntax) (otium.compiler :as nc) (otium.compiler.options :as options))
 
 ;; Forms that are run as well as compiled, by the head written.
 (def- definitions
   '(def def- defonce defparam defmacro defrecord defclass defabstract defgeneric defmethod ns require))
 
 (def (head form) (and (pair? form) (car form)))
-
-;; Line and column, from 1, of an offset into text.
-(def (position text offset)
-  (let loop ((i 0) (line 1) (start 0))
-    (cond ((or (>= i offset) (>= i (string-length text))) [line (+ 1 (- offset start))])
-          ((eq? (string-ref text i) #\newline) (loop (+ i 1) (+ line 1) (+ i 1)))
-          (else (loop (+ i 1) line start)))))
 
 (def (notes-for path)
   (let ((text (read-file path)) (saved (current-ns)))
@@ -35,10 +28,10 @@
         (when (memq h definitions)
           (%native-evaluate form))))
     (%set-namespace saved)
-    (let ((seen {}) (out []))
+    (let ((seen {}) (out []) (starts (syntax/line-starts text)))
       (for ((n :in (sort-by (fn (n) (get n 0)) options/notes)))
-        (let ((p (position text (get n 0))))
-          (let ((line (str path ":" (get p 0) ":" (get p 1) ": note: " (get n 1))))
+        (let ((i (syntax/offset-line starts (get n 0))))
+          (let ((line (str path ":" (+ i 1) ":" (+ 1 (- (get n 0) (get starts i))) ": note: " (get n 1))))
             (unless (get seen line)
               (put! seen line #t)
               (push! out line)))))

@@ -302,24 +302,6 @@ void oti_visit_threads(ot_state* rt, oti_root_visitor visit, void* context) {
   for (size_t i = 0; i < ts->count; i++) visit_thread(rt, ts->all[i], visit, context);
 }
 
-static void free_exec(ot_state* rt, oti_exec* x) {
-  oti_native_stack_free(rt, &x->native);
-  free(x->stack);
-  free(x->frames);
-  free(x->handlers);
-  free(x->handler_previous);
-  free(x->restarts);
-  free(x->restart_scopes);
-  free(x->cleanups);
-  free(x->cleanup_states);
-  free(x->params);
-  free(x->tries);
-  free(x->native.args);
-  for (size_t i = 0; i < x->unwind_count; i++) oti_release_error(&x->unwinds[i].error);
-  free(x->unwinds);
-  oti_release_error(&x->error);
-}
-
 static void free_thread(oti_thread* t) {
   free(t->fds);
   free(t->mailbox);
@@ -438,10 +420,10 @@ void oti_threads_destroy(ot_state* rt) {
   /* The running thread's exec is rt->exec, which the runtime frees. */
   for (size_t i = 0; i < ts->count; i++) {
     oti_thread* t = ts->all[i];
-    if (t != ts->current) free_exec(rt, &t->exec);
+    if (t != ts->current) oti_exec_free(rt, &t->exec);
     while (t->interruptions) {
       oti_interruption* previous = t->interruptions->previous;
-      free_exec(rt, &t->interruptions->exec);
+      oti_exec_free(rt, &t->interruptions->exec);
       free(t->interruptions);
       t->interruptions = previous;
     }
@@ -636,6 +618,29 @@ static _Noreturn void finish(ot_state* rt, ot_value result);
 /* An interrupt has its own native stack but retains the thread identity.
  * Saving execution state instead of a C continuation lets the thunk park;
  * completion restores the interrupted call, and failure unwinds it. */
+/* Fill x, zeroed and with its own native stack, as a fresh execution state
+ * with the current one's parameter bindings and namespace, and nothing else.
+ * false after recording an error; the caller frees x. */
+static bool exec_init(ot_state* rt, oti_exec* x) {
+  x->native.callee = x->condition_values[0] = x->pending_output = OT_NIL;
+  x->restart_transfer[0] = x->restart_transfer[1] = OT_NIL;
+  for (size_t i = 0; i < 4; i++) x->error.slots[i] = OT_NIL;
+  x->current_namespace = rt->current_namespace;
+  x->required_namespace = UINT32_MAX;
+  x->source = OTI_NO_SOURCE;
+  /* As much room for arguments as every other thread has. */
+  size_t capacity = rt->native.args_capacity;
+  x->native.args = malloc(capacity * sizeof(ot_value));
+  x->params = rt->param_count ? malloc(2 * rt->param_count * sizeof(ot_value)) : NULL;
+  if (!x->native.args || (rt->param_count && !x->params))
+    return oti_error(rt, "out of host memory");
+  for (size_t i = 0; i < capacity; i++) x->native.args[i] = OT_NIL;
+  x->native.args_capacity = capacity;
+  if (rt->param_count) memcpy(x->params, rt->params, 2 * rt->param_count * sizeof(ot_value));
+  x->param_count = x->param_capacity = rt->param_count;
+  return true;
+}
+
 static bool start_interruption(ot_state* rt, oti_thread* t) {
   oti_interruption* saved = calloc(1, sizeof(*saved));
   oti_exec fresh = {0};
@@ -644,24 +649,11 @@ static bool start_interruption(ot_state* rt, oti_thread* t) {
     free(saved);
     return false;
   }
-  size_t capacity = rt->native.args_capacity;
-  fresh.native.args = malloc(capacity * sizeof(ot_value));
-  fresh.params = rt->param_count ? malloc(2 * rt->param_count * sizeof(ot_value)) : NULL;
-  if (!fresh.native.args || (rt->param_count && !fresh.params)) {
-    free_exec(rt, &fresh);
+  if (!exec_init(rt, &fresh)) {
+    oti_exec_free(rt, &fresh);
     free(saved);
-    return oti_error(rt, "out of host memory");
+    return false;
   }
-  for (size_t j = 0; j < capacity; j++) fresh.native.args[j] = OT_NIL;
-  fresh.native.args_capacity = capacity;
-  if (rt->param_count) memcpy(fresh.params, rt->params, 2 * rt->param_count * sizeof(ot_value));
-  fresh.param_count = fresh.param_capacity = rt->param_count;
-  fresh.native.callee = fresh.condition_values[0] = fresh.pending_output = OT_NIL;
-  fresh.restart_transfer[0] = fresh.restart_transfer[1] = OT_NIL;
-  for (size_t j = 0; j < 4; j++) fresh.error.slots[j] = OT_NIL;
-  fresh.current_namespace = rt->current_namespace;
-  fresh.required_namespace = UINT32_MAX;
-  fresh.source = OTI_NO_SOURCE;
   saved->exec = rt->exec;
   saved->resume = t->resume;
   saved->entry = t->entry;
@@ -893,7 +885,7 @@ again:
     ot_value condition = rt->condition_values[0];
     oti_error_record error = rt->error;
     memset(&rt->error, 0, sizeof(rt->error));
-    free_exec(rt, &rt->exec);
+    oti_exec_free(rt, &rt->exec);
     rt->exec = saved->exec;
     me->resume = saved->resume;
     me->entry = saved->entry;
@@ -958,7 +950,7 @@ again:
   }
   unregister(ts, me);
   /* Nothing runs on its stack any more: this is the C stack. */
-  free_exec(rt, &rt->exec);
+  oti_exec_free(rt, &rt->exec);
   memset(&rt->exec, 0, sizeof(rt->exec));
   free_thread(me);
   ts->current = NULL;
@@ -1036,30 +1028,12 @@ static ot_value spawn_builtin(ot_state* rt, size_t first, size_t count) {
   as_thread(object)->result = as_thread(object)->status = OT_NIL;
   as_thread(object)->thread = t;
   t->object = object;
-  /* A fresh execution state with the parent's parameter bindings and
-   * namespace, and nothing else. */
-  oti_exec* x = &t->exec;
-  x->native.callee = OT_NIL;
-  x->restart_transfer[0] = x->restart_transfer[1] = OT_NIL;
-  x->condition_values[0] = x->pending_output = OT_NIL;
-  x->current_namespace = rt->current_namespace;
-  x->required_namespace = UINT32_MAX;
-  x->source = OTI_NO_SOURCE;
-  for (size_t i = 0; i < 4; i++) x->error.slots[i] = OT_NIL;
-  /* As much room for arguments as every other thread has. */
-  size_t args_capacity = rt->native.args_capacity;
-  x->native.args = malloc(args_capacity * sizeof(ot_value));
-  x->params = rt->param_count ? malloc(2 * rt->param_count * sizeof(ot_value)) : NULL;
-  if (!x->native.args || (rt->param_count && !x->params)) {
+  if (!exec_init(rt, &t->exec)) {
     unregister(ts, t);
-    free_exec(rt, x);
+    oti_exec_free(rt, &t->exec);
     free_thread(t);
-    return oti_fail(rt, "out of host memory");
+    return 0;
   }
-  for (size_t i = 0; i < args_capacity; i++) x->native.args[i] = OT_NIL;
-  x->native.args_capacity = args_capacity;
-  if (rt->param_count) memcpy(x->params, rt->params, 2 * rt->param_count * sizeof(ot_value));
-  x->param_count = x->param_capacity = rt->param_count;
   t->state = T_RUNNABLE;
   enqueue(&ts->run, t);
   return object;

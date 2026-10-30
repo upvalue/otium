@@ -779,6 +779,28 @@ bool ot_set_heap_limit(ot_state* rt, size_t bytes) {
          oti_error(rt, "heap limit is below capacity or exceeds addressable size");
 }
 
+void oti_exec_free(ot_state* rt, oti_exec* x) {
+#ifdef OTIUM_NATIVE
+  oti_native_stack_free(rt, &x->native);
+#else
+  (void)rt;
+#endif
+  free(x->stack);
+  free(x->frames);
+  free(x->handlers);
+  free(x->handler_previous);
+  free(x->restarts);
+  free(x->restart_scopes);
+  free(x->cleanups);
+  free(x->cleanup_states);
+  free(x->params);
+  free(x->tries);
+  free(x->native.args);
+  for (size_t i = 0; i < x->unwind_count; i++) oti_release_error(&x->unwinds[i].error);
+  free(x->unwinds);
+  oti_release_error(&x->error);
+}
+
 void ot_destroy(ot_state* rt) {
   if (!rt || !oti_host_entry(rt)) return;
   oti_ports_destroy(rt);
@@ -791,6 +813,8 @@ void ot_destroy(ot_state* rt) {
   close(rt->wake_pipe[0]);
   close(rt->wake_pipe[1]);
 #endif
+  /* Before oti_native_destroy, which unmaps the native stacks. */
+  oti_exec_free(rt, &rt->exec);
 #ifdef OTIUM_NATIVE
   oti_boot_destroy(rt);
   oti_native_destroy(rt);
@@ -811,18 +835,6 @@ void ot_destroy(ot_state* rt) {
   free(rt->host_path);
   free(rt->functions);
   free(rt->open_ports);
-  free(rt->cleanups);
-  free(rt->cleanup_states);
-  free(rt->restarts);
-  free(rt->restart_scopes);
-  free(rt->tries);
-  for (size_t i = 0; i < rt->unwind_count; i++) oti_release_error(&rt->unwinds[i].error);
-  free(rt->unwinds);
-  free(rt->params);
-  free(rt->handlers);
-  free(rt->handler_previous);
-  free(rt->frames);
-  free(rt->stack);
   free(rt->constant_state);
   free(rt->text_slots);
   free(rt->global_slots);

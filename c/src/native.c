@@ -2276,7 +2276,6 @@ void oti_native_destroy(ot_state* rt) {
     free(c);
     c = next;
   }
-  oti_native_stack_free(rt, &rt->native);
   while (n->segment_chunks) {
     oti_segment_chunk* chunk = n->segment_chunks;
     n->segment_chunks = chunk->next;
@@ -2285,7 +2284,6 @@ void oti_native_destroy(ot_state* rt) {
   }
   if (n->perf_map) fclose(n->perf_map);
   free(n);
-  free(rt->native.args);
   rt->native_runtime = NULL;
 }
 

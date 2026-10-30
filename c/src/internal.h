@@ -796,6 +796,10 @@ typedef struct {
   OTI_EXEC_FIELDS
 } oti_exec;
 
+/* Free everything x owns. Thread switches and ot_destroy both use this, so
+ * a buffer added to OTI_EXEC_FIELDS needs freeing only here. */
+void oti_exec_free(ot_state* rt, oti_exec* x);
+
 struct ot_state {
   /* Shared with signals and the ticker; never copied with a thread exec. */
   uintptr_t poll_limit;

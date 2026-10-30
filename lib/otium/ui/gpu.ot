@@ -134,6 +134,11 @@
       (set! (node :synced-width) width)
       (set! (node :synced-height) height)
       (set! (node :synced-shrink) shrink?))
+    ;; An :overlay node leaves its parent's flow and covers the parent.
+    (let ((overlay? (get (node :options) :overlay #f)))
+      (unless (eq? overlay? (node :synced-overlay))
+        (native/node-overlay p overlay?)
+        (set! (node :synced-overlay) overlay?)))
     ;; Yoga refuses a measure callback on a node with children, and children
     ;; on a node with a callback.
     (when (and leaf? (not (same-nodes? children (node :synced-children)))) (native/node-clear p))

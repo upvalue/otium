@@ -92,16 +92,40 @@ Returns true when the hovered nodes changed."
              (ui/send! node {:kind :press :x (get event :x) :y (get event :y)})))))
       (else nil))))
 
+;; A :modal node takes the keyboard while it is mounted. The last one in
+;; paint order wins. Focus outside it is ignored, not cleared, so it comes
+;; back when the modal goes.
+(def (modal tree)
+  "The mounted :modal node that takes keys, or nil."
+  (let ((found nil))
+    (def (visit node)
+      (when (get (node :options) :modal #f) (set! found node))
+      (for-each visit (ui/children node)))
+    (for-each visit (ui/children tree))
+    found))
+
+(def- (within? node ancestor)
+  (and (ui/mounted? node) (or (eq? node ancestor) (within? (node :parent) ancestor))))
+
+(def- (key-focus tree modal)
+  (let ((node (ui/focused tree)))
+    (if (and node modal (not (within? node modal)))
+        nil
+        node)))
+
 (def (focus-next! tree backwards?)
   (let ((nodes [])
-        (current (ui/focused tree))
+        (top (modal tree))
+        (current (key-focus tree top))
         (index -1))
     (def (visit node)
       (when (ui/focusable? node)
         (when (eq? node current) (set! index (length nodes)))
         (push! nodes node))
       (for-each visit (ui/children node)))
-    (for-each visit (ui/children tree))
+    (if top
+        (visit top)
+        (for-each visit (ui/children tree)))
     (if (= (length nodes) 0)
         (ui/focus! tree nil)
         (ui/focus! tree
@@ -116,9 +140,12 @@ Returns true when the hovered nodes changed."
                                            1)))
                                 (length nodes)))))))
 
-(def- (node-path node)
+(def- (node-path node stop)
   (if (ui/mounted? node)
-      (cons node (node-path (node :parent)))
+      (cons node
+            (if (eq? node stop)
+                '()
+                (node-path (node :parent) stop)))
       '()))
 
 (def- (action! path event)
@@ -132,7 +159,8 @@ Returns true when the hovered nodes changed."
 
 (def (keyboard! tree event)
   "Route normalized key strings; actions run on keydown, button activation on keyup."
-  (let ((node (ui/focused tree))
+  (let ((top (modal tree))
+        (node (key-focus tree top))
         (focus (tree :focus))
         (kind (get event :kind))
         (key (get event :key)))
@@ -161,9 +189,10 @@ Returns true when the hovered nodes changed."
             (set! (focus :key) (get event :code key))
             (set! (focus :event) event)
             (set! (node :pressed?) #t)))
-         (else (let ((path (if node
-                               (node-path node)
-                               (array-to-list (ui/children tree)))))
+         (else (let ((path (cond
+                             (node (node-path node top))
+                             (top (list top))
+                             (else (array-to-list (ui/children tree))))))
                  (if (eq? (action! path event) :handled)
                      (begin
                        (set! (focus :drop-text?) #t)

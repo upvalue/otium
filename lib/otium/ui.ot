@@ -43,6 +43,7 @@ are loaded when needed; requiring this module alone does not open a window."
   (synced-width :init nil)
   (synced-height :init nil)
   (synced-shrink :init nil)
+  (synced-overlay :init #f)
   (synced-children :init nil)
   (synced-key :init nil)
   (synced-generation :init nil)
@@ -388,6 +389,8 @@ are loaded when needed; requiring this module alone does not open a window."
                     ((memq k
                            '(:disabled :focusable
                                        :autofocus
+                                       :modal
+                                       :overlay
                                        :focus
                                        :tab-navigation
                                        :keymap

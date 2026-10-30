@@ -320,6 +320,51 @@
 (check "last painted sibling wins" (child pointer-tree 1) (car (input/hit-path pointer-tree 5 5)))
 (ui/dispose! pointer-tree)
 
+;; Modal
+
+(def modal-actions '())
+
+(def (modal-view open?)
+  (list (ui/column {:keymap {"X" :outer "Y" :outer}
+                    :on-action (fn (a)
+                                 (set! modal-actions (cons a modal-actions))
+                                 :handled)}
+                   (ui/button {:key :under} "Under"))
+        (when open?
+          (ui/column {:key :modal
+                      :modal #t
+                      :keymap {"X" :modal}
+                      :on-action (fn (a)
+                                   (set! modal-actions (cons a modal-actions))
+                                   :handled)}
+                     (ui/button {:key :first} "First")
+                     (ui/button {:key :second} "Second")))))
+
+(def modal-tree (ui/root))
+(ui/reconcile! modal-tree (modal-view #f))
+(def under (child (child modal-tree 0) 0))
+(ui/focus! modal-tree under)
+(input/keyboard! modal-tree {:kind :key-down :key "X"})
+(check "keys reach the focus without a modal" '(:outer) modal-actions)
+(ui/reconcile! modal-tree (modal-view #t))
+(check "modal found" (child modal-tree 1) (input/modal modal-tree))
+(set! modal-actions '())
+(input/keyboard! modal-tree {:kind :key-down :key "X"})
+(input/keyboard! modal-tree {:kind :key-down :key "Y"})
+(check "modal takes keys from the focus outside it" '(:modal) modal-actions)
+(check "outside focus kept" under (ui/focused modal-tree))
+(input/keyboard! modal-tree {:kind :key-down :key "Tab"})
+(check "tab enters the modal" (child (child modal-tree 1) 0) (ui/focused modal-tree))
+(input/keyboard! modal-tree {:kind :key-down :key "Tab"})
+(input/keyboard! modal-tree {:kind :key-down :key "Tab"})
+(check "tab stays in the modal" (child (child modal-tree 1) 0) (ui/focused modal-tree))
+(set! modal-actions '())
+(input/keyboard! modal-tree {:kind :key-down :key "Y"})
+(check "keys stop at the modal" '() modal-actions)
+(ui/reconcile! modal-tree (modal-view #f))
+(check "no modal after close" nil (input/modal modal-tree))
+(ui/dispose! modal-tree)
+
 (def keyboard-tree (ui/root))
 
 (def activations 0)

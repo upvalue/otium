@@ -46,6 +46,8 @@
                  (node-align "otui_node_align" (pointer int) void #t)
                  (node-scroll "otui_node_scroll" (pointer bool) void #t)
                  (node-shrink "otui_node_shrink" (pointer bool) void #t)
+                 ((private yg-position-type) "YGNodeStyleSetPositionType" (pointer int) void #t)
+                 ((private yg-position) "YGNodeStyleSetPosition" (pointer int float) void #t)
                  (node-style "otui_node_style" (pointer float float float float float int) bool #t)
                  (node-intrinsic "otui_node_intrinsic" (pointer float float bool) bool #t)
                  (node-pending "otui_node_pending" (pointer) int #t)
@@ -97,6 +99,19 @@
                  (gpu-driver "otui_gpu_driver" (pointer) utf8 #t)
                  (gpu-count "otui_gpu_count" (pointer) int #t)
                  (live-renderers "otui_live_renderers" () int #t))
+
+;; Yoga's own setters, on the YGNodeRef that leads a layout node.
+(def- YG_RELATIVE 1)
+
+(def- YG_ABSOLUTE 2)
+
+(def (node-overlay p overlay?)
+  "Take the node out of its parent's flow and cover the parent, or put it back."
+  (let ((yoga (ffi/ref p 'pointer 0)))
+    (yg-position-type yoga (if overlay? YG_ABSOLUTE YG_RELATIVE))
+    ;; Left, top, right and bottom. Zero offsets leave a relative node in place.
+    (dotimes (edge 4)
+      (yg-position yoga edge 0.0))))
 
 (def (gpu-new window width height scale driver &optional (offscreen #f))
   "Create a direct renderer, or pass #t as the last argument for offscreen rendering and capture."

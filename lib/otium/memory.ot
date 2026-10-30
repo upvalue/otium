@@ -4,16 +4,32 @@
 
 ;; Memory statistics: the Otium heap, the process footprint, buffers that other
 ;; modules know the size of, and allocation per UI frame. The runtime supplies
-;; %allocated, %collections and %heap; it has no heap breakdown yet, so heap
-;; returns nil.
+;; %allocated, %collections and %heap-stat.
 
 (def (allocated)
   "Bytes allocated on the Otium heap since the program started, including those since collected."
   (%allocated))
 
+(def heap-stats
+  "What heap-stat reports, by %heap-stat's number."
+  {:live 0 :used 1 :peak 2 :held 3 :limit 4 :collections 5 :gc-ns 6 :longest-gc-ns 7 :reclaimed 8 :copied 9})
+
+(def (heap-stat name)
+  "One heap statistic from heap-stats, as an integer, without allocating:
+:live bytes after the last collection, bytes :used, the :peak in use at a
+collection, bytes :held in blocks and large objects, the :limit, the number of
+:collections, nanoseconds collecting (:gc-ns) and the :longest-gc-ns, and bytes
+:reclaimed and :copied."
+  (%heap-stat (heap-stats name)))
+
 (def (heap)
-  "The Otium heap as a table of :live and :held bytes, :peak held bytes, live bytes per generation, :collections and :gc-ms, or nil when the runtime does not report it."
-  (%heap))
+  "The Otium heap as a table of :live, :used, :held and :peak bytes, :collections and :gc-ms."
+  {:live (heap-stat :live)
+   :used (heap-stat :used)
+   :held (heap-stat :held)
+   :peak (heap-stat :peak)
+   :collections (heap-stat :collections)
+   :gc-ms (/ (heap-stat :gc-ns) 1000000.0)})
 
 ;; Process footprint
 
@@ -125,7 +141,7 @@
       (when h
         (buffer-push! out
                       (line "otium heap"
-                            (str (size (h :held)) " held, " (size (h :live)) " live (peak held " (size (h :peak)) ")")))
+                            (str (size (h :held)) " held, " (size (h :live)) " live (peak in use " (size (h :peak)) ")")))
         (buffer-push! out (line "" (str (h :collections) " collections, " (h :gc-ms) " ms collecting")))))
     (buffer-push! out (line "allocated in total" (size (s :allocated))))
     (for-each (fn (name)

@@ -117,8 +117,7 @@ static ot_value process_arguments(ot_state* rt, size_t first, size_t count) {
 }
 
 /* otium.memory reads these. Allocation is cumulative: bytes collections have
- * reclaimed plus bytes still held. There is no heap breakdown, so %heap is
- * nil. */
+ * reclaimed plus bytes still held. */
 static ot_value memory_allocated(ot_state* rt, size_t first, size_t count) {
   (void)first;
   if (!process_metadata(rt, count)) return 0;
@@ -132,10 +131,41 @@ static ot_value memory_collections(ot_state* rt, size_t first, size_t count) {
   return ot_int((intptr_t)rt->heap.collections);
 }
 
-static ot_value memory_heap(ot_state* rt, size_t first, size_t count) {
-  (void)first;
-  if (!process_metadata(rt, count)) return 0;
-  return OT_NIL;
+/* (%heap-stat n): one heap statistic as an integer, so reading it allocates
+ * nothing. 0 live bytes after the last collection, 1 bytes in use, 2 the most
+ * in use at a collection, 3 bytes held in blocks and large objects, 4 the
+ * limit, 5 collections, 6 nanoseconds spent collecting, 7 the longest
+ * collection, 8 bytes reclaimed, 9 bytes copied. */
+static ot_value memory_heap_stat(ot_state* rt, size_t first, size_t count) {
+  if (count != 1) {
+    oti_error(rt, "%heap-stat takes one argument");
+    return 0;
+  }
+  ot_value n = rt->stack[first];
+  if (!ot_is_int(n)) {
+    oti_error(rt, "%heap-stat expects an integer");
+    return 0;
+  }
+  const oti_heap* h = &rt->heap;
+  uint64_t value;
+  switch (ot_to_int(n)) {
+    case 0: value = h->live_bytes; break;
+    case 1: value = oti_heap_used(h); break;
+    case 2: value = h->peak_used; break;
+    case 3: value = h->blocks_used * OTI_BLOCK + h->large_bytes; break;
+    case 4: value = h->limit; break;
+    case 5: value = h->collections; break;
+    case 6: value = h->pause_nanoseconds; break;
+    case 7: value = h->longest_pause; break;
+    case 8: value = h->reclaimed_bytes; break;
+    case 9: value = h->copied_bytes; break;
+    default:
+      oti_error(rt, "unknown heap statistic");
+      return 0;
+  }
+  // Otium integers are 63-bit.
+  uint64_t max = ((uint64_t)1 << 62) - 1;
+  return ot_int((intptr_t)(value > max ? max : value));
 }
 
 const oti_builtin_def oti_process_builtins[] = {
@@ -145,6 +175,6 @@ const oti_builtin_def oti_process_builtins[] = {
     {B_PROCESS_SETENV, "otium.process/setenv!", process_setenv},
     {B_MEMORY_ALLOCATED, "otium.memory/%allocated", memory_allocated},
     {B_MEMORY_COLLECTIONS, "otium.memory/%collections", memory_collections},
-    {B_MEMORY_HEAP, "otium.memory/%heap", memory_heap},
+    {B_MEMORY_HEAP_STAT, "otium.memory/%heap-stat", memory_heap_stat},
     {0, NULL, NULL},
 };

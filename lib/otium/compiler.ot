@@ -12,7 +12,6 @@
             (otium.compiler.known :as known)
             (otium.compiler.options :as options)
             (otium.compiler.rescope :as rescope)
-            (otium.compiler.options :as options)
             (otium.compiler.types :as types)
             (otium.compiler.lower :as lower)
             (otium.compiler.alloc :as alloc)

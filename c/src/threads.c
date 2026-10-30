@@ -175,7 +175,8 @@ static bool deadline_arg(ot_state* rt, ot_value v, uint64_t* deadline) {
     *deadline = 0;
     return true;
   }
-  if (!ot_is_int(v) || ot_to_int(v) <= 0) return oti_error(rt, "expected a deadline from %thread-deadline");
+  if (!ot_is_int(v) || ot_to_int(v) <= 0)
+    return oti_error(rt, "expected a deadline from %thread-deadline");
   *deadline = (uint64_t)ot_to_int(v);
   return true;
 }
@@ -997,7 +998,7 @@ static void notify_watchers(ot_state* rt, ot_value object, ot_value watchers, bo
 
 /* (%spawn name f args): start a thread running (apply f args). */
 static ot_value spawn_builtin(ot_state* rt, size_t first, size_t count) {
-  if (count != 3) return oti_fail(rt, "wrong number of arguments");
+  if (!oti_check_arity(rt, "%spawn", count, 3, 3)) return 0;
   if (!setup(rt)) return 0;
   oti_threads* ts = rt->threads;
   if (!oti_procedure(rt->stack[first + 1])) {
@@ -1072,14 +1073,14 @@ static ot_value thread_value(ot_state* rt, ot_value v, const char* who) {
 
 static ot_value self_builtin(ot_state* rt, size_t first, size_t count) {
   (void)first;
-  if (count) return oti_fail(rt, "wrong number of arguments");
+  if (!oti_check_arity(rt, "%self", count, 0, 0)) return 0;
   if (!setup(rt)) return 0;
   return rt->threads->current->object;
 }
 
 static ot_value yield_builtin(ot_state* rt, size_t first, size_t count) {
   (void)first;
-  if (count) return oti_fail(rt, "wrong number of arguments");
+  if (!oti_check_arity(rt, "%yield", count, 0, 0)) return 0;
   oti_threads* ts = rt->threads;
   if (!ts || retried(rt, NULL)) return OT_NIL;
   if (!can_switch(rt) || (!ts->run.head && !ts->timer_count && !ts->fd_waiters)) return OT_NIL;
@@ -1091,7 +1092,7 @@ static ot_value yield_builtin(ot_state* rt, size_t first, size_t count) {
 /* (%sleep deadline): park until then. Where a thread can't be switched,
  * such as while a module loads, the whole process waits. */
 static ot_value sleep_builtin(ot_state* rt, size_t first, size_t count) {
-  if (count != 1) return oti_fail(rt, "wrong number of arguments");
+  if (!oti_check_arity(rt, "%sleep", count, 1, 1)) return 0;
   uint64_t deadline = 0;
   if (!deadline_arg(rt, rt->stack[first], &deadline)) return 0;
   if (rt->threads) retried(rt, NULL);
@@ -1115,7 +1116,7 @@ static ot_value sleep_builtin(ot_state* rt, size_t first, size_t count) {
  * with bit 4 for an error or hangup, or :timeout. Where the thread can't be
  * switched, the whole process waits. */
 static ot_value wait_fds_builtin(ot_state* rt, size_t first, size_t count) {
-  if (count != 2) return oti_fail(rt, "wrong number of arguments");
+  if (!oti_check_arity(rt, "%wait-fds", count, 2, 2)) return 0;
   if (!setup(rt)) return 0;
   ot_value list = rt->stack[first];
   uint64_t deadline = 0;
@@ -1186,7 +1187,7 @@ static ot_value wait_fds_builtin(ot_state* rt, size_t first, size_t count) {
 /* (%thread-join t deadline): #t once t has finished, :timeout when the
  * deadline passes first. */
 static ot_value join_builtin(ot_state* rt, size_t first, size_t count) {
-  if (count != 2) return oti_fail(rt, "wrong number of arguments");
+  if (!oti_check_arity(rt, "%thread-join", count, 2, 2)) return 0;
   ot_value v = thread_value(rt, rt->stack[first], "thread/join");
   if (!v) return 0;
   uint64_t deadline = 0;
@@ -1200,7 +1201,7 @@ static ot_value join_builtin(ot_state* rt, size_t first, size_t count) {
 }
 
 static ot_value status_builtin(ot_state* rt, size_t first, size_t count) {
-  if (count != 1) return oti_fail(rt, "wrong number of arguments");
+  if (!oti_check_arity(rt, "%thread-status", count, 1, 1)) return 0;
   ot_value v = thread_value(rt, rt->stack[first], "thread/status");
   if (!v) return 0;
   oti_thread* t = as_thread(v)->thread;
@@ -1208,13 +1209,13 @@ static ot_value status_builtin(ot_state* rt, size_t first, size_t count) {
 }
 
 static ot_value result_builtin(ot_state* rt, size_t first, size_t count) {
-  if (count != 1) return oti_fail(rt, "wrong number of arguments");
+  if (!oti_check_arity(rt, "%thread-result", count, 1, 1)) return 0;
   ot_value v = thread_value(rt, rt->stack[first], "thread");
   return v ? as_thread(v)->result : 0;
 }
 
 static ot_value name_builtin(ot_state* rt, size_t first, size_t count) {
-  if (count != 1) return oti_fail(rt, "wrong number of arguments");
+  if (!oti_check_arity(rt, "%thread-name", count, 1, 1)) return 0;
   ot_value v = thread_value(rt, rt->stack[first], "thread");
   return v ? as_thread(v)->name : 0;
 }
@@ -1222,7 +1223,7 @@ static ot_value name_builtin(ot_state* rt, size_t first, size_t count) {
 /* Live threads, as an array; with daemons? #f, those join-all waits for:
  * all but daemons and the caller. */
 static ot_value threads_builtin(ot_state* rt, size_t first, size_t count) {
-  if (count != 1) return oti_fail(rt, "wrong number of arguments");
+  if (!oti_check_arity(rt, "%threads", count, 1, 1)) return 0;
   bool all = oti_truth(rt->stack[first]);
   if (!setup(rt)) return 0;
   oti_threads* ts = rt->threads;
@@ -1238,7 +1239,7 @@ static ot_value threads_builtin(ot_state* rt, size_t first, size_t count) {
 }
 
 static ot_value daemon_builtin(ot_state* rt, size_t first, size_t count) {
-  if (count != 1) return oti_fail(rt, "wrong number of arguments");
+  if (!oti_check_arity(rt, "%thread-daemon", count, 1, 1)) return 0;
   ot_value v = thread_value(rt, rt->stack[first], "thread/daemon!");
   if (!v) return 0;
   if (as_thread(v)->thread) as_thread(v)->thread->daemon = true;
@@ -1248,7 +1249,7 @@ static ot_value daemon_builtin(ot_state* rt, size_t first, size_t count) {
 /* (%thread-kill t reason): make t unwind, running its cleanups; try can't
  * catch it. Killing yourself unwinds at once. */
 static ot_value kill_builtin(ot_state* rt, size_t first, size_t count) {
-  if (count != 2) return oti_fail(rt, "wrong number of arguments");
+  if (!oti_check_arity(rt, "%thread-kill", count, 2, 2)) return 0;
   ot_value v = thread_value(rt, rt->stack[first], "thread/kill!");
   if (!v) return 0;
   oti_thread* t = as_thread(v)->thread;
@@ -1269,7 +1270,7 @@ static ot_value kill_builtin(ot_state* rt, size_t first, size_t count) {
  * it wakes: a parked thread is woken for it. On the running thread it runs
  * now. */
 static ot_value interrupt_builtin(ot_state* rt, size_t first, size_t count) {
-  if (count != 2) return oti_fail(rt, "wrong number of arguments");
+  if (!oti_check_arity(rt, "%thread-interrupt", count, 2, 2)) return 0;
   ot_value v = thread_value(rt, rt->stack[first], "thread/interrupt!");
   if (!v) return 0;
   oti_thread* t = as_thread(v)->thread;
@@ -1309,7 +1310,7 @@ static ot_value watchdog_builtin(ot_state* rt, size_t first, size_t count) {
 /* (%monitor t ref): send the caller {:exit t :ref ref :reason r} when t ends,
  * at once if it has. */
 static ot_value monitor_builtin(ot_state* rt, size_t first, size_t count) {
-  if (count != 2) return oti_fail(rt, "wrong number of arguments");
+  if (!oti_check_arity(rt, "%monitor", count, 2, 2)) return 0;
   ot_value v = thread_value(rt, rt->stack[first], "actor/monitor");
   if (!v || !setup(rt)) return 0;
   ot_value done = keyword(rt, ":done");
@@ -1332,7 +1333,7 @@ static ot_value monitor_builtin(ot_state* rt, size_t first, size_t count) {
 
 /* (%demonitor t ref): stop the caller's monitor with ref. */
 static ot_value demonitor_builtin(ot_state* rt, size_t first, size_t count) {
-  if (count != 2) return oti_fail(rt, "wrong number of arguments");
+  if (!oti_check_arity(rt, "%demonitor", count, 2, 2)) return 0;
   ot_value v = thread_value(rt, rt->stack[first], "actor/demonitor");
   if (!v) return 0;
   oti_thread* t = as_thread(v)->thread;
@@ -1350,7 +1351,7 @@ static ot_value demonitor_builtin(ot_state* rt, size_t first, size_t count) {
 
 static ot_value make_waitq_builtin(ot_state* rt, size_t first, size_t count) {
   (void)first;
-  if (count) return oti_fail(rt, "wrong number of arguments");
+  if (!oti_check_arity(rt, "%make-waitq", count, 0, 0)) return 0;
   if (!setup(rt)) return 0;
   oti_threads* ts = rt->threads;
   oti_waitq* q = calloc(1, sizeof(*q));
@@ -1413,7 +1414,7 @@ ot_value oti_thread_io_wait(ot_state* rt, ot_value queue, int fd, bool writing) 
  * :timeout, or nil for an interrupt. An atomic section is released while
  * waiting and taken again after, which makes check-then-park safe. */
 static ot_value park_builtin(ot_state* rt, size_t first, size_t count) {
-  if (count != 2) return oti_fail(rt, "wrong number of arguments");
+  if (!oti_check_arity(rt, "%park", count, 2, 2)) return 0;
   if (!setup(rt)) return 0;
   oti_waitq* q = waitq_arg(rt, rt->stack[first]);
   uint64_t deadline = 0;
@@ -1433,7 +1434,7 @@ static ot_value park_builtin(ot_state* rt, size_t first, size_t count) {
 }
 
 static ot_value wake_one_builtin(ot_state* rt, size_t first, size_t count) {
-  if (count != 1) return oti_fail(rt, "wrong number of arguments");
+  if (!oti_check_arity(rt, "%wake-one", count, 1, 1)) return 0;
   oti_waitq* q = waitq_arg(rt, rt->stack[first]);
   if (!q) return 0;
   if (!q->head) return OT_FALSE;
@@ -1442,7 +1443,7 @@ static ot_value wake_one_builtin(ot_state* rt, size_t first, size_t count) {
 }
 
 static ot_value wake_all_builtin(ot_state* rt, size_t first, size_t count) {
-  if (count != 1) return oti_fail(rt, "wrong number of arguments");
+  if (!oti_check_arity(rt, "%wake-all", count, 1, 1)) return 0;
   oti_waitq* q = waitq_arg(rt, rt->stack[first]);
   if (!q) return 0;
   while (q->head) wake(rt, q->head, OT_TRUE);
@@ -1452,7 +1453,7 @@ static ot_value wake_all_builtin(ot_state* rt, size_t first, size_t count) {
 /* (%atomic #t) enters a section no other thread preempts; (%atomic #f)
  * leaves it. */
 static ot_value atomic_builtin(ot_state* rt, size_t first, size_t count) {
-  if (count != 1) return oti_fail(rt, "wrong number of arguments");
+  if (!oti_check_arity(rt, "%atomic", count, 1, 1)) return 0;
   if (rt->stack[first] == OT_TRUE) rt->atomic++;
   else if (rt->atomic) rt->atomic--;
   return OT_NIL;
@@ -1462,7 +1463,7 @@ static ot_value atomic_builtin(ot_state* rt, size_t first, size_t count) {
 
 /* (%send t message): append to t's mailbox; #f when t has finished. */
 static ot_value send_builtin(ot_state* rt, size_t first, size_t count) {
-  if (count != 2) return oti_fail(rt, "wrong number of arguments");
+  if (!oti_check_arity(rt, "%send", count, 2, 2)) return 0;
   ot_value v = thread_value(rt, rt->stack[first], "send");
   if (!v) return 0;
   oti_thread* t = as_thread(v)->thread;
@@ -1479,7 +1480,7 @@ static ot_value send_builtin(ot_state* rt, size_t first, size_t count) {
  * one until the deadline from %thread-deadline; :timeout when it passes.
  * One receive has one deadline however many messages it skips. */
 static ot_value mailbox_next_builtin(ot_state* rt, size_t first, size_t count) {
-  if (count != 1) return oti_fail(rt, "wrong number of arguments");
+  if (!oti_check_arity(rt, "%mailbox-next", count, 1, 1)) return 0;
   if (!setup(rt)) return 0;
   uint64_t deadline = 0;
   if (!deadline_arg(rt, rt->stack[first], &deadline)) return 0;
@@ -1497,7 +1498,7 @@ static ot_value mailbox_next_builtin(ot_state* rt, size_t first, size_t count) {
  * starts from the beginning. */
 static ot_value mailbox_take_builtin(ot_state* rt, size_t first, size_t count) {
   (void)first;
-  if (count) return oti_fail(rt, "wrong number of arguments");
+  if (!oti_check_arity(rt, "%mailbox-take", count, 0, 0)) return 0;
   if (!setup(rt)) return 0;
   oti_thread* me = rt->threads->current;
   if (me->cursor) {
@@ -1517,7 +1518,7 @@ static ot_value mailbox_take_builtin(ot_state* rt, size_t first, size_t count) {
 
 static ot_value mailbox_rewind_builtin(ot_state* rt, size_t first, size_t count) {
   (void)first;
-  if (count) return oti_fail(rt, "wrong number of arguments");
+  if (!oti_check_arity(rt, "%mailbox-rewind", count, 0, 0)) return 0;
   if (!setup(rt)) return 0;
   rt->threads->current->cursor = 0;
   return OT_NIL;
@@ -1526,7 +1527,7 @@ static ot_value mailbox_rewind_builtin(ot_state* rt, size_t first, size_t count)
 /* (%thread-deadline seconds): an absolute deadline for the waiting
  * builtins, or nil. Virtual under the test scheduler, so it sets that up. */
 static ot_value deadline_builtin(ot_state* rt, size_t first, size_t count) {
-  if (count != 1) return oti_fail(rt, "wrong number of arguments");
+  if (!oti_check_arity(rt, "%thread-deadline", count, 1, 1)) return 0;
   if (!setup(rt)) return 0;
   uint64_t deadline = 0;
   if (!deadline_after(rt, rt->stack[first], &deadline)) return 0;
@@ -1536,7 +1537,7 @@ static ot_value deadline_builtin(ot_state* rt, size_t first, size_t count) {
 /* Seconds on the scheduler's clock, virtual under the test scheduler. */
 static ot_value clock_builtin(ot_state* rt, size_t first, size_t count) {
   (void)first;
-  if (count) return oti_fail(rt, "wrong number of arguments");
+  if (!oti_check_arity(rt, "%scheduler-clock", count, 0, 0)) return 0;
   return oti_float(rt, (double)now(rt->threads) / 1e9);
 }
 
@@ -1546,7 +1547,7 @@ static ot_value clock_builtin(ot_state* rt, size_t first, size_t count) {
  * watchdog, or nil when nothing is due. */
 static ot_value idle_ms_builtin(ot_state* rt, size_t first, size_t count) {
   (void)first;
-  if (count) return oti_fail(rt, "wrong number of arguments");
+  if (!oti_check_arity(rt, "%thread-idle-ms", count, 0, 0)) return 0;
   oti_threads* ts = rt->threads;
   if (!ts) return OT_NIL;
   if (ts->run.head) return ot_int(0);
@@ -1625,13 +1626,13 @@ static ot_value no_threads(ot_state* rt, size_t first, size_t count) {
 /* With no other threads, yielding has nothing to do and nothing is due. */
 static ot_value yield_builtin(ot_state* rt, size_t first, size_t count) {
   (void)first;
-  if (count) return oti_fail(rt, "wrong number of arguments");
+  if (!oti_check_arity(rt, "%yield", count, 0, 0)) return 0;
   return OT_NIL;
 }
 
 static ot_value idle_ms_builtin(ot_state* rt, size_t first, size_t count) {
   (void)first;
-  if (count) return oti_fail(rt, "wrong number of arguments");
+  if (!oti_check_arity(rt, "%thread-idle-ms", count, 0, 0)) return 0;
   return OT_NIL;
 }
 #endif

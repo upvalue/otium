@@ -43,42 +43,37 @@ static const char* type_name(ot_value value) {
   return ":native";
 }
 
-static bool reflection_arity(ot_state* rt, size_t count, size_t arity) {
-  if (count == arity) return true;
-  return oti_error(rt, "wrong number of arguments");
-}
-
 static ot_value reflection_eof_object(ot_state* rt, size_t first, size_t count) {
   (void)first;
-  if (!reflection_arity(rt, count, 0)) return 0;
+  if (!oti_check_arity(rt, "eof-object", count, 0, 0)) return 0;
   return OT_EOF;
 }
 
 static ot_value reflection_eof_object_p(ot_state* rt, size_t first, size_t count) {
-  if (!reflection_arity(rt, count, 1)) return 0;
+  if (!oti_check_arity(rt, "eof-object?", count, 1, 1)) return 0;
   return rt->stack[first] == OT_EOF ? OT_TRUE : OT_FALSE;
 }
 
 static ot_value reflection_buffer_p(ot_state* rt, size_t first, size_t count) {
-  if (!reflection_arity(rt, count, 1)) return 0;
+  if (!oti_check_arity(rt, "buffer?", count, 1, 1)) return 0;
   return oti_kind(rt->stack[first], K_BUFFER) ? OT_TRUE : OT_FALSE;
 }
 
 static ot_value reflection_type(ot_state* rt, size_t first, size_t count) {
-  if (!reflection_arity(rt, count, 1)) return 0;
+  if (!oti_check_arity(rt, "type", count, 1, 1)) return 0;
   const char* name = type_name(rt->stack[first]);
   return oti_intern(rt, K_KEYWORD, name, strlen(name));
 }
 
 static ot_value reflection_current_ns(ot_state* rt, size_t first, size_t count) {
   (void)first;
-  if (!reflection_arity(rt, count, 0)) return 0;
+  if (!oti_check_arity(rt, "current-ns", count, 0, 0)) return 0;
   const char* name = rt->namespaces[rt->current_namespace];
   return oti_intern(rt, K_SYMBOL, name, strlen(name));
 }
 
 static ot_value reflection_describe(ot_state* rt, size_t first, size_t count) {
-  if (!reflection_arity(rt, count, 1)) return 0;
+  if (!oti_check_arity(rt, "describe", count, 1, 1)) return 0;
   ot_value value = rt->stack[first];
   if (!oti_kind(value, K_SYMBOL)) {
     oti_error(rt, "describe expects a symbol");

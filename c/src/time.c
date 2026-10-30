@@ -10,14 +10,9 @@
 #define JIFFIES_PER_SECOND 1000
 #endif
 
-static bool time_arity(ot_state* rt, size_t count) {
-  if (!count) return true;
-  return oti_error(rt, "time procedures take no arguments");
-}
-
 static ot_value time_current_jiffy(ot_state* rt, size_t first, size_t count) {
   (void)first;
-  if (!time_arity(rt, count)) return 0;
+  if (!oti_check_arity(rt, "current-jiffy", count, 0, 0)) return 0;
   struct timespec now;
   if (clock_gettime(CLOCK_MONOTONIC, &now)) {
     oti_error(rt, "cannot read clock");
@@ -35,13 +30,13 @@ static ot_value time_current_jiffy(ot_state* rt, size_t first, size_t count) {
 
 static ot_value time_jiffies_second(ot_state* rt, size_t first, size_t count) {
   (void)first;
-  if (!time_arity(rt, count)) return 0;
+  if (!oti_check_arity(rt, "jiffies-per-second", count, 0, 0)) return 0;
   return ot_int(JIFFIES_PER_SECOND);
 }
 
 static ot_value time_current_second(ot_state* rt, size_t first, size_t count) {
   (void)first;
-  if (!time_arity(rt, count)) return 0;
+  if (!oti_check_arity(rt, "current-second", count, 0, 0)) return 0;
   struct timespec now;
   if (clock_gettime(CLOCK_REALTIME, &now)) {
     oti_error(rt, "cannot read clock");

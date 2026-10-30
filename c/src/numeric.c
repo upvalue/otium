@@ -32,13 +32,13 @@ static ot_value numeric_bit_fold(ot_state* rt, unsigned id, size_t first, size_t
 }
 
 static ot_value numeric_bit_not(ot_state* rt, size_t first, size_t count) {
-  if (count != 1) return oti_fail(rt, "wrong number of arguments");
+  if (!oti_check_arity(rt, "bitwise-not", count, 1, 1)) return 0;
   if (!numeric_integers(rt, first, count)) return 0;
   return wrapped(~(uintptr_t)ot_to_int(rt->stack[first]));
 }
 
 static ot_value numeric_bit_shift(ot_state* rt, size_t first, size_t count) {
-  if (count != 2) return oti_fail(rt, "wrong number of arguments");
+  if (!oti_check_arity(rt, "bitwise-arithmetic-shift", count, 2, 2)) return 0;
   if (!numeric_integers(rt, first, count)) return 0;
   intptr_t n = ot_to_int(rt->stack[first]), shift = ot_to_int(rt->stack[first + 1]);
   const intptr_t width = sizeof(ot_value) * CHAR_BIT - 1;
@@ -59,7 +59,7 @@ static ot_value numeric_bit_shift(ot_state* rt, size_t first, size_t count) {
 
 /* min and max. */
 static ot_value numeric_extremum(ot_state* rt, unsigned id, size_t first, size_t count) {
-  if (!count) return oti_fail(rt, "extremum needs an argument");
+  if (!oti_check_arity(rt, id == B_MIN ? "min" : "max", count, 1, SIZE_MAX)) return 0;
   ot_value selected = rt->stack[first];
   double best;
   if (!oti_number(rt, selected, &best)) return 0;
@@ -87,16 +87,16 @@ static ot_value numeric_extremum(ot_state* rt, unsigned id, size_t first, size_t
 }
 
 /* Check the argument count and convert every argument to a double. */
-static bool numeric_args(ot_state* rt, size_t first, size_t count, size_t arity, double* a,
-                         double* b) {
-  if (count != arity) return oti_error(rt, "wrong number of arguments");
+static bool numeric_args(ot_state* rt, const char* who, size_t first, size_t count, size_t arity,
+                         double* a, double* b) {
+  if (!oti_check_arity(rt, who, count, arity, arity)) return false;
   if (!oti_number(rt, rt->stack[first], a)) return false;
   return count != 2 || oti_number(rt, rt->stack[first + 1], b);
 }
 
 static ot_value numeric_quotient(ot_state* rt, size_t first, size_t count) {
   double a, b;
-  if (!numeric_args(rt, first, count, 2, &a, &b)) return 0;
+  if (!numeric_args(rt, "quotient", first, count, 2, &a, &b)) return 0;
   ot_value n = rt->stack[first], d = rt->stack[first + 1];
   if (!ot_is_int(n) || !ot_is_int(d)) return oti_fail(rt, "expected integers");
   if (!ot_to_int(d)) return oti_fail(rt, "division by zero");
@@ -105,7 +105,7 @@ static ot_value numeric_quotient(ot_state* rt, size_t first, size_t count) {
 
 static ot_value numeric_abs(ot_state* rt, size_t first, size_t count) {
   double a;
-  if (!numeric_args(rt, first, count, 1, &a, NULL)) return 0;
+  if (!numeric_args(rt, "abs", first, count, 1, &a, NULL)) return 0;
   ot_value value = rt->stack[first];
   if (ot_is_int(value)) {
     intptr_t n = ot_to_int(value);
@@ -115,9 +115,10 @@ static ot_value numeric_abs(ot_state* rt, size_t first, size_t count) {
 }
 
 /* exact?, inexact?, finite?, infinite? and nan?. */
-static ot_value numeric_classify(ot_state* rt, unsigned id, size_t first, size_t count) {
+static ot_value numeric_classify(ot_state* rt, const char* who, unsigned id, size_t first,
+                                 size_t count) {
   double a;
-  if (!numeric_args(rt, first, count, 1, &a, NULL)) return 0;
+  if (!numeric_args(rt, who, first, count, 1, &a, NULL)) return 0;
   ot_value value = rt->stack[first];
   switch (id) {
     case B_EXACT_P: return ot_bool(ot_is_int(value));
@@ -130,7 +131,7 @@ static ot_value numeric_classify(ot_state* rt, unsigned id, size_t first, size_t
 
 static ot_value numeric_exact(ot_state* rt, size_t first, size_t count) {
   double a;
-  if (!numeric_args(rt, first, count, 1, &a, NULL)) return 0;
+  if (!numeric_args(rt, "exact", first, count, 1, &a, NULL)) return 0;
   ot_value value = rt->stack[first];
   if (ot_is_int(value)) return value;
   if (trunc(a) != a) return oti_fail(rt, "exact expects an integer-valued number");
@@ -139,15 +140,16 @@ static ot_value numeric_exact(ot_state* rt, size_t first, size_t count) {
 
 static ot_value numeric_inexact(ot_state* rt, size_t first, size_t count) {
   double a;
-  if (!numeric_args(rt, first, count, 1, &a, NULL)) return 0;
+  if (!numeric_args(rt, "inexact", first, count, 1, &a, NULL)) return 0;
   ot_value value = rt->stack[first];
   return ot_is_int(value) ? oti_float(rt, a) : value;
 }
 
 /* floor, ceiling, round and truncate. */
-static ot_value numeric_rounding(ot_state* rt, unsigned id, size_t first, size_t count) {
+static ot_value numeric_rounding(ot_state* rt, const char* who, unsigned id, size_t first,
+                                 size_t count) {
   double a;
-  if (!numeric_args(rt, first, count, 1, &a, NULL)) return 0;
+  if (!numeric_args(rt, who, first, count, 1, &a, NULL)) return 0;
   ot_value value = rt->stack[first];
   if (ot_is_int(value)) return value;
   double (*round_fn)(double) = id == B_FLOOR     ? floor
@@ -158,22 +160,23 @@ static ot_value numeric_rounding(ot_state* rt, unsigned id, size_t first, size_t
 }
 
 /* One-argument libm wrappers. */
-static ot_value numeric_libm(ot_state* rt, double (*fn)(double), size_t first, size_t count) {
+static ot_value numeric_libm(ot_state* rt, const char* who, double (*fn)(double), size_t first,
+                             size_t count) {
   double a;
-  if (!numeric_args(rt, first, count, 1, &a, NULL)) return 0;
+  if (!numeric_args(rt, who, first, count, 1, &a, NULL)) return 0;
   return oti_float(rt, fn(a));
 }
 
 static ot_value numeric_atan(ot_state* rt, size_t first, size_t count) {
   double a, b = 0;
-  if (count < 1 || count > 2) return oti_fail(rt, "wrong number of arguments");
-  if (!numeric_args(rt, first, count, count, &a, &b)) return 0;
+  if (!oti_check_arity(rt, "atan", count, 1, 2)) return 0;
+  if (!numeric_args(rt, "atan", first, count, count, &a, &b)) return 0;
   return oti_float(rt, count == 2 ? atan2(a, b) : atan(a));
 }
 
 static ot_value numeric_expt(ot_state* rt, size_t first, size_t count) {
   double a, b;
-  if (!numeric_args(rt, first, count, 2, &a, &b)) return 0;
+  if (!numeric_args(rt, "expt", first, count, 2, &a, &b)) return 0;
   ot_value value = rt->stack[first], power = rt->stack[first + 1];
   if (ot_is_int(value) && ot_is_int(power) && ot_to_int(power) >= 0) {
     uintptr_t base = (uintptr_t)ot_to_int(value), exponent = (uintptr_t)ot_to_int(power),
@@ -197,71 +200,71 @@ static ot_value numeric_max(ot_state* rt, size_t first, size_t count) {
 }
 
 static ot_value numeric_exact_p(ot_state* rt, size_t first, size_t count) {
-  return numeric_classify(rt, B_EXACT_P, first, count);
+  return numeric_classify(rt, "exact?", B_EXACT_P, first, count);
 }
 
 static ot_value numeric_inexact_p(ot_state* rt, size_t first, size_t count) {
-  return numeric_classify(rt, B_INEXACT_P, first, count);
+  return numeric_classify(rt, "inexact?", B_INEXACT_P, first, count);
 }
 
 static ot_value numeric_finite_p(ot_state* rt, size_t first, size_t count) {
-  return numeric_classify(rt, B_FINITE_P, first, count);
+  return numeric_classify(rt, "finite?", B_FINITE_P, first, count);
 }
 
 static ot_value numeric_infinite_p(ot_state* rt, size_t first, size_t count) {
-  return numeric_classify(rt, B_INFINITE_P, first, count);
+  return numeric_classify(rt, "infinite?", B_INFINITE_P, first, count);
 }
 
 static ot_value numeric_nan_p(ot_state* rt, size_t first, size_t count) {
-  return numeric_classify(rt, B_NAN_P, first, count);
+  return numeric_classify(rt, "nan?", B_NAN_P, first, count);
 }
 
 static ot_value numeric_floor(ot_state* rt, size_t first, size_t count) {
-  return numeric_rounding(rt, B_FLOOR, first, count);
+  return numeric_rounding(rt, "floor", B_FLOOR, first, count);
 }
 
 static ot_value numeric_ceiling(ot_state* rt, size_t first, size_t count) {
-  return numeric_rounding(rt, B_CEILING, first, count);
+  return numeric_rounding(rt, "ceiling", B_CEILING, first, count);
 }
 
 static ot_value numeric_round(ot_state* rt, size_t first, size_t count) {
-  return numeric_rounding(rt, B_ROUND, first, count);
+  return numeric_rounding(rt, "round", B_ROUND, first, count);
 }
 
 static ot_value numeric_truncate(ot_state* rt, size_t first, size_t count) {
-  return numeric_rounding(rt, B_TRUNCATE, first, count);
+  return numeric_rounding(rt, "truncate", B_TRUNCATE, first, count);
 }
 
 static ot_value numeric_sqrt(ot_state* rt, size_t first, size_t count) {
-  return numeric_libm(rt, sqrt, first, count);
+  return numeric_libm(rt, "sqrt", sqrt, first, count);
 }
 
 static ot_value numeric_exp(ot_state* rt, size_t first, size_t count) {
-  return numeric_libm(rt, exp, first, count);
+  return numeric_libm(rt, "exp", exp, first, count);
 }
 
 static ot_value numeric_log(ot_state* rt, size_t first, size_t count) {
-  return numeric_libm(rt, log, first, count);
+  return numeric_libm(rt, "log", log, first, count);
 }
 
 static ot_value numeric_sin(ot_state* rt, size_t first, size_t count) {
-  return numeric_libm(rt, sin, first, count);
+  return numeric_libm(rt, "sin", sin, first, count);
 }
 
 static ot_value numeric_cos(ot_state* rt, size_t first, size_t count) {
-  return numeric_libm(rt, cos, first, count);
+  return numeric_libm(rt, "cos", cos, first, count);
 }
 
 static ot_value numeric_tan(ot_state* rt, size_t first, size_t count) {
-  return numeric_libm(rt, tan, first, count);
+  return numeric_libm(rt, "tan", tan, first, count);
 }
 
 static ot_value numeric_asin(ot_state* rt, size_t first, size_t count) {
-  return numeric_libm(rt, asin, first, count);
+  return numeric_libm(rt, "asin", asin, first, count);
 }
 
 static ot_value numeric_acos(ot_state* rt, size_t first, size_t count) {
-  return numeric_libm(rt, acos, first, count);
+  return numeric_libm(rt, "acos", acos, first, count);
 }
 
 static ot_value numeric_bit_and(ot_state* rt, size_t first, size_t count) {

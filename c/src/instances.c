@@ -239,7 +239,7 @@ static bool instance_property_check(ot_state* rt, ot_value* live, bool same_clas
 
 static ot_value instance_class_mount(ot_state* rt, size_t first, size_t count) {
   if (!oti_classes_init(rt)) return 0;
-  if (count != 1) return oti_fail(rt, "wrong number of property operation arguments");
+  if (!oti_check_arity(rt, "class-mount", count, 1, 1)) return 0;
   ot_value live[] = {rt->stack[first], rt->stack[first], OT_NIL};
   oti_roots roots;
   oti_roots_push(&rt->heap, &roots, live, 3);
@@ -264,7 +264,7 @@ static ot_value instance_class_mount(ot_state* rt, size_t first, size_t count) {
 
 static ot_value instance_class_update(ot_state* rt, size_t first, size_t count) {
   if (!oti_classes_init(rt)) return 0;
-  if (count != 2) return oti_fail(rt, "wrong number of property operation arguments");
+  if (!oti_check_arity(rt, "class-update-properties!", count, 2, 2)) return 0;
   ot_value live[] = {rt->stack[first], rt->stack[first + 1]};
   oti_roots roots;
   oti_roots_push(&rt->heap, &roots, live, 2);

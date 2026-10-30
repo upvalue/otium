@@ -88,29 +88,29 @@ static ot_value record_new(ot_state* rt, size_t first, size_t count) {
 }
 
 static ot_value record_record_p(ot_state* rt, size_t first, size_t count) {
-  if (count != 1) return oti_fail(rt, "wrong number of record arguments");
+  if (!oti_check_arity(rt, "record?", count, 1, 1)) return 0;
   return oti_kind(rt->stack[first], K_RECORD) ? OT_TRUE : OT_FALSE;
 }
 
 static ot_value record_type_p(ot_state* rt, size_t first, size_t count) {
-  if (count != 1) return oti_fail(rt, "wrong number of record arguments");
+  if (!oti_check_arity(rt, "record-type?", count, 1, 1)) return 0;
   return oti_kind(rt->stack[first], K_RECORD_TYPE) ? OT_TRUE : OT_FALSE;
 }
 
 /* Check the argument count and that the first argument is a record. */
-static bool record_args(ot_state* rt, size_t first, size_t count, size_t wanted) {
-  if (count != wanted) return oti_error(rt, "wrong number of record arguments");
+static bool record_args(ot_state* rt, const char* who, size_t first, size_t count, size_t wanted) {
+  if (!oti_check_arity(rt, who, count, wanted, wanted)) return false;
   if (!oti_kind(rt->stack[first], K_RECORD)) return oti_error(rt, "expected record instance");
   return true;
 }
 
 static ot_value record_type(ot_state* rt, size_t first, size_t count) {
-  if (!record_args(rt, first, count, 1)) return 0;
+  if (!record_args(rt, "record-type", first, count, 1)) return 0;
   return oti_as_record(rt->stack[first])->type;
 }
 
 static ot_value record_ref(ot_state* rt, size_t first, size_t count) {
-  if (!record_args(rt, first, count, 2)) return 0;
+  if (!record_args(rt, "record-ref", first, count, 2)) return 0;
   ot_value record = rt->stack[first];
   size_t index = field_index(oti_as_record(record)->type, rt->stack[first + 1]);
   if (index == SIZE_MAX) return oti_fail(rt, "unknown record field");
@@ -118,7 +118,7 @@ static ot_value record_ref(ot_state* rt, size_t first, size_t count) {
 }
 
 static ot_value record_set(ot_state* rt, size_t first, size_t count) {
-  if (!record_args(rt, first, count, 3)) return 0;
+  if (!record_args(rt, "record-set!", first, count, 3)) return 0;
   ot_value record = rt->stack[first], type = oti_as_record(record)->type;
   size_t index = field_index(type, rt->stack[first + 1]);
   if (index == SIZE_MAX) return oti_fail(rt, "unknown record field");
@@ -129,8 +129,9 @@ static ot_value record_set(ot_state* rt, size_t first, size_t count) {
 /* The record at first, when it has the type at first + 1, checked for the
  * accessor whose cell is at first + 3, and the field index at first + 2.
  * The accessors defrecord defines call these. */
-static bool accessor_args(ot_state* rt, size_t first, size_t count, size_t wanted, size_t* index) {
-  if (count != wanted) return oti_error(rt, "wrong number of record arguments");
+static bool accessor_args(ot_state* rt, const char* who, size_t first, size_t count, size_t wanted,
+                          size_t* index) {
+  if (!oti_check_arity(rt, who, count, wanted, wanted)) return false;
   ot_value record = rt->stack[first], type = rt->stack[first + 1], at = rt->stack[first + 2],
            cell = rt->stack[first + 3];
   if (!oti_kind(type, K_RECORD_TYPE) || !ot_is_int(at) || ot_to_int(at) < 0 ||
@@ -151,20 +152,20 @@ static bool accessor_args(ot_state* rt, size_t first, size_t count, size_t wante
 
 static ot_value record_get_at(ot_state* rt, size_t first, size_t count) {
   size_t index;
-  if (!accessor_args(rt, first, count, 4, &index)) return 0;
+  if (!accessor_args(rt, "%record-get", first, count, 4, &index)) return 0;
   return oti_as_record(rt->stack[first])->values[index];
 }
 
 static ot_value record_set_at(ot_state* rt, size_t first, size_t count) {
   size_t index;
-  if (!accessor_args(rt, first, count, 5, &index)) return 0;
+  if (!accessor_args(rt, "%record-set!", first, count, 5, &index)) return 0;
   return oti_as_record(rt->stack[first])->values[index] = rt->stack[first + 4];
 }
 
 /* Define the global cell at first as a record accessor, which only another
  * call of this can change. */
 static ot_value record_define_accessor(ot_state* rt, size_t first, size_t count) {
-  if (count != 2) return oti_fail(rt, "wrong number of arguments");
+  if (!oti_check_arity(rt, "%define-accessor!", count, 2, 2)) return 0;
   ot_value cell = rt->stack[first];
   if (!ot_is_int(cell) || ot_to_int(cell) < 0 || (size_t)ot_to_int(cell) >= rt->global_count)
     return oti_fail(rt, "expected a global cell number");

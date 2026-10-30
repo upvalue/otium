@@ -138,13 +138,13 @@ static ot_value string_lt(ot_state* rt, size_t first, size_t count) {
 }
 
 /* The single argument of a one-argument builtin, or 0 after recording an error. */
-static ot_value string_argument(ot_state* rt, size_t first, size_t count) {
-  if (count != 1) return oti_fail(rt, "wrong number of arguments");
+static ot_value string_argument(ot_state* rt, const char* who, size_t first, size_t count) {
+  if (!oti_check_arity(rt, who, count, 1, 1)) return 0;
   return rt->stack[first];
 }
 
 static ot_value string_buffer_string(ot_state* rt, size_t first, size_t count) {
-  ot_value value = string_argument(rt, first, count);
+  ot_value value = string_argument(rt, "buffer->string", first, count);
   if (!value) return 0;
   if (!oti_kind(value, K_BUFFER)) return oti_fail(rt, "expected buffer");
   size_t n = oti_as_buffer(value)->length;
@@ -166,7 +166,7 @@ static const char* string_name_text(ot_state* rt, ot_value value, size_t* n) {
 }
 
 static ot_value string_name(ot_state* rt, size_t first, size_t count) {
-  ot_value value = string_argument(rt, first, count);
+  ot_value value = string_argument(rt, "name", first, count);
   if (!value) return 0;
   size_t n;
   const char* bytes = string_name_text(rt, value, &n);
@@ -174,7 +174,7 @@ static ot_value string_name(ot_state* rt, size_t first, size_t count) {
 }
 
 static ot_value string_symbol(ot_state* rt, size_t first, size_t count) {
-  ot_value value = string_argument(rt, first, count);
+  ot_value value = string_argument(rt, "symbol", first, count);
   if (!value) return 0;
   size_t n;
   const char* bytes = string_name_text(rt, value, &n);
@@ -183,7 +183,7 @@ static ot_value string_symbol(ot_state* rt, size_t first, size_t count) {
 }
 
 static ot_value string_to_list(ot_state* rt, size_t first, size_t count) {
-  ot_value value = string_argument(rt, first, count);
+  ot_value value = string_argument(rt, "string->list", first, count);
   if (!value) return 0;
   if (!oti_kind(value, K_STRING)) return oti_fail(rt, "expected string");
   ot_value roots[3] = {value, OT_EMPTY, OT_EMPTY};
@@ -212,7 +212,7 @@ static ot_value string_to_list(ot_state* rt, size_t first, size_t count) {
 }
 
 static ot_value string_to_number(ot_state* rt, size_t first, size_t count) {
-  ot_value value = string_argument(rt, first, count);
+  ot_value value = string_argument(rt, "string->number", first, count);
   if (!value) return 0;
   if (!oti_kind(value, K_STRING)) return oti_fail(rt, "expected string");
   size_t n;
@@ -241,7 +241,7 @@ static ot_value string_to_number(ot_state* rt, size_t first, size_t count) {
 }
 
 static ot_value string_integer_char(ot_state* rt, size_t first, size_t count) {
-  ot_value value = string_argument(rt, first, count);
+  ot_value value = string_argument(rt, "integer->char", first, count);
   if (!value) return 0;
   if (!ot_is_int(value)) return oti_fail(rt, "expected integer code point");
   intptr_t cp = ot_to_int(value);
@@ -251,8 +251,9 @@ static ot_value string_integer_char(ot_state* rt, size_t first, size_t count) {
 }
 
 /* The code point of the single character argument. */
-static bool string_char_argument(ot_state* rt, size_t first, size_t count, uint32_t* cp) {
-  ot_value value = string_argument(rt, first, count);
+static bool string_char_argument(ot_state* rt, const char* who, size_t first, size_t count,
+                                 uint32_t* cp) {
+  ot_value value = string_argument(rt, who, first, count);
   if (!value) return false;
   if ((value & 255) != TAG_CHAR) {
     oti_fail(rt, "expected character");
@@ -264,39 +265,39 @@ static bool string_char_argument(ot_state* rt, size_t first, size_t count, uint3
 
 static ot_value string_char_integer(ot_state* rt, size_t first, size_t count) {
   uint32_t cp;
-  if (!string_char_argument(rt, first, count, &cp)) return 0;
+  if (!string_char_argument(rt, "char->integer", first, count, &cp)) return 0;
   return ot_int(cp);
 }
 
 static ot_value string_char_upcase(ot_state* rt, size_t first, size_t count) {
   uint32_t cp;
-  if (!string_char_argument(rt, first, count, &cp)) return 0;
+  if (!string_char_argument(rt, "char-upcase", first, count, &cp)) return 0;
   if (cp >= 'a' && cp <= 'z') cp -= 32;
   return ((ot_value)cp << 8) | TAG_CHAR;
 }
 
 static ot_value string_char_downcase(ot_state* rt, size_t first, size_t count) {
   uint32_t cp;
-  if (!string_char_argument(rt, first, count, &cp)) return 0;
+  if (!string_char_argument(rt, "char-downcase", first, count, &cp)) return 0;
   if (cp >= 'A' && cp <= 'Z') cp += 32;
   return ((ot_value)cp << 8) | TAG_CHAR;
 }
 
 static ot_value string_char_whitespace(ot_state* rt, size_t first, size_t count) {
   uint32_t cp;
-  if (!string_char_argument(rt, first, count, &cp)) return 0;
+  if (!string_char_argument(rt, "char-whitespace?", first, count, &cp)) return 0;
   return cp == ' ' || (cp >= 9 && cp <= 13) ? OT_TRUE : OT_FALSE;
 }
 
 static ot_value string_char_alphabetic(ot_state* rt, size_t first, size_t count) {
   uint32_t cp;
-  if (!string_char_argument(rt, first, count, &cp)) return 0;
+  if (!string_char_argument(rt, "char-alphabetic?", first, count, &cp)) return 0;
   return (cp >= 'a' && cp <= 'z') || (cp >= 'A' && cp <= 'Z') ? OT_TRUE : OT_FALSE;
 }
 
 static ot_value string_char_numeric(ot_state* rt, size_t first, size_t count) {
   uint32_t cp;
-  if (!string_char_argument(rt, first, count, &cp)) return 0;
+  if (!string_char_argument(rt, "char-numeric?", first, count, &cp)) return 0;
   return cp >= '0' && cp <= '9' ? OT_TRUE : OT_FALSE;
 }
 

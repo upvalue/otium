@@ -163,7 +163,7 @@ ot_value oti_raise(ot_state* rt, size_t first, size_t count) {
 }
 
 static ot_value condition_define(ot_state* rt, size_t first, size_t count) {
-  if (count != 2) return oti_fail(rt, "wrong number of condition arguments");
+  if (!oti_check_arity(rt, "define-condition", count, 2, 2)) return 0;
   ot_value values[] = {OT_NIL, OT_NIL};
   oti_roots roots;
   oti_roots_push(&rt->heap, &roots, values, 2);
@@ -193,7 +193,7 @@ done:
 }
 
 static ot_value condition_of_type_p(ot_state* rt, size_t first, size_t count) {
-  if (count != 2) return oti_fail(rt, "wrong number of condition arguments");
+  if (!oti_check_arity(rt, "condition-of-type?", count, 2, 2)) return 0;
   ot_value values[] = {OT_NIL, OT_NIL};
   oti_roots roots;
   oti_roots_push(&rt->heap, &roots, values, 2);

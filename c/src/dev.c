@@ -10,12 +10,6 @@
 #include <time.h>
 #endif
 
-static bool dev_arity(ot_state* rt, size_t count, size_t expected) {
-  if (count == expected) return true;
-  return oti_errorf(rt, "development primitive expects %zu argument%s", expected,
-                    expected == 1 ? "" : "s");
-}
-
 /* A string argument as a C string, or NULL after recording an error. */
 static const char* dev_path(ot_state* rt, ot_value v) {
   if (!oti_kind(v, K_STRING) || memchr(oti_bytes_data(v), 0, oti_bytes_length(v))) {
@@ -29,8 +23,9 @@ static ot_value dev_string(ot_state* rt, const char* text) {
   return oti_text(rt, K_STRING, text, strlen(text));
 }
 
-static ot_value dev_integer(ot_state* rt, size_t first, size_t count, intptr_t* out) {
-  if (!dev_arity(rt, count, 1)) return 0;
+static ot_value dev_integer(ot_state* rt, const char* who, size_t first, size_t count,
+                            intptr_t* out) {
+  if (!oti_check_arity(rt, who, count, 1, 1)) return 0;
   if (!ot_is_int(rt->stack[first])) {
     oti_error(rt, "expected an integer");
     return 0;
@@ -40,21 +35,21 @@ static ot_value dev_integer(ot_state* rt, size_t first, size_t count, intptr_t* 
 }
 
 static ot_value dev_open(ot_state* rt, size_t first, size_t count) {
-  if (!dev_arity(rt, count, 1)) return 0;
+  if (!oti_check_arity(rt, "otium.dev/%open", count, 1, 1)) return 0;
   const char* path = dev_path(rt, rt->stack[first]);
   return path ? ot_bool(ot_dev_open(path) == 0) : 0;
 }
 
 static ot_value dev_close(ot_state* rt, size_t first, size_t count) {
   (void)first;
-  if (!dev_arity(rt, count, 0)) return 0;
+  if (!oti_check_arity(rt, "otium.dev/%close", count, 0, 0)) return 0;
   ot_dev_close();
   return OT_NIL;
 }
 
 static ot_value dev_poll(ot_state* rt, size_t first, size_t count) {
   intptr_t timeout;
-  if (!dev_integer(rt, first, count, &timeout)) return 0;
+  if (!dev_integer(rt, "otium.dev/%transport-poll", first, count, &timeout)) return 0;
   if (timeout < -1 || timeout > INT32_MAX) {
     oti_error(rt, "poll timeout out of range");
     return 0;
@@ -64,7 +59,7 @@ static ot_value dev_poll(ot_state* rt, size_t first, size_t count) {
 
 static ot_value dev_fds(ot_state* rt, size_t first, size_t count) {
   (void)first;
-  if (!dev_arity(rt, count, 0)) return 0;
+  if (!oti_check_arity(rt, "otium.dev/%transport-fds", count, 0, 0)) return 0;
   size_t n = ot_dev_fds(NULL, 0), base = rt->sp;
   int* pairs = n ? malloc(n * sizeof(int)) : NULL;
   if (n && !pairs) return oti_fail(rt, "out of host memory");
@@ -83,19 +78,19 @@ static ot_value dev_fds(ot_state* rt, size_t first, size_t count) {
 
 static ot_value dev_next(ot_state* rt, size_t first, size_t count) {
   (void)first;
-  if (!dev_arity(rt, count, 0)) return 0;
+  if (!oti_check_arity(rt, "otium.dev/%next", count, 0, 0)) return 0;
   const char* text = ot_dev_next();
   return text ? dev_string(rt, text) : OT_FALSE;
 }
 
 static ot_value dev_client(ot_state* rt, size_t first, size_t count) {
   (void)first;
-  if (!dev_arity(rt, count, 0)) return 0;
+  if (!oti_check_arity(rt, "otium.dev/%client", count, 0, 0)) return 0;
   return ot_int(ot_dev_client());
 }
 
 static ot_value dev_send(ot_state* rt, size_t first, size_t count) {
-  if (!dev_arity(rt, count, 2)) return 0;
+  if (!oti_check_arity(rt, "otium.dev/%send", count, 2, 2)) return 0;
   if (!ot_is_int(rt->stack[first])) {
     oti_error(rt, "expected a client id");
     return 0;
@@ -108,48 +103,48 @@ static ot_value dev_send(ot_state* rt, size_t first, size_t count) {
 
 static ot_value dev_clock(ot_state* rt, size_t first, size_t count) {
   (void)first;
-  if (!dev_arity(rt, count, 0)) return 0;
+  if (!oti_check_arity(rt, "otium.dev/%clock", count, 0, 0)) return 0;
   return ot_int((intptr_t)ot_dev_clock());
 }
 
 static ot_value dev_now(ot_state* rt, size_t first, size_t count) {
   (void)first;
-  if (!dev_arity(rt, count, 0)) return 0;
+  if (!oti_check_arity(rt, "otium.dev/%now", count, 0, 0)) return 0;
   return ot_int((intptr_t)ot_dev_now());
 }
 
 static ot_value dev_pid(ot_state* rt, size_t first, size_t count) {
   (void)first;
-  if (!dev_arity(rt, count, 0)) return 0;
+  if (!oti_check_arity(rt, "otium.dev/%pid", count, 0, 0)) return 0;
   return ot_int(ot_dev_pid());
 }
 
 static ot_value dev_uid(ot_state* rt, size_t first, size_t count) {
   (void)first;
-  if (!dev_arity(rt, count, 0)) return 0;
+  if (!oti_check_arity(rt, "otium.dev/%uid", count, 0, 0)) return 0;
   return ot_int(ot_dev_uid());
 }
 
 static ot_value dev_cwd(ot_state* rt, size_t first, size_t count) {
   (void)first;
-  if (!dev_arity(rt, count, 0)) return 0;
+  if (!oti_check_arity(rt, "otium.dev/%cwd", count, 0, 0)) return 0;
   return dev_string(rt, ot_dev_cwd());
 }
 
 static ot_value dev_private_directory(ot_state* rt, size_t first, size_t count) {
-  if (!dev_arity(rt, count, 1)) return 0;
+  if (!oti_check_arity(rt, "otium.dev/%private-directory!", count, 1, 1)) return 0;
   const char* path = dev_path(rt, rt->stack[first]);
   return path ? ot_bool(ot_dev_private_directory(path)) : 0;
 }
 
 static ot_value dev_realpath(ot_state* rt, size_t first, size_t count) {
-  if (!dev_arity(rt, count, 1)) return 0;
+  if (!oti_check_arity(rt, "otium.dev/%realpath", count, 1, 1)) return 0;
   const char* path = dev_path(rt, rt->stack[first]);
   return path ? dev_string(rt, ot_dev_realpath(path)) : 0;
 }
 
 static ot_value dev_mtime(ot_state* rt, size_t first, size_t count) {
-  if (!dev_arity(rt, count, 1)) return 0;
+  if (!oti_check_arity(rt, "otium.dev/%mtime", count, 1, 1)) return 0;
   const char* path = dev_path(rt, rt->stack[first]);
   if (!path) return 0;
   int64_t mtime = ot_dev_mtime(path);
@@ -168,7 +163,7 @@ static bool dev_push(ot_state* rt, ot_value* list, ot_value* value) {
 
 static ot_value dev_namespace_names(ot_state* rt, size_t first, size_t count) {
   (void)first;
-  if (!dev_arity(rt, count, 0)) return 0;
+  if (!oti_check_arity(rt, "otium.dev/%namespace-names", count, 0, 0)) return 0;
   ot_value v[] = {OT_EMPTY, OT_NIL};
   oti_roots roots;
   oti_roots_push(&rt->heap, &roots, v, 2);
@@ -195,7 +190,7 @@ static ot_value arity_mask(ot_state* rt, ot_value value) {
 /* Each binding defined in a namespace as (name kind public? doc arity-mask),
  * where arity-mask is #f for anything but an Otium function. */
 static ot_value dev_namespace_bindings(ot_state* rt, size_t first, size_t count) {
-  if (!dev_arity(rt, count, 1)) return 0;
+  if (!oti_check_arity(rt, "otium.dev/%namespace-bindings", count, 1, 1)) return 0;
   ot_value name = rt->stack[first];
   if (!oti_kind(name, K_SYMBOL)) {
     oti_error(rt, "bindings: expected a namespace symbol");
@@ -245,7 +240,7 @@ static ot_value dev_namespace_bindings(ot_state* rt, size_t first, size_t count)
 /* Evaluate a datum in the named namespace, creating it if needed. A ns form
  * inside it changes the namespace only for that evaluation. */
 static ot_value dev_eval_in(ot_state* rt, size_t first, size_t count) {
-  if (!dev_arity(rt, count, 2)) return 0;
+  if (!oti_check_arity(rt, "otium.dev/%eval-in", count, 2, 2)) return 0;
   if (!oti_kind(rt->stack[first], K_SYMBOL)) {
     oti_error(rt, "expected a namespace symbol");
     return 0;
@@ -264,7 +259,7 @@ static ot_value dev_eval_in(ot_state* rt, size_t first, size_t count) {
 /* Compile while in C, then let Otium call the resulting thunk so eval can
  * park. Namespace/import/macro declarations finish during preparation. */
 static ot_value dev_prepare_in(ot_state* rt, size_t first, size_t count) {
-  if (!dev_arity(rt, count, 2)) return 0;
+  if (!oti_check_arity(rt, "otium.dev/%prepare-in", count, 2, 2)) return 0;
   if (!oti_kind(rt->stack[first], K_SYMBOL)) return oti_fail(rt, "expected a namespace symbol");
   size_t length;
   const char* name = oti_text_bytes(rt->stack[first], &length);
@@ -283,7 +278,7 @@ static ot_value dev_prepare_in(ot_state* rt, size_t first, size_t count) {
  * server sends output printed outside requests to clients this way, since
  * current-output-port's cell in otium.core can't be redefined. */
 static ot_value dev_set_param_default(ot_state* rt, size_t first, size_t count) {
-  if (!dev_arity(rt, count, 2)) return 0;
+  if (!oti_check_arity(rt, "otium.dev/%set-param-default!", count, 2, 2)) return 0;
   if (!oti_kind(rt->stack[first], K_PARAM)) {
     oti_error(rt, "expected a param");
     return 0;

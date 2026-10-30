@@ -188,21 +188,16 @@ static ot_value table_table(ot_state* rt, size_t first, size_t count) {
   return table;
 }
 
-static bool table_arity(ot_state* rt, size_t count, size_t min, size_t max) {
-  if (count >= min && count <= max) return true;
-  return oti_error(rt, "wrong number of collection arguments");
-}
-
 /* Checks the argument count, then that the first argument is a table. */
 static bool table_arguments(ot_state* rt, const char* who, size_t first, size_t count, size_t min,
                             size_t max) {
-  if (!table_arity(rt, count, min, max)) return false;
+  if (!oti_check_arity(rt, who, count, min, max)) return false;
   if (oti_kind(rt->stack[first], K_TABLE)) return true;
   return oti_type_error(rt, who, "table", rt->stack[first]);
 }
 
 static ot_value table_table_p(ot_state* rt, size_t first, size_t count) {
-  if (!table_arity(rt, count, 1, 1)) return 0;
+  if (!oti_check_arity(rt, "table?", count, 1, 1)) return 0;
   return oti_kind(rt->stack[first], K_TABLE) ? OT_TRUE : OT_FALSE;
 }
 
@@ -218,7 +213,7 @@ ot_value oti_table_get_builtin(ot_state* rt, size_t first, size_t count) {
 }
 
 ot_value oti_table_put_builtin(ot_state* rt, size_t first, size_t count) {
-  if (!table_arity(rt, count, 3, SIZE_MAX)) return 0;
+  if (!oti_check_arity(rt, "put!", count, 3, SIZE_MAX)) return 0;
   if (!(count % 2)) return oti_fail(rt, "wrong number of collection arguments");
   if (!oti_kind(rt->stack[first], K_TABLE)) {
     oti_type_error(rt, "put!", "table", rt->stack[first]);

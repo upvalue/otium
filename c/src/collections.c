@@ -180,31 +180,26 @@ static bool collection_on_table(ot_state* rt, size_t first, size_t count) {
   return count && oti_kind(rt->stack[first], K_TABLE);
 }
 
-static bool collection_arity(ot_state* rt, size_t count, size_t min, size_t max) {
-  if (count >= min && count <= max) return true;
-  return oti_error(rt, "wrong number of collection arguments");
-}
-
 static ot_value collection_array_p(ot_state* rt, size_t first, size_t count) {
-  if (!collection_arity(rt, count, 1, 1)) return 0;
+  if (!oti_check_arity(rt, "array?", count, 1, 1)) return 0;
   return oti_kind(rt->stack[first], K_ARRAY) ? OT_TRUE : OT_FALSE;
 }
 
 static ot_value collection_equal(ot_state* rt, size_t first, size_t count) {
-  if (!collection_arity(rt, count, 2, 2)) return 0;
+  if (!oti_check_arity(rt, "equal?", count, 2, 2)) return 0;
   return oti_equal(rt, rt->stack[first], rt->stack[first + 1], false);
 }
 
 static ot_value collection_get(ot_state* rt, size_t first, size_t count) {
   if (collection_on_table(rt, first, count)) return oti_table_get_builtin(rt, first, count);
-  if (!collection_arity(rt, count, 2, 3)) return 0;
+  if (!oti_check_arity(rt, "get", count, 2, 3)) return 0;
   return get(rt, rt->stack[first], rt->stack[first + 1],
              count == 3 ? rt->stack[first + 2] : OT_NIL);
 }
 
 static ot_value collection_length(ot_state* rt, size_t first, size_t count) {
   if (collection_on_table(rt, first, count)) return oti_table_length_builtin(rt, first, count);
-  if (!collection_arity(rt, count, 1, 1)) return 0;
+  if (!oti_check_arity(rt, "length", count, 1, 1)) return 0;
   ot_value a = rt->stack[first];
   if (a == OT_NIL || a == OT_EMPTY) return ot_int(0);
   if (oti_kind(a, K_BUFFER)) return ot_int((intptr_t)oti_as_buffer(a)->characters);
@@ -233,7 +228,7 @@ static ot_value collection_length(ot_state* rt, size_t first, size_t count) {
 
 static ot_value collection_put_mut(ot_state* rt, size_t first, size_t count) {
   if (collection_on_table(rt, first, count)) return oti_table_put_builtin(rt, first, count);
-  if (!collection_arity(rt, count, 3, SIZE_MAX)) return 0;
+  if (!oti_check_arity(rt, "put!", count, 3, SIZE_MAX)) return 0;
   if (!(count % 2)) return oti_fail(rt, "wrong number of collection arguments");
   ot_value a = rt->stack[first];
   if (oti_kind(a, K_BYTEVECTOR)) {
@@ -260,7 +255,7 @@ static ot_value collection_put_mut(ot_state* rt, size_t first, size_t count) {
 
 static ot_value collection_push(ot_state* rt, size_t first, size_t count) {
   if (collection_on_table(rt, first, count)) return oti_table_push_builtin(rt, first, count);
-  if (!collection_arity(rt, count, 1, SIZE_MAX)) return 0;
+  if (!oti_check_arity(rt, "push!", count, 1, SIZE_MAX)) return 0;
   ot_value a = rt->stack[first];
   if (!oti_kind(a, K_ARRAY)) return oti_fail(rt, "expected an array");
   size_t length = oti_as_array(a)->length;
@@ -273,7 +268,7 @@ static ot_value collection_push(ot_state* rt, size_t first, size_t count) {
 
 static ot_value collection_pop(ot_state* rt, size_t first, size_t count) {
   if (collection_on_table(rt, first, count)) return oti_table_pop_builtin(rt, first, count);
-  if (!collection_arity(rt, count, 1, 1)) return 0;
+  if (!oti_check_arity(rt, "pop!", count, 1, 1)) return 0;
   ot_value a = rt->stack[first];
   if (!oti_kind(a, K_ARRAY)) return oti_fail(rt, "expected an array");
   if (!oti_as_array(a)->length) return OT_NIL;
@@ -285,7 +280,7 @@ static ot_value collection_pop(ot_state* rt, size_t first, size_t count) {
 
 static ot_value collection_copy(ot_state* rt, size_t first, size_t count) {
   if (collection_on_table(rt, first, count)) return oti_table_copy_builtin(rt, first, count);
-  if (!collection_arity(rt, count, 1, 1)) return 0;
+  if (!oti_check_arity(rt, "copy", count, 1, 1)) return 0;
   ot_value a = rt->stack[first];
   if (oti_kind(a, K_INSTANCE)) return oti_instance_copy(rt, a);
   if (oti_kind(a, K_RECORD)) return oti_record_copy(rt, a);

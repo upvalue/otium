@@ -62,7 +62,6 @@ TEST(restarts_transfer_and_introspect) {
 
 TEST(failures_leave_no_restarts) {
   ot_state* rt = new_restart_runtime();
-  const char* arguments = "wrong number of restart arguments";
 
   const struct {
     const char* source;
@@ -72,8 +71,8 @@ TEST(failures_leave_no_restarts) {
              {"(find-restart 42)", "restart name must be a symbol, keyword, string or restart"},
              {"(restart-name 1)", "expected restart"},
              {"(restart-description 1)", "expected restart"},
-             {"(compute-restarts 1)", arguments},
-             {"(invoke-restart)", arguments},
+             {"(compute-restarts 1)", "wrong number of arguments to `compute-restarts`"},
+             {"(invoke-restart)", "wrong number of arguments to `invoke-restart`"},
              {"(invoke-restart 'missing)", "no active restart"},
              {"(restart-case (error :bad) (give () 1))", ":bad"}};
 

@@ -7,11 +7,6 @@
  * produces. All but %native-install work in the VM too, which runs the
  * compiler to build boot files. */
 
-static ot_value codegen_arity(ot_state* rt, size_t count, size_t low, size_t high) {
-  if (count < low || count > high) return oti_fail(rt, "wrong number of arguments");
-  return OT_TRUE;
-}
-
 static bool cell_arg(ot_state* rt, ot_value v, uint32_t* cell) {
   if (!ot_is_int(v) || ot_to_int(v) < 0 || (size_t)ot_to_int(v) >= rt->global_count)
     return oti_error(rt, "expected a global cell number");
@@ -20,7 +15,7 @@ static bool cell_arg(ot_state* rt, ot_value v, uint32_t* cell) {
 }
 
 static ot_value codegen_install(ot_state* rt, size_t first, size_t count) {
-  if (!codegen_arity(rt, count, 1, 1)) return 0;
+  if (!oti_check_arity(rt, "%native-install", count, 1, 1)) return 0;
 #ifdef OTIUM_NATIVE
   if (rt->native_mode) return oti_native_install(rt, first);
 #else
@@ -32,7 +27,7 @@ static ot_value codegen_install(ot_state* rt, size_t first, size_t count) {
 /* The cell a global name resolves to here, created in the current namespace
  * when nothing else matches, as compiler.c resolves names. */
 static ot_value codegen_cell(ot_state* rt, size_t first, size_t count) {
-  if (!codegen_arity(rt, count, 1, 1)) return 0;
+  if (!oti_check_arity(rt, "%native-cell", count, 1, 1)) return 0;
   ot_value name = rt->stack[first];
   if (!oti_kind(name, K_SYMBOL)) return oti_fail(rt, "%native-cell expects a symbol");
   size_t length;
@@ -46,7 +41,9 @@ static ot_value codegen_cell(ot_state* rt, size_t first, size_t count) {
  * Other namespaces' builtins can share a core name (otium.ffi's null?). */
 static ot_value codegen_cell_builtin(ot_state* rt, size_t first, size_t count) {
   uint32_t cell = 0;
-  if (!codegen_arity(rt, count, 1, 1) || !cell_arg(rt, rt->stack[first], &cell)) return 0;
+  if (!oti_check_arity(rt, "%native-cell-builtin", count, 1, 1) ||
+      !cell_arg(rt, rt->stack[first], &cell))
+    return 0;
   if (rt->global_info[cell].space != 0) return OT_FALSE;
   ot_value v = oti_global_value(rt, cell);
   if ((v & 255) != TAG_BUILTIN) return OT_FALSE;
@@ -59,7 +56,9 @@ static ot_value codegen_cell_builtin(ot_state* rt, size_t first, size_t count) {
 /* (namespace . name) of a cell, as strings, for code written to files. */
 static ot_value codegen_cell_name(ot_state* rt, size_t first, size_t count) {
   uint32_t cell = 0;
-  if (!codegen_arity(rt, count, 1, 1) || !cell_arg(rt, rt->stack[first], &cell)) return 0;
+  if (!oti_check_arity(rt, "%native-cell-name", count, 1, 1) ||
+      !cell_arg(rt, rt->stack[first], &cell))
+    return 0;
   const oti_global_info* info = &rt->global_info[cell];
   ot_value live[] = {OT_NIL, OT_NIL};
   oti_roots roots;
@@ -74,19 +73,19 @@ static ot_value codegen_cell_name(ot_state* rt, size_t first, size_t count) {
 
 static ot_value codegen_namespace(ot_state* rt, size_t first, size_t count) {
   (void)first;
-  if (!codegen_arity(rt, count, 0, 0)) return 0;
+  if (!oti_check_arity(rt, "%native-namespace", count, 0, 0)) return 0;
   return ot_int((intptr_t)rt->current_namespace);
 }
 
 static ot_value codegen_native_p(ot_state* rt, size_t first, size_t count) {
   (void)first;
-  if (!codegen_arity(rt, count, 0, 0)) return 0;
+  if (!oti_check_arity(rt, "%native?", count, 0, 0)) return 0;
   return ot_bool(rt->native_mode);
 }
 
 /* The source offset a located list carries, or nil. */
 static ot_value codegen_source_offset(ot_state* rt, size_t first, size_t count) {
-  if (!codegen_arity(rt, count, 1, 1)) return 0;
+  if (!oti_check_arity(rt, "%source-offset", count, 1, 1)) return 0;
   size_t offset;
   return oti_pair_offset(rt->stack[first], &offset) ? ot_int((intptr_t)offset) : OT_NIL;
 }
@@ -95,7 +94,7 @@ static ot_value codegen_source_offset(ot_state* rt, size_t first, size_t count) 
  * at offset, when it is an integer. code is a diagnostic code string, or the
  * symbol invalid-declaration for a tagged declaration error. */
 static ot_value codegen_compile_error(ot_state* rt, size_t first, size_t count) {
-  if (!codegen_arity(rt, count, 2, 3)) return 0;
+  if (!oti_check_arity(rt, "%compile-error", count, 2, 3)) return 0;
   ot_value message = rt->stack[first], offset = rt->stack[first + 1];
   if (!oti_kind(message, K_STRING)) return oti_fail(rt, "%compile-error expects a message");
   size_t length;
@@ -131,7 +130,7 @@ static ot_value codegen_compile_error(ot_state* rt, size_t first, size_t count) 
 /* The cell a definition of name binds: in the current namespace, an error
  * when an import has the name, as oti_global. */
 static ot_value codegen_cell_define(ot_state* rt, size_t first, size_t count) {
-  if (!codegen_arity(rt, count, 1, 1)) return 0;
+  if (!oti_check_arity(rt, "%native-cell-define", count, 1, 1)) return 0;
   ot_value name = rt->stack[first];
   if (!oti_kind(name, K_SYMBOL)) return oti_fail(rt, "%native-cell-define expects a symbol");
   size_t length;
@@ -142,21 +141,23 @@ static ot_value codegen_cell_define(ot_state* rt, size_t first, size_t count) {
 
 static ot_value codegen_core_cell(ot_state* rt, size_t first, size_t count) {
   uint32_t cell = 0;
-  if (!codegen_arity(rt, count, 1, 1) || !cell_arg(rt, rt->stack[first], &cell)) return 0;
+  if (!oti_check_arity(rt, "%native-core-cell?", count, 1, 1) ||
+      !cell_arg(rt, rt->stack[first], &cell))
+    return 0;
   return ot_bool(rt->global_info[cell].space == 0);
 }
 
 /* Whether otium.core's cells are fixed, so the compiler can rely on them. */
 static ot_value codegen_core_locked(ot_state* rt, size_t first, size_t count) {
   (void)first;
-  if (!codegen_arity(rt, count, 0, 0)) return 0;
+  if (!oti_check_arity(rt, "%core-locked?", count, 0, 0)) return 0;
   return ot_bool(rt->core_locked);
 }
 
 /* The machine word of a builtin, by name; "qq-append" is the compiler's
  * unnamed append for quasiquote. */
 static ot_value codegen_builtin(ot_state* rt, size_t first, size_t count) {
-  if (!codegen_arity(rt, count, 1, 1)) return 0;
+  if (!oti_check_arity(rt, "%native-builtin", count, 1, 1)) return 0;
   if (!oti_kind(rt->stack[first], K_STRING)) return oti_fail(rt, "%native-builtin expects a name");
   size_t length;
   const char* text = oti_text_bytes(rt->stack[first], &length);
@@ -167,14 +168,14 @@ static ot_value codegen_builtin(ot_state* rt, size_t first, size_t count) {
 
 static ot_value codegen_object_class(ot_state* rt, size_t first, size_t count) {
   (void)first;
-  if (!codegen_arity(rt, count, 0, 0) || !oti_classes_init(rt)) return 0;
+  if (!oti_check_arity(rt, "%native-object-class", count, 0, 0) || !oti_classes_init(rt)) return 0;
   return rt->classes[C_OBJECT];
 }
 
 /* Every form in a string, as located data, the way the evaluator reads a
  * file. */
 static ot_value codegen_read_forms(ot_state* rt, size_t first, size_t count) {
-  if (!codegen_arity(rt, count, 1, 1)) return 0;
+  if (!oti_check_arity(rt, "%read-forms", count, 1, 1)) return 0;
   if (!oti_kind(rt->stack[first], K_STRING)) return oti_fail(rt, "%read-forms expects a string");
   size_t length;
   const char* text = oti_text_bytes(rt->stack[first], &length);
@@ -205,7 +206,7 @@ static ot_value codegen_read_forms(ot_state* rt, size_t first, size_t count) {
 
 /* Make a namespace, by name, the current one. */
 static ot_value codegen_set_namespace(ot_state* rt, size_t first, size_t count) {
-  if (!codegen_arity(rt, count, 1, 1)) return 0;
+  if (!oti_check_arity(rt, "%set-namespace", count, 1, 1)) return 0;
   ot_value name = rt->stack[first];
   if (!oti_kind(name, K_SYMBOL) && !oti_kind(name, K_STRING))
     return oti_fail(rt, "%set-namespace expects a name");
@@ -219,20 +220,22 @@ static ot_value codegen_set_namespace(ot_state* rt, size_t first, size_t count) 
 
 /* A symbol's gensym serial, or 0 for an interned symbol. */
 static ot_value codegen_symbol_serial(ot_state* rt, size_t first, size_t count) {
-  if (!codegen_arity(rt, count, 1, 1)) return 0;
+  if (!oti_check_arity(rt, "%symbol-serial", count, 1, 1)) return 0;
   if (!oti_kind(rt->stack[first], K_SYMBOL)) return oti_fail(rt, "%symbol-serial expects a symbol");
   return ot_int((intptr_t)oti_symbol_id(rt->stack[first]));
 }
 
 /* Evaluate a form in the current namespace, as at top level. */
 static ot_value codegen_evaluate(ot_state* rt, size_t first, size_t count) {
-  if (!codegen_arity(rt, count, 1, 1)) return 0;
+  if (!oti_check_arity(rt, "%native-evaluate", count, 1, 1)) return 0;
   return oti_eval_value(rt, rt->stack[first]);
 }
 
 static ot_value codegen_cell_bound(ot_state* rt, size_t first, size_t count) {
   uint32_t cell = 0;
-  if (!codegen_arity(rt, count, 1, 1) || !cell_arg(rt, rt->stack[first], &cell)) return 0;
+  if (!oti_check_arity(rt, "%native-cell-bound?", count, 1, 1) ||
+      !cell_arg(rt, rt->stack[first], &cell))
+    return 0;
   return ot_bool(!oti_unbound(oti_global_value(rt, cell)));
 }
 

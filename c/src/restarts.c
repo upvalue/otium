@@ -69,13 +69,9 @@ static ot_value find(ot_state* rt, ot_value name) {
   return OT_NIL;
 }
 
-static ot_value restart_arity_error(ot_state* rt) {
-  return oti_fail(rt, "wrong number of restart arguments");
-}
-
 static ot_value restart_compute(ot_state* rt, size_t first, size_t count) {
   (void)first;
-  if (count) return restart_arity_error(rt);
+  if (!oti_check_arity(rt, "compute-restarts", count, 0, 0)) return 0;
   size_t base = rt->sp, n = rt->restart_count;
   if (n > rt->stack_limit - base || !oti_stack(rt, base + n))
     return oti_fail(rt, "VM stack limit exceeded");
@@ -87,26 +83,26 @@ static ot_value restart_compute(ot_state* rt, size_t first, size_t count) {
 }
 
 static ot_value restart_find(ot_state* rt, size_t first, size_t count) {
-  if (count != 1) return restart_arity_error(rt);
+  if (!oti_check_arity(rt, "find-restart", count, 1, 1)) return 0;
   return find(rt, rt->stack[first]);
 }
 
 static ot_value restart_name(ot_state* rt, size_t first, size_t count) {
-  if (count != 1) return restart_arity_error(rt);
+  if (!oti_check_arity(rt, "restart-name", count, 1, 1)) return 0;
   ot_value value = rt->stack[first];
   if (!oti_kind(value, K_RESTART)) return oti_fail(rt, "expected restart");
   return oti_as_restart(value)->name;
 }
 
 static ot_value restart_description(ot_state* rt, size_t first, size_t count) {
-  if (count != 1) return restart_arity_error(rt);
+  if (!oti_check_arity(rt, "restart-description", count, 1, 1)) return 0;
   ot_value value = rt->stack[first];
   if (!oti_kind(value, K_RESTART)) return oti_fail(rt, "expected restart");
   return oti_as_restart(value)->description;
 }
 
 static ot_value restart_invoke(ot_state* rt, size_t first, size_t count) {
-  if (count < 1) return restart_arity_error(rt);
+  if (!oti_check_arity(rt, "invoke-restart", count, 1, SIZE_MAX)) return 0;
   ot_value restart = find(rt, rt->stack[first]);
   if (!restart) return 0;
   if (restart == OT_NIL) return oti_fail(rt, "no active restart");

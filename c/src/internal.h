@@ -946,6 +946,14 @@ void oti_trace_error(ot_state* rt);
 void oti_locate_error(ot_state* rt, size_t offset);
 /* Record E0301 for a call of fn with argc arguments, with :name and :label. */
 bool oti_arity_error(ot_state* rt, const oti_function* fn, size_t argc);
+/* Record E0301 for the builtin who called with count arguments, outside
+ * [min, max]; a max of SIZE_MAX means no upper limit. */
+bool oti_builtin_arity_error(ot_state* rt, const char* who, size_t count, size_t min, size_t max);
+/* Whether count is in [min, max], else record E0301 for the builtin who. */
+static inline bool oti_check_arity(ot_state* rt, const char* who, size_t count, size_t min,
+                                   size_t max) {
+  return (count >= min && count <= max) || oti_builtin_arity_error(rt, who, count, min, max);
+}
 /* Record E0302, "value is not callable", with :value. */
 bool oti_callable_error(ot_state* rt, ot_value value);
 /* Record E0201 for the unbound global cell, with :name. */

@@ -226,28 +226,28 @@ static ot_value copy_signature(ot_state* rt, ot_value source) {
   return result;
 }
 
-static bool class_args(ot_state* rt, size_t count, size_t needed) {
-  if (count != needed) return oti_error(rt, "wrong number of class arguments");
+static bool class_args(ot_state* rt, const char* who, size_t count, size_t needed) {
+  if (!oti_check_arity(rt, who, count, needed, needed)) return false;
   return oti_classes_init(rt);
 }
 
 static ot_value class_class_p(ot_state* rt, size_t first, size_t count) {
-  if (!class_args(rt, count, 1)) return 0;
+  if (!class_args(rt, "class?", count, 1)) return 0;
   return oti_kind(rt->stack[first], K_CLASS) ? OT_TRUE : OT_FALSE;
 }
 
 static ot_value class_generic_p(ot_state* rt, size_t first, size_t count) {
-  if (!class_args(rt, count, 1)) return 0;
+  if (!class_args(rt, "generic?", count, 1)) return 0;
   return oti_kind(rt->stack[first], K_GENERIC) ? OT_TRUE : OT_FALSE;
 }
 
 static ot_value class_dispatch_type(ot_state* rt, size_t first, size_t count) {
-  if (!class_args(rt, count, 1)) return 0;
+  if (!class_args(rt, "dispatch-type", count, 1)) return 0;
   return oti_dispatch_type(rt, rt->stack[first]);
 }
 
 static ot_value class_subtype_p(ot_state* rt, size_t first, size_t count) {
-  if (!class_args(rt, count, 2)) return 0;
+  if (!class_args(rt, "class-subtype?", count, 2)) return 0;
   ot_value child = rt->stack[first], parent = rt->stack[first + 1];
   if (!oti_kind(child, K_CLASS) || !oti_kind(parent, K_CLASS))
     return oti_fail(rt, "expected class descriptors");
@@ -255,7 +255,7 @@ static ot_value class_subtype_p(ot_state* rt, size_t first, size_t count) {
 }
 
 static ot_value class_define_generic(ot_state* rt, size_t first, size_t count) {
-  if (!class_args(rt, count, 3)) return 0;
+  if (!class_args(rt, "%define-generic", count, 3)) return 0;
   ot_value v = rt->stack[first], n = rt->stack[first + 1];
   if (!oti_kind(v, K_SYMBOL) || !ot_is_int(n) || ot_to_int(n) < 0)
     return oti_fail(rt, "invalid generic declaration");
@@ -329,7 +329,7 @@ static bool class_same_method(ot_value method, ot_value signature, bool around) 
 }
 
 static ot_value class_define_method(ot_state* rt, size_t first, size_t count) {
-  if (!class_args(rt, count, 5)) return 0;
+  if (!class_args(rt, "%define-method", count, 5)) return 0;
   if (!oti_kind(rt->stack[first], K_GENERIC)) return not_generic(rt, "defmethod");
   ot_value slots[] = {rt->stack[first], OT_NIL, OT_NIL, OT_NIL};
   oti_roots roots;
@@ -362,7 +362,7 @@ done:
 }
 
 static ot_value class_remove_method(ot_state* rt, size_t first, size_t count) {
-  if (count != 2 && count != 3) return oti_fail(rt, "wrong number of class arguments");
+  if (!oti_check_arity(rt, "remove-method!", count, 2, 3)) return 0;
   if (!oti_classes_init(rt)) return 0;
   if (!oti_kind(rt->stack[first], K_GENERIC)) return not_generic(rt, "remove-method!");
   ot_value slots[] = {rt->stack[first], OT_NIL};
@@ -400,7 +400,7 @@ done:
 }
 
 static ot_value class_generic_methods(ot_state* rt, size_t first, size_t count) {
-  if (!class_args(rt, count, 1)) return 0;
+  if (!class_args(rt, "generic-methods", count, 1)) return 0;
   if (!oti_kind(rt->stack[first], K_GENERIC)) return not_generic(rt, "generic-methods");
   ot_value slots[] = {OT_NIL, OT_NIL, OT_NIL, OT_EMPTY};
   oti_roots roots;

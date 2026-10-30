@@ -100,33 +100,34 @@ void oti_locate_error(ot_state* rt, size_t offset) {
   e->reached[e->reached_count++] = (oti_error_place){rt->source, (uint32_t)offset, NULL};
 }
 
-/* "1", "1 or 2", "1, 2, or 3" or "at least 1". */
-static void arity_text(const oti_function* fn, char* out, size_t size) {
-  if (fn->rest) {
-    snprintf(out, size, "at least %zu", fn->arity);
+/* "1", "1 or 2", "1, 2, or 3" or "at least 1", for counts from min to max. */
+static void arity_text(size_t min, size_t max, char* out, size_t size) {
+  if (max == SIZE_MAX) {
+    snprintf(out, size, "at least %zu", min);
     return;
   }
   size_t used = 0;
-  for (size_t n = fn->arity; n <= fn->arity + fn->optional && used < size; n++) {
-    const char* separator = n == fn->arity                 ? ""
-                            : n < fn->arity + fn->optional ? ", "
-                            : fn->optional == 1            ? " or "
-                                                           : ", or ";
+  for (size_t n = min; n <= max && used < size; n++) {
+    const char* separator = n == min ? "" : n < max ? ", " : max - min == 1 ? " or " : ", or ";
     used += (size_t)snprintf(out + used, size - used, "%s%zu", separator, n);
   }
 }
 
-bool oti_arity_error(ot_state* rt, const oti_function* fn, size_t argc) {
+bool oti_builtin_arity_error(ot_state* rt, const char* name, size_t count, size_t min, size_t max) {
   if (oti_failed(rt)) return false;
-  const char* name = fn->name ? fn->name : "function";
   oti_coded_errorf(rt, "E0301", "wrong number of arguments to `%s`", name);
   char expected[96], label[160];
-  arity_text(fn, expected, sizeof(expected));
+  arity_text(min, max, expected, sizeof(expected));
   snprintf(label, sizeof(label), "expects %s argument%s, called with %zu", expected,
-           strcmp(expected, "1") ? "s" : "", argc);
+           strcmp(expected, "1") ? "s" : "", count);
   rt->error.name = copy_string(name);
   rt->error.label = copy_string(label);
   return false;
+}
+
+bool oti_arity_error(ot_state* rt, const oti_function* fn, size_t argc) {
+  return oti_builtin_arity_error(rt, fn->name ? fn->name : "function", argc, fn->arity,
+                                 fn->rest ? SIZE_MAX : fn->arity + fn->optional);
 }
 
 /* The printed form of value, owned, or NULL. */

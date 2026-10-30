@@ -38,22 +38,17 @@ size_t oti_utf8_scalar(const unsigned char* s, size_t p, size_t end) {
   return p + width;
 }
 
-static bool bytes_arity(ot_state* rt, size_t count, size_t min, size_t max) {
-  if (count >= min && count <= max) return true;
-  oti_fail(rt, "wrong number of bytevector arguments");
-  return false;
-}
-
 /* The bytevector first argument, after checking the arity. */
-static bool bytes_target(ot_state* rt, size_t first, size_t count, size_t min, size_t max) {
-  if (!bytes_arity(rt, count, min, max)) return false;
+static bool bytes_target(ot_state* rt, const char* who, size_t first, size_t count, size_t min,
+                         size_t max) {
+  if (!oti_check_arity(rt, who, count, min, max)) return false;
   if (oti_kind(rt->stack[first], K_BYTEVECTOR)) return true;
   oti_fail(rt, "expected bytevector");
   return false;
 }
 
 static ot_value bytes_p(ot_state* rt, size_t first, size_t count) {
-  if (!bytes_arity(rt, count, 1, 1)) return 0;
+  if (!oti_check_arity(rt, "bytevector?", count, 1, 1)) return 0;
   return oti_kind(rt->stack[first], K_BYTEVECTOR) ? OT_TRUE : OT_FALSE;
 }
 
@@ -68,7 +63,7 @@ static ot_value bytes_bytevector(ot_state* rt, size_t first, size_t count) {
 }
 
 static ot_value bytes_make(ot_state* rt, size_t first, size_t count) {
-  if (!bytes_arity(rt, count, 1, 2)) return 0;
+  if (!oti_check_arity(rt, "make-bytevector", count, 1, 2)) return 0;
   size_t n;
   if (!oti_natural(rt->stack[first], &n) || (count == 2 && !byte(rt->stack[first + 1])))
     return oti_fail(rt, "invalid bytevector length or fill");
@@ -101,7 +96,7 @@ static ot_value bytes_append(ot_state* rt, size_t first, size_t count) {
 }
 
 static ot_value bytes_string_utf8(ot_state* rt, size_t first, size_t count) {
-  if (!bytes_arity(rt, count, 1, 3)) return 0;
+  if (!oti_check_arity(rt, "string->utf8", count, 1, 3)) return 0;
   ot_value a = rt->stack[first];
   if (!oti_kind(a, K_STRING)) return oti_fail(rt, "expected string");
   size_t n = oti_bytes_length(a), chars = 0;
@@ -123,7 +118,7 @@ static ot_value bytes_string_utf8(ot_state* rt, size_t first, size_t count) {
 }
 
 static ot_value bytes_length(ot_state* rt, size_t first, size_t count) {
-  if (!bytes_target(rt, first, count, 1, 1)) return 0;
+  if (!bytes_target(rt, "bytevector-length", first, count, 1, 1)) return 0;
   return ot_int((intptr_t)oti_bytes_length(rt->stack[first]));
 }
 
@@ -137,20 +132,23 @@ static bool bytes_index(ot_state* rt, size_t first, size_t* index) {
 
 static ot_value bytes_ref(ot_state* rt, size_t first, size_t count) {
   size_t index;
-  if (!bytes_target(rt, first, count, 2, 2) || !bytes_index(rt, first, &index)) return 0;
+  if (!bytes_target(rt, "bytevector-u8-ref", first, count, 2, 2) || !bytes_index(rt, first, &index))
+    return 0;
   return ot_int(oti_bytes_data(rt->stack[first])[index]);
 }
 
 static ot_value bytes_set(ot_state* rt, size_t first, size_t count) {
   size_t index;
-  if (!bytes_target(rt, first, count, 3, 3) || !bytes_index(rt, first, &index)) return 0;
+  if (!bytes_target(rt, "bytevector-u8-set!", first, count, 3, 3) ||
+      !bytes_index(rt, first, &index))
+    return 0;
   if (!byte(rt->stack[first + 2])) return oti_fail(rt, "expected byte");
   oti_bytes_data(rt->stack[first])[index] = (unsigned char)ot_to_int(rt->stack[first + 2]);
   return OT_NIL;
 }
 
 static ot_value bytes_copy_mut(ot_state* rt, size_t first, size_t count) {
-  if (!bytes_target(rt, first, count, 3, 5)) return 0;
+  if (!bytes_target(rt, "bytevector-copy!", first, count, 3, 5)) return 0;
   ot_value a = rt->stack[first], from = rt->stack[first + 2];
   size_t n = oti_bytes_length(a), at, start, end;
   if (!oti_kind(from, K_BYTEVECTOR)) return oti_fail(rt, "expected source bytevector");
@@ -163,7 +161,7 @@ static ot_value bytes_copy_mut(ot_state* rt, size_t first, size_t count) {
 }
 
 ot_value oti_bytes_copy_builtin(ot_state* rt, size_t first, size_t count) {
-  if (!bytes_target(rt, first, count, 1, 3)) return 0;
+  if (!bytes_target(rt, "bytevector-copy", first, count, 1, 3)) return 0;
   size_t start, end;
   if (!slice(rt, first + 1, count - 1, oti_bytes_length(rt->stack[first]), &start, &end)) return 0;
   ot_value result = oti_bytes_new(rt, end - start);
@@ -172,7 +170,7 @@ ot_value oti_bytes_copy_builtin(ot_state* rt, size_t first, size_t count) {
 }
 
 static ot_value bytes_utf8_string(ot_state* rt, size_t first, size_t count) {
-  if (!bytes_target(rt, first, count, 1, 3)) return 0;
+  if (!bytes_target(rt, "utf8->string", first, count, 1, 3)) return 0;
   ot_value a = rt->stack[first];
   size_t start, end;
   if (!slice(rt, first + 1, count - 1, oti_bytes_length(a), &start, &end)) return 0;

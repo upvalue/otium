@@ -50,11 +50,6 @@ size_t oti_utf8_next(const char* s, size_t n, size_t p, uint32_t* cp) {
   return p;
 }
 
-static bool support_arity(ot_state* rt, size_t count, size_t arity) {
-  if (count == arity) return true;
-  return oti_error(rt, "wrong number of arguments");
-}
-
 static ot_value support_string_append(ot_state* rt, size_t first, size_t count) {
   size_t total = 0;
   for (size_t i = 0; i < count; i++) {
@@ -79,7 +74,7 @@ static ot_value support_string_append(ot_state* rt, size_t first, size_t count) 
 }
 
 static ot_value support_number_string(ot_state* rt, size_t first, size_t count) {
-  if (!support_arity(rt, count, 1)) return 0;
+  if (!oti_check_arity(rt, "number->string", count, 1, 1)) return 0;
   ot_value v = rt->stack[first];
   char buffer[128];
   int n;
@@ -91,8 +86,9 @@ static ot_value support_number_string(ot_state* rt, size_t first, size_t count) 
 }
 
 /* pos? and neg? */
-static ot_value support_sign_p(ot_state* rt, bool positive, size_t first, size_t count) {
-  if (!support_arity(rt, count, 1)) return 0;
+static ot_value support_sign_p(ot_state* rt, const char* who, bool positive, size_t first,
+                               size_t count) {
+  if (!oti_check_arity(rt, who, count, 1, 1)) return 0;
   ot_value v = rt->stack[first];
   double number;
   if (ot_is_int(v)) number = (double)ot_to_int(v);
@@ -108,8 +104,9 @@ bool oti_procedure(ot_value v) {
 }
 
 /* One-argument type predicates. */
-static ot_value support_type_p(ot_state* rt, unsigned id, size_t first, size_t count) {
-  if (!support_arity(rt, count, 1)) return 0;
+static ot_value support_type_p(ot_state* rt, const char* who, unsigned id, size_t first,
+                               size_t count) {
+  if (!oti_check_arity(rt, who, count, 1, 1)) return 0;
   ot_value v = rt->stack[first];
   bool result = false;
   switch (id) {
@@ -129,64 +126,64 @@ static ot_value support_type_p(ot_state* rt, unsigned id, size_t first, size_t c
 }
 
 static ot_value support_symbol_p(ot_state* rt, size_t first, size_t count) {
-  return support_type_p(rt, B_SYMBOL_P, first, count);
+  return support_type_p(rt, "symbol?", B_SYMBOL_P, first, count);
 }
 
 static ot_value support_keyword_p(ot_state* rt, size_t first, size_t count) {
-  return support_type_p(rt, B_KEYWORD_P, first, count);
+  return support_type_p(rt, "keyword?", B_KEYWORD_P, first, count);
 }
 
 static ot_value support_string_p(ot_state* rt, size_t first, size_t count) {
-  return support_type_p(rt, B_STRING_P, first, count);
+  return support_type_p(rt, "string?", B_STRING_P, first, count);
 }
 
 static ot_value support_boolean_p(ot_state* rt, size_t first, size_t count) {
-  return support_type_p(rt, B_BOOLEAN_P, first, count);
+  return support_type_p(rt, "boolean?", B_BOOLEAN_P, first, count);
 }
 
 static ot_value support_list_p(ot_state* rt, size_t first, size_t count) {
-  return support_type_p(rt, B_LIST_P, first, count);
+  return support_type_p(rt, "list?", B_LIST_P, first, count);
 }
 
 static ot_value support_procedure_p(ot_state* rt, size_t first, size_t count) {
-  return support_type_p(rt, B_PROCEDURE_P, first, count);
+  return support_type_p(rt, "procedure?", B_PROCEDURE_P, first, count);
 }
 
 static ot_value support_foreign_p(ot_state* rt, size_t first, size_t count) {
-  return support_type_p(rt, B_FOREIGN_P, first, count);
+  return support_type_p(rt, "foreign?", B_FOREIGN_P, first, count);
 }
 
 static ot_value support_int_p(ot_state* rt, size_t first, size_t count) {
-  return support_type_p(rt, B_INT_P, first, count);
+  return support_type_p(rt, "int?", B_INT_P, first, count);
 }
 
 static ot_value support_float_p(ot_state* rt, size_t first, size_t count) {
-  return support_type_p(rt, B_FLOAT_P, first, count);
+  return support_type_p(rt, "float?", B_FLOAT_P, first, count);
 }
 
 static ot_value support_macro_p(ot_state* rt, size_t first, size_t count) {
-  return support_type_p(rt, B_MACRO_P, first, count);
+  return support_type_p(rt, "macro?", B_MACRO_P, first, count);
 }
 
 static ot_value support_char_p(ot_state* rt, size_t first, size_t count) {
-  return support_type_p(rt, B_CHAR_P, first, count);
+  return support_type_p(rt, "char?", B_CHAR_P, first, count);
 }
 
 static ot_value support_pos_p(ot_state* rt, size_t first, size_t count) {
-  return support_sign_p(rt, true, first, count);
+  return support_sign_p(rt, "pos?", true, first, count);
 }
 
 static ot_value support_neg_p(ot_state* rt, size_t first, size_t count) {
-  return support_sign_p(rt, false, first, count);
+  return support_sign_p(rt, "neg?", false, first, count);
 }
 
 static ot_value support_eval(ot_state* rt, size_t first, size_t count) {
-  if (!support_arity(rt, count, 1)) return 0;
+  if (!oti_check_arity(rt, "eval", count, 1, 1)) return 0;
   return oti_eval_value(rt, rt->stack[first]);
 }
 
 static ot_value support_read_string(ot_state* rt, size_t first, size_t count) {
-  if (!support_arity(rt, count, 1)) return 0;
+  if (!oti_check_arity(rt, "read-string", count, 1, 1)) return 0;
   return oti_read_string(rt, rt->stack[first]);
 }
 
@@ -194,7 +191,7 @@ static ot_value support_read_string(ot_state* rt, size_t first, size_t count) {
  * input form's offset. The expander only passes the result on, so the copy
  * need not be the same pair. */
 static ot_value support_expander_locate(ot_state* rt, size_t first, size_t count) {
-  if (!support_arity(rt, count, 2)) return 0;
+  if (!oti_check_arity(rt, "expander-locate", count, 2, 2)) return 0;
   size_t offset, ignored;
   if (!oti_pair_offset(rt->stack[first], &offset) || !oti_kind(rt->stack[first + 1], K_PAIR) ||
       oti_pair_offset(rt->stack[first + 1], &ignored))
@@ -209,7 +206,7 @@ static ot_value support_expander_locate(ot_state* rt, size_t first, size_t count
 }
 
 static ot_value support_expander_invoke_macro(ot_state* rt, size_t first, size_t count) {
-  if (!support_arity(rt, count, 2)) return 0;
+  if (!oti_check_arity(rt, "expander-invoke-macro", count, 2, 2)) return 0;
   if (rt->expanding && ++rt->expansion_calls > 1024) {
     oti_coded_error(rt, "E0111", "macro expansion limit exceeded");
     return 0;
@@ -218,7 +215,7 @@ static ot_value support_expander_invoke_macro(ot_state* rt, size_t first, size_t
 }
 
 static ot_value support_expander_fail(ot_state* rt, size_t first, size_t count) {
-  if (!support_arity(rt, count, 3)) return 0;
+  if (!oti_check_arity(rt, "expander-fail", count, 3, 3)) return 0;
   ot_value message = rt->stack[first + 1];
   if (!oti_kind(message, K_STRING)) return oti_fail(rt, "expansion error");
   size_t n;
@@ -241,7 +238,7 @@ static ot_value support_expander_fail(ot_state* rt, size_t first, size_t count) 
 }
 
 static ot_value support_expander_macro_var(ot_state* rt, size_t first, size_t count) {
-  if (!support_arity(rt, count, 1)) return 0;
+  if (!oti_check_arity(rt, "expander-macro-var", count, 1, 1)) return 0;
   ot_value v = rt->stack[first];
   if (!oti_kind(v, K_SYMBOL)) return oti_fail(rt, "expected symbol");
   size_t n;
@@ -251,7 +248,7 @@ static ot_value support_expander_macro_var(ot_state* rt, size_t first, size_t co
 }
 
 static ot_value support_expander_local_name(ot_state* rt, size_t first, size_t count) {
-  if (!support_arity(rt, count, 1)) return 0;
+  if (!oti_check_arity(rt, "expander-local-name", count, 1, 1)) return 0;
   ot_value v = rt->stack[first];
   if (!oti_kind(v, K_SYMBOL)) return oti_fail(rt, "expected symbol");
   size_t n;
@@ -267,7 +264,7 @@ static ot_value support_expander_local_name(ot_state* rt, size_t first, size_t c
 }
 
 static ot_value support_expander_qualify(ot_state* rt, size_t first, size_t count) {
-  if (!support_arity(rt, count, 1)) return 0;
+  if (!oti_check_arity(rt, "expander-qualify", count, 1, 1)) return 0;
   ot_value v = rt->stack[first];
   if (!oti_kind(v, K_SYMBOL)) return oti_fail(rt, "expected symbol");
   size_t n;
@@ -310,7 +307,7 @@ static ot_value support_gensym(ot_state* rt, size_t first, size_t count) {
 }
 
 static ot_value support_string_symbol(ot_state* rt, size_t first, size_t count) {
-  if (!support_arity(rt, count, 1)) return 0;
+  if (!oti_check_arity(rt, "string->symbol", count, 1, 1)) return 0;
   ot_value v = rt->stack[first];
   if (!oti_kind(v, K_STRING)) return oti_fail(rt, "expected string or symbol");
   size_t n;
@@ -319,7 +316,7 @@ static ot_value support_string_symbol(ot_state* rt, size_t first, size_t count) 
 }
 
 static ot_value support_keyword(ot_state* rt, size_t first, size_t count) {
-  if (!support_arity(rt, count, 1)) return 0;
+  if (!oti_check_arity(rt, "keyword", count, 1, 1)) return 0;
   ot_value v = rt->stack[first];
   if (oti_kind(v, K_KEYWORD)) return v;
   if (!oti_kind(v, K_STRING) && !oti_kind(v, K_SYMBOL))
@@ -336,7 +333,7 @@ static ot_value support_keyword(ot_state* rt, size_t first, size_t count) {
 }
 
 static ot_value support_symbol_string(ot_state* rt, size_t first, size_t count) {
-  if (!support_arity(rt, count, 1)) return 0;
+  if (!oti_check_arity(rt, "symbol->string", count, 1, 1)) return 0;
   ot_value v = rt->stack[first];
   if (!oti_kind(v, K_SYMBOL)) return oti_fail(rt, "expected symbol");
   size_t n;
@@ -350,7 +347,7 @@ static ot_value support_symbol_string(ot_state* rt, size_t first, size_t count) 
 }
 
 ot_value oti_string_length_builtin(ot_state* rt, size_t first, size_t count) {
-  if (!support_arity(rt, count, 1)) return 0;
+  if (!oti_check_arity(rt, "string-length", count, 1, 1)) return 0;
   ot_value v = rt->stack[first];
   if (!oti_kind(v, K_STRING)) return oti_fail(rt, "expected string");
   size_t n, length = 0;
@@ -361,7 +358,7 @@ ot_value oti_string_length_builtin(ot_state* rt, size_t first, size_t count) {
 }
 
 static ot_value support_string_ref(ot_state* rt, size_t first, size_t count) {
-  if (!support_arity(rt, count, 2)) return 0;
+  if (!oti_check_arity(rt, "string-ref", count, 2, 2)) return 0;
   ot_value v = rt->stack[first];
   if (!oti_kind(v, K_STRING)) return oti_fail(rt, "expected string");
   size_t n;

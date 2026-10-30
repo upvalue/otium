@@ -1402,47 +1402,26 @@ void oti_native_visit_exec(ot_state* rt, oti_exec* x, oti_root_visitor visit, vo
 
 /* The frames of an uncaught error, innermost first, as oti_trace_error does
  * for VM frames. */
-#define TRACE_LIMIT 200
-
-static char* copy_name(const char* s) {
-  if (!s) return NULL;
-  size_t n = strlen(s) + 1;
-  char* copy = malloc(n);
-  if (copy) memcpy(copy, s, n);
-  return copy;
-}
-
 void oti_native_trace(ot_state* rt) {
+  if (!oti_trace_begin(rt)) return;
   oti_error_record* e = &rt->error;
-  if (!e->set || e->traced || rt->try_count || rt->interrupted || rt->exit_pending ||
-      rt->restart_pending)
-    return;
-  e->traced = true;
-  oti_error_place* places = calloc(TRACE_LIMIT, sizeof(oti_error_place));
-  if (!places) return;
-  size_t count = 0;
+  if (!(e->frames = calloc(OTI_TRACE_LIMIT, sizeof(oti_error_place)))) return;
   bool seen = false;
-  for (oti_walk w = walk_from(rt->native.sp); count < TRACE_LIMIT && walk_frame(&w, true);) {
+  for (oti_walk w = walk_from(rt->native.sp);
+       e->frame_count < OTI_TRACE_LIMIT && walk_frame(&w, true);) {
     const oti_descriptor* d = descriptor_at(rt->native_runtime, w.ra, NULL);
     if (!d) break;
     walk_next(&w, d);
     if (d->function == UINT32_MAX || d->offset == UINT32_MAX) continue;
     const oti_function* fn = rt->functions[d->function];
     if (!fn || fn->source == OTI_NO_SOURCE) continue;
-    bool innermost = !seen;
+    oti_trace_place(e, fn->source, d->offset, fn->name, !seen && d->tail);
     seen = true;
-    if (innermost && d->tail && strcmp(e->code, "E0201")) continue;
-    /* Recursion through one call site shows once. */
-    if (count && places[count - 1].source == fn->source && places[count - 1].offset == d->offset)
-      continue;
-    places[count++] = (oti_error_place){fn->source, d->offset, copy_name(fn->name)};
   }
-  if (!count) {
-    free(places);
-    return;
+  if (!e->frame_count) {
+    free(e->frames);
+    e->frames = NULL;
   }
-  e->frames = places;
-  e->frame_count = count;
 }
 
 /* The source offset of the innermost native call site with one. */

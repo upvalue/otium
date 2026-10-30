@@ -940,6 +940,17 @@ bool oti_tagged_error(ot_state* rt, const char* who, const char* tag, const char
 void oti_error_at(ot_state* rt, size_t offset);
 /* Record the frames of an uncaught error before they unwind. */
 void oti_trace_error(ot_state* rt);
+/* The most frames a trace records. */
+#define OTI_TRACE_LIMIT 200
+/* Whether the recorded error is uncaught and has no trace yet, marking it
+ * traced; each backend's trace calls this first. */
+bool oti_trace_begin(ot_state* rt);
+/* Append a frame at offset in source to the error's frames, which have room
+ * for it, unless it repeats the last one (recursion through one call site
+ * shows once). innermost_tail is for the innermost frame when it made a tail
+ * call, which has replaced its caller's frame by the time the callee fails. */
+void oti_trace_place(oti_error_record* e, uint32_t source, uint32_t offset, const char* name,
+                     bool innermost_tail);
 /* After the top-level form at offset in the current source failed: locate
  * the error at the form if nothing located it, or note that the form led to
  * an error located in another file. */

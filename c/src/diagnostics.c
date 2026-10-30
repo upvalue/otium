@@ -52,16 +52,29 @@ static uint32_t point_offset(const oti_function* fn, size_t pc) {
   return fn->point_count ? fn->points[low].offset : 0;
 }
 
-#define TRACE_LIMIT 200
-
-void oti_trace_error(ot_state* rt) {
+bool oti_trace_begin(ot_state* rt) {
   oti_error_record* e = &rt->error;
   if (!e->set || e->traced || rt->try_count || rt->interrupted || rt->exit_pending ||
       rt->restart_pending)
-    return;
+    return false;
   e->traced = true;
+  return true;
+}
+
+void oti_trace_place(oti_error_record* e, uint32_t source, uint32_t offset, const char* name,
+                     bool innermost_tail) {
+  /* An unbound callee (E0201) fails before the tail call replaces the frame. */
+  if (innermost_tail && strcmp(e->code, "E0201")) return;
+  const oti_error_place* last = e->frame_count ? &e->frames[e->frame_count - 1] : NULL;
+  if (last && last->source == source && last->offset == offset) return;
+  e->frames[e->frame_count++] = (oti_error_place){source, offset, copy_string(name)};
+}
+
+void oti_trace_error(ot_state* rt) {
+  if (!oti_trace_begin(rt)) return;
+  oti_error_record* e = &rt->error;
   size_t count = 0;
-  for (size_t i = rt->frame_count; i-- && count < TRACE_LIMIT;)
+  for (size_t i = rt->frame_count; i-- && count < OTI_TRACE_LIMIT;)
     if (rt->frames[i].fn->source != OTI_NO_SOURCE) count++;
   if (!count || !(e->frames = calloc(count, sizeof(oti_error_place)))) return;
   for (size_t i = rt->frame_count; i-- && e->frame_count < count;) {
@@ -69,17 +82,11 @@ void oti_trace_error(ot_state* rt) {
     const oti_function* fn = frame->fn;
     if (fn->source == OTI_NO_SOURCE) continue;
     size_t pc = frame->pc > fn->code ? (size_t)(frame->pc - fn->code) - 1 : 0;
-    /* A tail call has replaced its caller's frame by the time the callee
-     * fails, though a builtin callee runs on the caller's. */
+    /* A builtin callee runs on its caller's frame, so only a tail call
+     * instruction here means the callee's frame replaced this one. */
     unsigned op = pc < fn->count ? fn->code[pc].op : OP_COUNT;
-    if (i == rt->frame_count - 1 && (op == OP_TAIL_CALL || op == OP_TAIL_CALL_GLOBAL) &&
-        strcmp(e->code, "E0201"))
-      continue;
-    /* Recursion through one call site shows once. */
-    uint32_t offset = point_offset(fn, pc);
-    const oti_error_place* last = e->frame_count ? &e->frames[e->frame_count - 1] : NULL;
-    if (last && last->source == fn->source && last->offset == offset) continue;
-    e->frames[e->frame_count++] = (oti_error_place){fn->source, offset, copy_string(fn->name)};
+    bool tail = i == rt->frame_count - 1 && (op == OP_TAIL_CALL || op == OP_TAIL_CALL_GLOBAL);
+    oti_trace_place(e, fn->source, point_offset(fn, pc), fn->name, tail);
   }
 }
 

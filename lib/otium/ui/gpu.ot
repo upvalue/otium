@@ -376,9 +376,6 @@ measure-key cannot see."
 
 (def- RESIZING 16)
 
-(def- (flag-set? flags bit)
-  (odd? (quotient flags bit)))
-
 ;; Compare each node with how it was last painted, then record in changed-at
 ;; the paint frame in which it or anything under it last changed. Returns
 ;; that frame.
@@ -500,11 +497,11 @@ measure-key cannot see."
 (def- (paint-subtree! node g clip frame)
   (let ((flags (node :painted-flags)))
     (set! (g :clip) clip)
-    (set! (g :focused?) (flag-set? flags FOCUSED))
-    (set! (g :pressed?) (flag-set? flags PRESSED))
-    (set! (g :hovered?) (flag-set? flags HOVERED))
-    (set! (g :disabled?) (flag-set? flags DISABLED))
-    (set! (g :resizing?) (flag-set? flags RESIZING)))
+    (set! (g :focused?) (sdl/flag-set? flags FOCUSED))
+    (set! (g :pressed?) (sdl/flag-set? flags PRESSED))
+    (set! (g :hovered?) (sdl/flag-set? flags HOVERED))
+    (set! (g :disabled?) (sdl/flag-set? flags DISABLED))
+    (set! (g :resizing?) (sdl/flag-set? flags RESIZING)))
   (ui/paint (ui/instance node) g (node :bounds))
   (let ((children (ui/children node)))
     (dotimes (i (length children))

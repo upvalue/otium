@@ -16,7 +16,7 @@
 (ns otium.compiler.alloc
   (:require (otium.compiler.lower :refer (fc-closure fc-code fc-cold fc-next fc-optional-regs fc-params
                                           fc-rest-reg fc-u set-fc-cold! set-fc-live! set-fc-location!
-                                          set-fc-ranges! set-fc-spills! unit-labels))))
+                                          set-fc-ranges! set-fc-spills! unit-labels vreg?))))
 
 ;; sljit registers R0-R10, except R6, which emit keeps as a scratch register.
 ;; R7 and up are pushed by the prologue of a function that uses them.
@@ -68,8 +68,6 @@
     out))
 
 ;; --- Uses and definitions ---------------------------------------------------------
-
-(def (vreg? x) (int? x))
 
 (def (operand-uses op out)
   (cond ((vreg? op) (push! out op))

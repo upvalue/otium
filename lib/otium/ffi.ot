@@ -59,17 +59,14 @@
          callback-pointer
          utf8))
 
-(def- (%scalar-id name names index)
-  (cond
-    ((%empty? names) #f)
-    ((eq? name (car names)) index)
-    (else (%scalar-id name (cdr names) (+ index 1)))))
+(def- (%scalar-id name)
+  (find-index (fn (s) (eq? s name)) %scalars))
 
 ;; Type codes shared with the runtime: scalars by position in %scalars, then
 ;; layout kinds. They match native/ffi/native.h.
-(def- KIND_VOID (%scalar-id 'void %scalars 0))
+(def- KIND_VOID (%scalar-id 'void))
 
-(def- KIND_UTF8 (%scalar-id 'utf8 %scalars 0))
+(def- KIND_UTF8 (%scalar-id 'utf8))
 
 (def- KIND_STRUCT (length %scalars))
 
@@ -85,7 +82,7 @@
   (unless %scalar-descriptions
     (let ((descriptions {}))
       (for-each (fn (name)
-                  (let ((k (%scalar-id name %scalars 0)))
+                  (let ((k (%scalar-id name)))
                     (put! descriptions
                           name
                           (list k

@@ -310,14 +310,9 @@ ot_value oti_list_from(ot_state* rt, size_t first, size_t count) {
   return result;
 }
 
-static bool core_arity(ot_state* rt, size_t count, size_t arity) {
-  if (count == arity) return true;
-  return oti_error(rt, "wrong number of builtin arguments");
-}
-
 /* remainder and modulo differ only in the sign of a nonzero result. */
 static ot_value remainder_modulo(ot_state* rt, bool modulo, size_t first, size_t count) {
-  if (!core_arity(rt, count, 2)) return 0;
+  if (!oti_check_arity(rt, modulo ? "modulo" : "remainder", count, 2, 2)) return 0;
   ot_value a = rt->stack[first], b = rt->stack[first + 1];
   if (!ot_is_int(a) || !ot_is_int(b)) {
     oti_error(rt, "expected integers");
@@ -334,32 +329,32 @@ static ot_value remainder_modulo(ot_state* rt, bool modulo, size_t first, size_t
 }
 
 static ot_value eq_builtin(ot_state* rt, size_t first, size_t count) {
-  if (!core_arity(rt, count, 2)) return 0;
+  if (!oti_check_arity(rt, "eq?", count, 2, 2)) return 0;
   return ot_bool(rt->stack[first] == rt->stack[first + 1]);
 }
 
 static ot_value not_builtin(ot_state* rt, size_t first, size_t count) {
-  if (!core_arity(rt, count, 1)) return 0;
+  if (!oti_check_arity(rt, "not", count, 1, 1)) return 0;
   return ot_bool(!oti_truth(rt->stack[first]));
 }
 
 static ot_value null_builtin(ot_state* rt, size_t first, size_t count) {
-  if (!core_arity(rt, count, 1)) return 0;
+  if (!oti_check_arity(rt, "null?", count, 1, 1)) return 0;
   return ot_bool(rt->stack[first] == OT_EMPTY);
 }
 
 static ot_value nil_builtin(ot_state* rt, size_t first, size_t count) {
-  if (!core_arity(rt, count, 1)) return 0;
+  if (!oti_check_arity(rt, "nil?", count, 1, 1)) return 0;
   return ot_bool(rt->stack[first] == OT_NIL);
 }
 
 static ot_value pair_builtin(ot_state* rt, size_t first, size_t count) {
-  if (!core_arity(rt, count, 1)) return 0;
+  if (!oti_check_arity(rt, "pair?", count, 1, 1)) return 0;
   return ot_bool(oti_kind(rt->stack[first], K_PAIR));
 }
 
 static ot_value integer_builtin(ot_state* rt, size_t first, size_t count) {
-  if (!core_arity(rt, count, 1)) return 0;
+  if (!oti_check_arity(rt, "integer?", count, 1, 1)) return 0;
   ot_value a = rt->stack[first];
   double real;
   if (ot_is_int(a)) return OT_TRUE;
@@ -369,13 +364,13 @@ static ot_value integer_builtin(ot_state* rt, size_t first, size_t count) {
 }
 
 static ot_value number_builtin(ot_state* rt, size_t first, size_t count) {
-  if (!core_arity(rt, count, 1)) return 0;
+  if (!oti_check_arity(rt, "number?", count, 1, 1)) return 0;
   ot_value a = rt->stack[first];
   return ot_bool(ot_is_int(a) || oti_kind(a, K_FLOAT));
 }
 
 static ot_value cons_builtin(ot_state* rt, size_t first, size_t count) {
-  if (!core_arity(rt, count, 2)) return 0;
+  if (!oti_check_arity(rt, "cons", count, 2, 2)) return 0;
   ot_value pair = oti_alloc(rt, K_PAIR, 2, 0);
   if (pair) {
     oti_as_pair(pair)->car = rt->stack[first];
@@ -389,12 +384,14 @@ static bool pair_argument(ot_state* rt, const char* who, ot_value a) {
 }
 
 static ot_value car_builtin(ot_state* rt, size_t first, size_t count) {
-  if (!core_arity(rt, count, 1) || !pair_argument(rt, "car", rt->stack[first])) return 0;
+  if (!oti_check_arity(rt, "car", count, 1, 1) || !pair_argument(rt, "car", rt->stack[first]))
+    return 0;
   return oti_car(rt->stack[first]);
 }
 
 static ot_value cdr_builtin(ot_state* rt, size_t first, size_t count) {
-  if (!core_arity(rt, count, 1) || !pair_argument(rt, "cdr", rt->stack[first])) return 0;
+  if (!oti_check_arity(rt, "cdr", count, 1, 1) || !pair_argument(rt, "cdr", rt->stack[first]))
+    return 0;
   return oti_cdr(rt->stack[first]);
 }
 
@@ -407,14 +404,16 @@ static bool mutable_pair(ot_state* rt, ot_value a) {
 }
 
 static ot_value set_car_builtin(ot_state* rt, size_t first, size_t count) {
-  if (!core_arity(rt, count, 2) || !mutable_pair(rt, rt->stack[first])) return 0;
+  if (!oti_check_arity(rt, "set-car!", count, 2, 2) || !mutable_pair(rt, rt->stack[first]))
+    return 0;
   ot_value a = rt->stack[first];
   oti_as_pair(a)->car = rt->stack[first + 1];
   return a;
 }
 
 static ot_value set_cdr_builtin(ot_state* rt, size_t first, size_t count) {
-  if (!core_arity(rt, count, 2) || !mutable_pair(rt, rt->stack[first])) return 0;
+  if (!oti_check_arity(rt, "set-cdr!", count, 2, 2) || !mutable_pair(rt, rt->stack[first]))
+    return 0;
   ot_value a = rt->stack[first];
   oti_as_pair(a)->cdr = rt->stack[first + 1];
   return a;

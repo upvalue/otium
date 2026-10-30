@@ -48,7 +48,7 @@ static ot_value codegen_cell_builtin(ot_state* rt, size_t first, size_t count) {
   ot_value v = oti_global_value(rt, cell);
   if ((v & 255) != TAG_BUILTIN) return OT_FALSE;
   unsigned id = (unsigned)(v >> 8);
-  if (id >= B_COUNT || rt->builtin_cells[id] != cell) return OT_FALSE;
+  if (id >= B_COUNT || !oti_builtin_cell(rt, cell, id)) return OT_FALSE;
   const char* name = rt->global_info[cell].name;
   return oti_intern(rt, K_SYMBOL, name, strlen(name));
 }

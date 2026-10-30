@@ -638,13 +638,21 @@ typedef struct {
   oti_documentation doc;
   uint32_t space;
   /* accessor: defined by defrecord, so only defrecord may change it. */
-  bool defined, is_private, macro, accessor;
+  bool defined : 1, is_private : 1, macro : 1, accessor : 1;
+  /* The id + 1 of the builtin bound to this cell at startup, or 0. Other
+   * cells may hold a builtin too, but only this one can be inlined. */
+  uint16_t builtin;
   uint32_t length;
 } oti_global_info;
+_Static_assert(B_COUNT < UINT16_MAX, "builtin ids fit oti_global_info.builtin");
 
 /* A builtin reads its arguments from rt->stack[first, first + count). It
  * returns 0 after recording an error. */
 typedef ot_value (*oti_builtin_fn)(ot_state* rt, size_t first, size_t count);
+
+/* Each builtin's function by id. It is the same for every state, so it is
+ * filled once, by the first oti_builtins. */
+extern oti_builtin_fn oti_builtin_run[B_COUNT];
 
 /* name is NULL for compiler-only helpers. A table ends with a NULL run. */
 typedef struct {
@@ -844,9 +852,6 @@ struct ot_state {
   bool exit_pending;
   int exit_status;
   ot_value classes[C_COUNT];
-  /* Global cell of each builtin; inlined builtins cannot be redefined. */
-  uint32_t builtin_cells[B_COUNT];
-  oti_builtin_fn builtin_run[B_COUNT];
   oti_roots class_roots;
   bool classes_ready, core_loaded;
   /* Once core has loaded, its cells can't be defined or assigned unless the
@@ -1577,6 +1582,12 @@ static inline ot_value oti_alloc_closure(ot_state* rt, uint32_t captures) {
 
 static inline ot_value oti_global_value(const ot_state* rt, uint32_t cell) {
   return rt->globals[cell].value;
+}
+
+/* Whether cell is the one builtin id was bound to at startup. Inlined
+ * builtins' cells cannot be redefined. */
+static inline bool oti_builtin_cell(const ot_state* rt, uint32_t cell, unsigned id) {
+  return rt->global_info[cell].builtin == id + 1;
 }
 
 /* Store a global's value, keeping its entry in step in native processes. */

@@ -23,9 +23,27 @@ int oti_builtin_index(const char* name) {
   return -1;
 }
 
-/* Fill the dispatch array and bind each named builtin. Every id must be
+oti_builtin_fn oti_builtin_run[B_COUNT];
+
+/* Fill oti_builtin_run, the first time a state is created. Every id must be
  * defined exactly once. */
+static bool fill_builtin_run(ot_state* rt) {
+  static bool filled;
+  if (filled) return true;
+  for (size_t m = 0; m < BUILTIN_MODULES; m++)
+    for (const oti_builtin_def* d = builtin_modules[m]; d->run; d++) {
+      if (d->id >= B_COUNT || oti_builtin_run[d->id]) return oti_error(rt, "duplicate builtin");
+      oti_builtin_run[d->id] = d->run;
+    }
+  for (size_t i = 0; i < B_COUNT; i++)
+    if (!oti_builtin_run[i]) return oti_error(rt, "missing builtin");
+  filled = true;
+  return true;
+}
+
+/* Bind each named builtin. */
 bool oti_builtins(ot_state* rt) {
+  if (!fill_builtin_run(rt)) return false;
   uint32_t ffi = oti_namespace(rt, "otium.ffi", 9);
   uint32_t process = oti_namespace(rt, "otium.process", 13);
   uint32_t reader = oti_namespace(rt, "otium.reader", 12);
@@ -36,11 +54,8 @@ bool oti_builtins(ot_state* rt) {
   if (ffi == UINT32_MAX || process == UINT32_MAX || reader == UINT32_MAX || generic == UINT32_MAX ||
       dev == UINT32_MAX || memory == UINT32_MAX)
     return false;
-  memset(rt->builtin_run, 0, sizeof(rt->builtin_run));
   for (size_t m = 0; m < BUILTIN_MODULES; m++) {
     for (const oti_builtin_def* d = builtin_modules[m]; d->run; d++) {
-      if (d->id >= B_COUNT || rt->builtin_run[d->id]) return oti_error(rt, "duplicate builtin");
-      rt->builtin_run[d->id] = d->run;
       const char* full = d->name;
       if (!full) continue;
       bool foreign = !strncmp(full, "otium.ffi/", 10);
@@ -63,12 +78,10 @@ bool oti_builtins(ot_state* rt) {
       uint32_t global = oti_global(rt, name, strlen(name));
       if (global == UINT32_MAX) return false;
       oti_set_global(rt, global, ((ot_value)d->id << 8) | TAG_BUILTIN);
-      rt->builtin_cells[d->id] = global;
+      rt->global_info[global].builtin = (uint16_t)(d->id + 1);
     }
   }
   rt->current_namespace = 0;
-  for (size_t i = 0; i < B_COUNT; i++)
-    if (!rt->builtin_run[i]) return oti_error(rt, "missing builtin");
   return true;
 }
 
@@ -498,9 +511,9 @@ static const oti_builtin_def oti_core_builtins[] = {
 };
 
 ot_value oti_builtin(ot_state* rt, unsigned id, size_t first, size_t count) {
-  if (id >= B_COUNT || !rt->builtin_run[id]) {
+  if (id >= B_COUNT) {
     oti_error(rt, "unknown builtin");
     return 0;
   }
-  return rt->builtin_run[id](rt, first, count);
+  return oti_builtin_run[id](rt, first, count);
 }

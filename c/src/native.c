@@ -1668,7 +1668,7 @@ static W h_builtin(ot_state* rt, W id, W argc) {
   }
   oti_copy_words(rt->stack + base, rt->native.args, argc);
   rt->sp = base + argc;
-  ot_value result = rt->builtin_run[id](rt, base, argc);
+  ot_value result = oti_builtin_run[id](rt, base, argc);
   rt->sp = base;
   if (result == OTI_PARKED) {
     oti_error(rt, "native compiler: a builtin called directly tried to wait");
@@ -1699,7 +1699,7 @@ static bool inlined_builtin_cell(ot_state* rt, uint32_t index) {
   ot_value old = oti_global_value(rt, index);
   if ((old & 255) != TAG_BUILTIN) return false;
   unsigned id = (unsigned)(old >> 8);
-  if (!oti_inlined_builtin(id) || rt->builtin_cells[id] != index) return false;
+  if (!oti_inlined_builtin(id) || !oti_builtin_cell(rt, index, id)) return false;
   oti_errorf(rt, "cannot redefine builtin: %s", rt->global_info[index].name);
   return true;
 }
@@ -2022,7 +2022,7 @@ static W dispatch(ot_state* rt) {
     /* A new thread has no VM stack until something needs one. */
     oti_copy_words(rt->stack + base, rt->native.args, argc);
     rt->sp = base + argc;
-    ot_value result = rt->builtin_run[callee >> 8](rt, base, argc);
+    ot_value result = oti_builtin_run[callee >> 8](rt, base, argc);
     rt->sp = base;
     if (result == OTI_PARKED) oti_thread_wait(rt);
     if (!result || oti_failed(rt)) oti_native_raise(rt);

@@ -1379,7 +1379,8 @@ static const oti_primitive* primitive(oti_compiler* c, const oti_ast* a) {
   if (global == UINT32_MAX) return NULL;
   ot_value value = oti_global_value(c->rt, global);
   /* Only the builtin's own cell is immutable; other globals may hold it. */
-  if ((value & 255) != TAG_BUILTIN || c->rt->builtin_cells[value >> 8] != global) return NULL;
+  if ((value & 255) != TAG_BUILTIN || !oti_builtin_cell(c->rt, global, (unsigned)(value >> 8)))
+    return NULL;
   unsigned count = 0;
   for (const oti_ast* p = head->next; p; p = p->next) count++;
   for (size_t i = 0; i < sizeof(primitives) / sizeof(primitives[0]); i++)

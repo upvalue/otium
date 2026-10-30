@@ -247,7 +247,7 @@ static bool vm_inlined_builtin(ot_state* rt, uint32_t index) {
   if ((old & 255) != TAG_BUILTIN) return false;
   unsigned id = (unsigned)(old >> 8);
   if (!oti_inlined_builtin(id)) return false;
-  if (rt->builtin_cells[id] != index) return false;
+  if (!oti_builtin_cell(rt, index, id)) return false;
   oti_errorf(rt, "cannot redefine builtin: %s", rt->global_info[index].name);
   return true;
 }

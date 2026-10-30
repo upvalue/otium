@@ -103,10 +103,8 @@ static ot_value codegen_compile_error(ot_state* rt, size_t first, size_t count) 
   /* A declaration error is tagged, as compiler.c's declaration_error. */
   if (count == 3 && oti_kind(rt->stack[first + 2], K_SYMBOL)) {
     bool fresh = !oti_failed(rt);
-    char* copy = malloc(length + 1);
-    if (!copy) return oti_fail(rt, "out of host memory");
-    memcpy(copy, text, length);
-    copy[length] = 0;
+    char* copy = oti_strndup(rt, text, length);
+    if (!copy) return 0;
     oti_tagged_error(rt, "declaration", "invalid-declaration", copy, 0, NULL);
     free(copy);
     if (fresh && ot_is_int(offset) && ot_to_int(offset) >= 0)
@@ -179,10 +177,8 @@ static ot_value codegen_read_forms(ot_state* rt, size_t first, size_t count) {
   if (!oti_kind(rt->stack[first], K_STRING)) return oti_fail(rt, "%read-forms expects a string");
   size_t length;
   const char* text = oti_text_bytes(rt->stack[first], &length);
-  char* copy = malloc(length + 1);
-  if (!copy) return oti_fail(rt, "out of host memory");
-  memcpy(copy, text, length);
-  copy[length] = 0;
+  char* copy = oti_strndup(rt, text, length);
+  if (!copy) return 0;
   oti_reader reader;
   oti_reader_init(&reader, copy, length, OTI_SOURCE_LIMIT);
   size_t base = rt->sp;

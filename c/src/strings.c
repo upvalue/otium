@@ -17,6 +17,17 @@ size_t oti_utf8_encode(uint32_t cp, char bytes[4]) {
   return n;
 }
 
+char* oti_strndup(ot_state* rt, const char* s, size_t n) {
+  char* copy = n < SIZE_MAX ? malloc(n + 1) : NULL;
+  if (!copy) {
+    oti_error(rt, "out of host memory");
+    return NULL;
+  }
+  memcpy(copy, s, n);
+  copy[n] = 0;
+  return copy;
+}
+
 ot_value oti_string_get(ot_value string, ot_value key, ot_value fallback) {
   if (!ot_is_int(key) || ot_to_int(key) < 0) return fallback;
   size_t n, at = 0, index = (size_t)ot_to_int(key);

@@ -880,10 +880,8 @@ static bool lambda(oti_compiler* c, const oti_ast* params, const oti_ast* forms,
   const oti_ast* label = self ? self : c->naming;
   c->naming = NULL;
   if (label && label->kind == AST_SYMBOL) {
-    child.fn->name = malloc(label->as.text.size + 1);
-    if (!child.fn->name) return oti_error(c->rt, "out of host memory");
-    memcpy(child.fn->name, label->as.text.data, label->as.text.size);
-    child.fn->name[label->as.text.size] = 0;
+    child.fn->name = oti_strndup(c->rt, label->as.text.data, label->as.text.size);
+    if (!child.fn->name) return false;
   }
   if (self && !fact(c, self_fact)->assigned) {
     ok = oti_grow(c->rt, (void**)&child.bindings, &child.binding_capacity, 1, sizeof(oti_binding));
@@ -2074,13 +2072,8 @@ ot_value oti_read_string(ot_state* rt, ot_value string) {
   }
   size_t n;
   const char* text = oti_text_bytes(string, &n);
-  char* copy = malloc(n + 1);
-  if (!copy) {
-    oti_error(rt, "out of host memory");
-    return 0;
-  }
-  memcpy(copy, text, n);
-  copy[n] = 0;
+  char* copy = oti_strndup(rt, text, n);
+  if (!copy) return 0;
   ot_value result = oti_read_source(rt, copy, n);
   free(copy);
   return result;

@@ -1060,6 +1060,9 @@ int oti_integer_real(intptr_t integer, double real);
 size_t oti_utf8_next(const char* s, size_t n, size_t p, uint32_t* cp);
 size_t oti_utf8_encode(uint32_t cp, char bytes[4]);
 ot_value oti_string_get(ot_value string, ot_value key, ot_value fallback);
+/* A malloc'd copy of the n bytes at s with a NUL after them, or NULL after
+ * recording an error. */
+char* oti_strndup(ot_state* rt, const char* s, size_t n);
 
 /* The condition for a recorded error, or the raised condition. Clears the error. */
 ot_value oti_error_condition(ot_state* rt);

@@ -50,13 +50,8 @@ ot_value oti_tokens(ot_state* rt, size_t first, size_t count) {
     return 0;
   }
   size_t length = oti_bytes_length(rt->stack[first]);
-  char* text = malloc(length + 1);
-  if (!text) {
-    oti_error(rt, "out of host memory");
-    return 0;
-  }
-  memcpy(text, oti_bytes_data(rt->stack[first]), length);
-  text[length] = 0;
+  char* text = oti_strndup(rt, (const char*)oti_bytes_data(rt->stack[first]), length);
+  if (!text) return 0;
   if (!validate(rt, text, length)) {
     free(text);
     return 0;

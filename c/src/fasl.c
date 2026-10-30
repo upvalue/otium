@@ -402,10 +402,8 @@ static bool run(oti_fasl* f, bool in_module) {
         if (oti_kind(path, K_STRING)) {
           size_t length;
           const char* text = oti_text_bytes(path, &length);
-          char* copy = malloc(length + 1);
-          if (!copy) return oti_error(rt, "out of host memory");
-          memcpy(copy, text, length);
-          copy[length] = 0;
+          char* copy = oti_strndup(rt, text, length);
+          if (!copy) return false;
           rt->source = oti_source_id(rt, copy);
           free(copy);
         } else rt->source = OTI_NO_SOURCE;
@@ -451,10 +449,8 @@ static bool index_modules(ot_state* rt, oti_boot* boot) {
     if (!oti_grow(rt, (void**)&boot->modules, &capacity, boot->module_count + 1,
                   sizeof(oti_boot_section)))
       return false;
-    char* copy = malloc(length + 1);
-    if (!copy) return oti_error(rt, "out of host memory");
-    memcpy(copy, name, length);
-    copy[length] = 0;
+    char* copy = oti_strndup(rt, name, length);
+    if (!copy) return false;
     boot->modules[boot->module_count++] = (oti_boot_section){copy, body, (size_t)(f.p - boot->bytes)};
   }
   return true;

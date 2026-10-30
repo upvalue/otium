@@ -18,9 +18,9 @@ int main(int argc, char** argv) {
   ot_state* rt = new_runtime(128 * 1024, 4096);
   char source[2048];
   snprintf(source, sizeof(source),
-           "(def lib (ffi/open-library '(\"/missing/ffi/library\" \"%s\"))) "
-           "(def other (ffi/open-library '(\"%s\"))) "
-           "(def extra (ffi/open-library '(\"%s\")))",
+           "(def lib (otium.ffi/open-library '(\"/missing/ffi/library\" \"%s\"))) "
+           "(def other (otium.ffi/open-library '(\"%s\"))) "
+           "(def extra (otium.ffi/open-library '(\"%s\")))",
            TEST_SHARED_LIBRARY("ffi-fixture-17"), TEST_SHARED_LIBRARY("ffi-fixture-29"),
            TEST_SHARED_LIBRARY("c/ffi-extra"));
   eval(rt, source);
@@ -29,8 +29,8 @@ int main(int argc, char** argv) {
     CHECK(ot_load_core(rt, TEST_LIBRARY_DIR));
     eval(rt, "(def cleaned 0)");
     const char* program =
-        "(defer ((ffi/bind lib \"call_n\" '(callback-pointer int) 'int #t)"
-        " (ffi/%callback '(12) 12 (fn (x) (exit 3))) 2) (set! cleaned (+ cleaned 1)))";
+        "(defer ((otium.ffi/bind lib \"call_n\" '(callback-pointer int) 'int #t)"
+        " (otium.ffi/%callback '(12) 12 (fn (x) (exit 3))) 2) (set! cleaned (+ cleaned 1)))";
     ot_value result;
     CHECK(!ot_eval(rt, program, strlen(program), &result));
     int status;
@@ -41,16 +41,16 @@ int main(int argc, char** argv) {
     return 0;
   }
   if (!strcmp(mode, "thread")) {
-    eval(rt, "((ffi/bind lib \"call_on_thread\" '(callback-pointer) 'void #t)"
-             " (ffi/%callback '() 0 (fn () nil)))");
+    eval(rt, "((otium.ffi/bind lib \"call_on_thread\" '(callback-pointer) 'void #t)"
+             " (otium.ffi/%callback '() 0 (fn () nil)))");
     abort();
   }
   if (strcmp(mode, "outside")) {
     fprintf(stderr, "unknown mode: %s\n", mode);
     return 2;
   }
-  eval(rt, "((ffi/bind lib \"store_callback\" '(callback-pointer) 'void #t)"
-           " (ffi/%callback '(12) 12 (fn (x) x)))");
+  eval(rt, "((otium.ffi/bind lib \"store_callback\" '(callback-pointer) 'void #t)"
+           " (otium.ffi/%callback '(12) 12 (fn (x) x)))");
   void* library = dlopen(TEST_SHARED_LIBRARY("ffi-fixture-17"), RTLD_NOW | RTLD_LOCAL);
   CHECK(library);
   void* symbol = dlsym(library, "call_stored");

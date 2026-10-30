@@ -187,13 +187,12 @@ static bool notify_load(ot_state* rt, uint32_t space, const char* path) {
   return ok;
 }
 
-static bool load_module(ot_state* rt, uint32_t space, bool reload, bool legacy_ffi) {
+static bool load_module(ot_state* rt, uint32_t space, bool reload) {
   oti_module_state* m = state(rt);
   if (!m) return false;
   const char* name = rt->namespaces[space];
-  if (!strcmp(name, "otium.core") || (!strcmp(name, "otium.ffi") && legacy_ffi) ||
-      !strcmp(name, "otium.process") || !strcmp(name, "otium.reader") ||
-      !strcmp(name, "otium.generic"))
+  if (!strcmp(name, "otium.core") || !strcmp(name, "otium.process") ||
+      !strcmp(name, "otium.reader") || !strcmp(name, "otium.generic"))
     return true;
   size_t index = 0;
   while (index < m->count && m->items[index].space != space) index++;
@@ -282,7 +281,7 @@ static bool load_module(ot_state* rt, uint32_t space, bool reload, bool legacy_f
   return ok;
 }
 
-bool oti_load_module(ot_state* rt, uint32_t space) { return load_module(rt, space, false, false); }
+bool oti_load_module(ot_state* rt, uint32_t space) { return load_module(rt, space, false); }
 
 size_t oti_module_depth(ot_state* rt) { return rt->modules ? rt->modules->depth : 0; }
 
@@ -320,7 +319,7 @@ static bool one_require(ot_state* rt, const oti_ast** cursor) {
       if (i != space && strlen(rt->namespaces[i]) == alias->as.text.size &&
           !memcmp(rt->namespaces[i], alias->as.text.data, alias->as.text.size))
         return oti_coded_error(rt, "E0208", "require alias conflicts with a namespace name");
-  if (!load_module(rt, space, reload, oti_ast_symbol(module, "ffi"))) {
+  if (!load_module(rt, space, reload)) {
     oti_error(rt, "");
     oti_error_record* e = &rt->error;
     /* A located error names its file, and the report notes this require. */

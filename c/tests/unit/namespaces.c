@@ -47,8 +47,8 @@ TEST(namespaces_isolate_and_share_definitions) {
   check_int(rt, "(ns future) (left/imported 1)", 2);
   check_int(rt, "(left/local 1)", 17);
   eval(rt, "(ns future)");
-  check_true(rt, "(ns ffi) (null? null)");
-  check_true(rt, "(ns future) (ffi/null? ffi/null)");
+  check_true(rt, "(ns otium.ffi) (null? null)");
+  check_true(rt, "(ns future) (otium.ffi/null? otium.ffi/null)");
   ot_value result;
   CHECK(ot_call(rt, "left/imported", (ot_value[]){ot_int(41)}, 1, &result));
   CHECK(result == ot_int(42));

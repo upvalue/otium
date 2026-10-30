@@ -103,8 +103,8 @@ TEST(modules_load_refer_and_reload) {
   eval(rt, "(set! api/value 42)");
   check_int(rt, "(read)", 42);
   check_int(rt, "(facade/read)", 42);
-  eval(rt, "(require ffi :as foreign)");
-  check_true(rt, "(foreign/null? foreign/null)");
+  eval(rt, "(require otium.process :as proc)");
+  check_true(rt, "(procedure? proc/getenv)");
   eval(rt, "(ns retarget) (require suffix :as s :refer (value)) "
            "(def (old) value) (require choice :as s :refer (value))");
   check_true(rt, "(equal? s/value \"first-directory\")");

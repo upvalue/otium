@@ -50,7 +50,7 @@ def generated(t):
 @test('runtime reference')
 def reference(t):
     """Every C builtin and core form is documented, and prelude definitions have docstrings.
-    Internal (%) and namespaced builtins, such as ffi/ and otium.process/, are exempt."""
+    Internal (%) and namespaced builtins, such as otium.ffi/ and otium.process/, are exempt."""
     builtins = ''.join(path.read_text() for path in (ROOT / 'c/src').glob('*.c'))
     required = {name for name in re.findall(r'\{B_\w+, "([^"]+)",', builtins)
                 if not name.startswith('%') and '/' not in name}

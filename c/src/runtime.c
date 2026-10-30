@@ -510,10 +510,6 @@ uint32_t oti_constant(ot_state* rt, ot_value value) {
 }
 
 uint32_t oti_namespace(ot_state* rt, const char* name, size_t length) {
-  if (length == 3 && !memcmp(name, "ffi", 3)) {
-    name = "otium.ffi";
-    length = 9;
-  }
   for (size_t i = 0; i < rt->namespace_count; i++)
     if (strlen(rt->namespaces[i]) == length && !memcmp(rt->namespaces[i], name, length))
       return (uint32_t)i;
@@ -629,13 +625,8 @@ static uint32_t resolve_global(ot_state* rt, const char* name, size_t length, bo
     uint32_t alias = oti_alias_namespace(rt, name, prefix);
     if (alias != UINT32_MAX)
       return oti_binding_global(rt, alias, slash + 1, length - prefix - 1, create);
-    const char* space_name = name;
-    if (prefix == 3 && !memcmp(name, "ffi", 3)) {
-      space_name = "otium.ffi";
-      prefix = 9;
-    }
     for (size_t i = 0; i < rt->namespace_count; i++)
-      if (strlen(rt->namespaces[i]) == prefix && !memcmp(rt->namespaces[i], space_name, prefix))
+      if (strlen(rt->namespaces[i]) == prefix && !memcmp(rt->namespaces[i], name, prefix))
         return oti_binding_global(rt, (uint32_t)i, slash + 1, length - (size_t)(slash - name) - 1,
                                   create);
   }

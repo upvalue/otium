@@ -13,9 +13,9 @@
 static void open_fixtures(ot_state* rt) {
   char source[2048];
   snprintf(source, sizeof(source),
-           "(def lib (ffi/open-library '(\"/missing/ffi/library\" \"%s\"))) "
-           "(def other (ffi/open-library '(\"%s\"))) "
-           "(def extra (ffi/open-library '(\"%s\")))",
+           "(def lib (otium.ffi/open-library '(\"/missing/ffi/library\" \"%s\"))) "
+           "(def other (otium.ffi/open-library '(\"%s\"))) "
+           "(def extra (otium.ffi/open-library '(\"%s\")))",
            FIXTURE, OTHER, EXTRA);
   eval(rt, source);
 }
@@ -27,12 +27,12 @@ static ot_state* fixture_runtime(void) {
 }
 
 static void define_scalar_bindings(ot_state* rt) {
-  eval(rt, "(def byte (ffi/bind lib \"echo_u8\" '(u8) 'u8 #t))"
-           "(def boolean (ffi/bind lib \"echo_bool\" '(bool) 'bool #t))"
-           "(def single (ffi/bind lib \"echo_float\" '(float) 'float #t))"
-           "(def real (ffi/bind lib \"echo_double\" '(double) 'double #f))"
-           "(def text (ffi/bind lib \"echo_utf8\" '(utf8) 'utf8 #t))"
-           "(def pointer (ffi/bind lib \"echo_pointer\" '(pointer) 'pointer #t))");
+  eval(rt, "(def byte (otium.ffi/bind lib \"echo_u8\" '(u8) 'u8 #t))"
+           "(def boolean (otium.ffi/bind lib \"echo_bool\" '(bool) 'bool #t))"
+           "(def single (otium.ffi/bind lib \"echo_float\" '(float) 'float #t))"
+           "(def real (otium.ffi/bind lib \"echo_double\" '(double) 'double #f))"
+           "(def text (otium.ffi/bind lib \"echo_utf8\" '(utf8) 'utf8 #t))"
+           "(def pointer (otium.ffi/bind lib \"echo_pointer\" '(pointer) 'pointer #t))");
 }
 
 static ot_state* core_runtime(void) {
@@ -43,23 +43,24 @@ static ot_state* core_runtime(void) {
 
 TEST(library_loading_and_binding) {
   ot_state* rt = fixture_runtime();
-  check_int(rt, "((ffi/bind lib \"fixture_id\" '() 'int #t))", 17);
+  check_int(rt, "((otium.ffi/bind lib \"fixture_id\" '() 'int #t))", 17);
   CHECK(ot_get_stats(rt).signatures == 1);
-  check_int(rt, "((ffi/bind other \"fixture_id\" '() 'int #f))", 29);
+  check_int(rt, "((otium.ffi/bind other \"fixture_id\" '() 'int #f))", 29);
   CHECK(ot_get_stats(rt).signatures == 1);
-  check_int(rt, "(apply (ffi/bind lib \"fixture_id\" '() 'int #t) nil)", 17);
+  check_int(rt, "(apply (otium.ffi/bind lib \"fixture_id\" '() 'int #t) nil)", 17);
 
-  check_true(rt, "(ffi/has-symbol? lib \"echo_bool\")");
-  CHECK(eval(rt, "(ffi/has-symbol? lib \"absent\")") == OT_FALSE);
-  check_error(rt, "(ffi/open-library '(\"/missing/ffi/library\"))", "load");
-  check_error(rt, "(ffi/bind lib \"absent\" '() 'int #t)", "symbol");
-  check_error(rt, "(ffi/bind lib \"fixture_id\" '() 'int 0)", "boolean");
-  check_error(rt, "(ffi/bind lib \"fixture_id\" '() 'int)", "arity");
-  check_error(rt, "(ffi/bind lib \"fixture_id\" '(void) 'int #t)", "void argument");
-  check_error(rt, "(ffi/bind lib \"fixture_id\" '(unknown) 'int #t)", "unsupported scalar");
-  check_error(rt, "(ffi/bind lib \"fixture_id\" '(int . int) 'int #t)", "improper");
-  check_error(rt, "(let ((p (list 'int))) (set-cdr! p p) (ffi/bind lib \"fixture_id\" p 'int #t))",
-              "cyclic");
+  check_true(rt, "(otium.ffi/has-symbol? lib \"echo_bool\")");
+  CHECK(eval(rt, "(otium.ffi/has-symbol? lib \"absent\")") == OT_FALSE);
+  check_error(rt, "(otium.ffi/open-library '(\"/missing/ffi/library\"))", "load");
+  check_error(rt, "(otium.ffi/bind lib \"absent\" '() 'int #t)", "symbol");
+  check_error(rt, "(otium.ffi/bind lib \"fixture_id\" '() 'int 0)", "boolean");
+  check_error(rt, "(otium.ffi/bind lib \"fixture_id\" '() 'int)", "arity");
+  check_error(rt, "(otium.ffi/bind lib \"fixture_id\" '(void) 'int #t)", "void argument");
+  check_error(rt, "(otium.ffi/bind lib \"fixture_id\" '(unknown) 'int #t)", "unsupported scalar");
+  check_error(rt, "(otium.ffi/bind lib \"fixture_id\" '(int . int) 'int #t)", "improper");
+  check_error(
+      rt, "(let ((p (list 'int))) (set-cdr! p p) (otium.ffi/bind lib \"fixture_id\" p 'int #t))",
+      "cyclic");
   ot_destroy(rt);
 }
 
@@ -88,12 +89,12 @@ TEST(integer_types_round_trip) {
 
   char source[2048];
   for (size_t i = 0; i < sizeof(integers) / sizeof(integers[0]); i++) {
-    snprintf(source, sizeof(source), "((ffi/bind lib \"echo_%s\" '(%s) '%s #t) %ld)",
+    snprintf(source, sizeof(source), "((otium.ffi/bind lib \"echo_%s\" '(%s) '%s #t) %ld)",
              integers[i].symbol, integers[i].type, integers[i].type, (long)integers[i].value);
     check_int(rt, source, integers[i].value);
     snprintf(source, sizeof(source),
-             "(let ((p (ffi/alloc '%s 1))) (ffi/set! p '%s 0 %ld) "
-             "(let ((v (ffi/ref p '%s 0))) (ffi/free! p) v))",
+             "(let ((p (otium.ffi/alloc '%s 1))) (otium.ffi/set! p '%s 0 %ld) "
+             "(let ((v (otium.ffi/ref p '%s 0))) (otium.ffi/free! p) v))",
              integers[i].type, integers[i].type, (long)integers[i].value, integers[i].type);
     check_int(rt, source, integers[i].value);
   }
@@ -113,32 +114,33 @@ TEST(scalar_text_and_pointer_conversions) {
   check_true(rt, "(= (single 16777217) 16777216.0)");
   check_true(rt, "(= (real 1.25) 1.25)");
   check_error(rt, "(single 1e100)", "range");
-  check_error(rt, "((ffi/bind lib \"high_u64\" '() 'u64 #t))", "range");
-  check_int(rt, "((ffi/bind lib \"calls\" '() 'int #t))", 1);
-  check_error(rt, "((ffi/bind extra \"lowest_integer\" '() 'i64 #t))", "range");
+  check_error(rt, "((otium.ffi/bind lib \"high_u64\" '() 'u64 #t))", "range");
+  check_int(rt, "((otium.ffi/bind lib \"calls\" '() 'int #t))", 1);
+  check_error(rt, "((otium.ffi/bind extra \"lowest_integer\" '() 'i64 #t))", "range");
   check_printed(rt, "(text \"héllo 🌍\")", "héllo 🌍");
   check_printed(rt, "(text \"\")", "");
-  check_true(rt, "(ffi/null? (text ffi/null))");
+  check_true(rt, "(otium.ffi/null? (text otium.ffi/null))");
   check_error(rt, "(text #f)", "string");
   check_error(rt, "(text \"a\\0b\")", "embedded NUL");
-  check_error(rt, "((ffi/bind lib \"bad_utf8\" '() 'utf8 #t))", "encoding");
+  check_error(rt, "((otium.ffi/bind lib \"bad_utf8\" '() 'utf8 #t))", "encoding");
 
   /* Returned text is copied, so later changes in C do not reach it. */
-  eval(rt, "(def first ((ffi/bind lib \"changing_text\" '() 'utf8 #t)))");
-  CHECK(eval(rt, "((ffi/bind lib \"change_text\" '() 'void #t))") == OT_FALSE);
+  eval(rt, "(def first ((otium.ffi/bind lib \"changing_text\" '() 'utf8 #t)))");
+  CHECK(eval(rt, "((otium.ffi/bind lib \"change_text\" '() 'void #t))") == OT_FALSE);
   check_printed(rt, "first", "first");
-  check_printed(rt, "((ffi/bind lib \"changing_text\" '() 'utf8 #t))", "second");
-  check_printed(rt, "((ffi/bind extra \"offset_text\" '(utf8) 'utf8 #t) \"hello\")", "ello");
-  check_error(rt, "((ffi/bind extra \"offset_text\" '(utf8) 'pointer #t) \"hello\")",
+  check_printed(rt, "((otium.ffi/bind lib \"changing_text\" '() 'utf8 #t))", "second");
+  check_printed(rt, "((otium.ffi/bind extra \"offset_text\" '(utf8) 'utf8 #t) \"hello\")", "ello");
+  check_error(rt, "((otium.ffi/bind extra \"offset_text\" '(utf8) 'pointer #t) \"hello\")",
               "temporary UTF-8");
 
-  check_true(rt, "(ffi/null? ffi/null)");
-  CHECK(eval(rt, "(ffi/null? 0)") == OT_FALSE);
-  check_true(rt, "(ffi/pointer? ffi/null)");
-  check_true(rt, "(if ffi/null #t #f)");
-  check_true(rt, "(ffi/null? (pointer ffi/null))");
+  check_true(rt, "(otium.ffi/null? otium.ffi/null)");
+  CHECK(eval(rt, "(otium.ffi/null? 0)") == OT_FALSE);
+  check_true(rt, "(otium.ffi/pointer? otium.ffi/null)");
+  check_true(rt, "(if otium.ffi/null #t #f)");
+  check_true(rt, "(otium.ffi/null? (pointer otium.ffi/null))");
   check_error(rt, "(pointer 0)", "pointer");
-  check_true(rt, "((ffi/bind lib \"null_callback\" '(callback-pointer) 'bool #t) ffi/null)");
+  check_true(
+      rt, "((otium.ffi/bind lib \"null_callback\" '(callback-pointer) 'bool #t) otium.ffi/null)");
   ot_destroy(rt);
 }
 
@@ -147,56 +149,58 @@ TEST(scalar_text_and_pointer_conversions) {
 TEST(foreign_memory_and_collection) {
   ot_state* rt = fixture_runtime();
   define_scalar_bindings(rt);
-  eval(rt, "(def p (ffi/alloc 'u64 2)) (def view (ffi/view p 8 8))");
-  check_int(rt, "(ffi/allocation-count)", 1);
-  check_int(rt, "(ffi/allocation-bytes)", 16);
-  check_int(rt, "(ffi/ref p 'u64 0)", 0);
-  eval(rt, "(ffi/set! view 'u64 0 1234)");
-  check_int(rt, "(ffi/ref p 'u64 1)", 1234);
-  check_error(rt, "(ffi/ref p 'u64 2)", "bounds");
-  check_error(rt, "(ffi/ref (ffi/view p 1 8) 'u64 0)", "alignment");
-  check_error(rt, "(ffi/view view 0 9)", "bounds");
-  check_error(rt, "(ffi/free! view)", "owning");
+  eval(rt, "(def p (otium.ffi/alloc 'u64 2)) (def view (otium.ffi/view p 8 8))");
+  check_int(rt, "(otium.ffi/allocation-count)", 1);
+  check_int(rt, "(otium.ffi/allocation-bytes)", 16);
+  check_int(rt, "(otium.ffi/ref p 'u64 0)", 0);
+  eval(rt, "(otium.ffi/set! view 'u64 0 1234)");
+  check_int(rt, "(otium.ffi/ref p 'u64 1)", 1234);
+  check_error(rt, "(otium.ffi/ref p 'u64 2)", "bounds");
+  check_error(rt, "(otium.ffi/ref (otium.ffi/view p 1 8) 'u64 0)", "alignment");
+  check_error(rt, "(otium.ffi/view view 0 9)", "bounds");
+  check_error(rt, "(otium.ffi/free! view)", "owning");
   eval(rt, "(def alias (pointer p))");
-  check_true(rt, "(ffi/pointer=? p alias)");
-  eval(rt, "(ffi/free! p)");
-  CHECK(eval(rt, "(ffi/free! p)") == OT_FALSE);
-  check_error(rt, "(ffi/ref view 'u64 0)", "released");
+  check_true(rt, "(otium.ffi/pointer=? p alias)");
+  eval(rt, "(otium.ffi/free! p)");
+  CHECK(eval(rt, "(otium.ffi/free! p)") == OT_FALSE);
+  check_error(rt, "(otium.ffi/ref view 'u64 0)", "released");
   check_error(rt, "(pointer p)", "released");
-  check_true(rt, "(ffi/pointer=? p alias)");
-  check_error(rt, "(ffi/free! alias)", "owning");
-  check_int(rt, "(ffi/allocation-count)", 0);
-  check_int(rt, "(ffi/allocation-bytes)", 0);
-  eval(rt, "(def zero (ffi/alloc 'u8 0))");
-  check_error(rt, "(ffi/ref zero 'u8 0)", "bounds");
-  eval(rt, "(ffi/free! zero)");
-  eval(rt, "(def storage (ffi/alloc-utf8 \"retained λ\"))"
-           "((ffi/bind lib \"retain\" '(pointer) 'void #t) storage)");
+  check_true(rt, "(otium.ffi/pointer=? p alias)");
+  check_error(rt, "(otium.ffi/free! alias)", "owning");
+  check_int(rt, "(otium.ffi/allocation-count)", 0);
+  check_int(rt, "(otium.ffi/allocation-bytes)", 0);
+  eval(rt, "(def zero (otium.ffi/alloc 'u8 0))");
+  check_error(rt, "(otium.ffi/ref zero 'u8 0)", "bounds");
+  eval(rt, "(otium.ffi/free! zero)");
+  eval(rt, "(def storage (otium.ffi/alloc-utf8 \"retained λ\"))"
+           "((otium.ffi/bind lib \"retain\" '(pointer) 'void #t) storage)");
 
   ot_gc_stress(rt, true);
-  check_printed(rt, "((ffi/bind lib \"retained_text\" '() 'utf8 #t))", "retained λ");
-  check_printed(rt, "(ffi/read-utf8 storage 12)", "retained λ");
-  check_error(rt, "(ffi/read-utf8 storage 2)", "bounds");
+  check_printed(rt, "((otium.ffi/bind lib \"retained_text\" '() 'utf8 #t))", "retained λ");
+  check_printed(rt, "(otium.ffi/read-utf8 storage 12)", "retained λ");
+  check_error(rt, "(otium.ffi/read-utf8 storage 2)", "bounds");
   check_printed(rt, "(text (text \"moves across GC\"))", "moves across GC");
   check_true(rt, "(= (real (single 1.25)) 1.25)");
-  eval(rt, "(def interior ((ffi/bind extra \"offset_pointer\" '(pointer) 'pointer #t) storage))");
-  check_printed(rt, "(ffi/read-utf8 interior 11)", "etained λ");
-  eval(rt, "(ffi/free! storage)");
-  check_error(rt, "(ffi/free! interior)", "owning");
-  eval(rt, "(def slots (ffi/alloc 'pointer 1))"
-           "((ffi/bind lib \"pointer_out\" '(pointer pointer) 'void #t) slots slots)");
-  check_true(rt, "(ffi/pointer=? slots (ffi/ref slots 'pointer 0))");
-  eval(rt, "(ffi/free! slots)");
-  eval(rt, "(def mix (ffi/bind extra \"abi_mix\" "
+  eval(rt,
+       "(def interior ((otium.ffi/bind extra \"offset_pointer\" '(pointer) 'pointer #t) storage))");
+  check_printed(rt, "(otium.ffi/read-utf8 interior 11)", "etained λ");
+  eval(rt, "(otium.ffi/free! storage)");
+  check_error(rt, "(otium.ffi/free! interior)", "owning");
+  eval(rt, "(def slots (otium.ffi/alloc 'pointer 1))"
+           "((otium.ffi/bind lib \"pointer_out\" '(pointer pointer) 'void #t) slots slots)");
+  check_true(rt, "(otium.ffi/pointer=? slots (otium.ffi/ref slots 'pointer 0))");
+  eval(rt, "(otium.ffi/free! slots)");
+  eval(rt, "(def mix (otium.ffi/bind extra \"abi_mix\" "
            "'(int double int double int double int double int double int double int double int "
            "double pointer bool float) 'double #t))");
-  check_true(rt,
-             "(= (mix 1 0.5 2 1.5 3 2.5 4 3.5 5 4.5 6 5.5 7 6.5 8 7.5 ffi/null #t 0.25) 168.25)");
+  check_true(
+      rt,
+      "(= (mix 1 0.5 2 1.5 3 2.5 4 3.5 5 4.5 6 5.5 7 6.5 8 7.5 otium.ffi/null #t 0.25) 168.25)");
   eval(rt, "(def (tail-call x) (byte x))");
   check_int(rt, "(tail-call 42)", 42);
   ot_value argument = ot_int(43), result;
   CHECK(ot_call(rt, "byte", &argument, 1, &result) && result == argument);
-  check_int(rt, "(ffi/allocation-count)", 0);
+  check_int(rt, "(otium.ffi/allocation-count)", 0);
   CHECK(ot_get_stats(rt).collections > 10);
   ot_destroy(rt);
 }
@@ -205,8 +209,8 @@ TEST(text_survives_collection_in_small_heap) {
   ot_state* rt = new_runtime(8192, 256);
   char source[2048];
   snprintf(source, sizeof(source),
-           "(def lib (ffi/open-library '(\"%s\"))) "
-           "(def text (ffi/bind lib \"echo_utf8\" '(utf8) 'utf8 #t))",
+           "(def lib (otium.ffi/open-library '(\"%s\"))) "
+           "(def text (otium.ffi/bind lib \"echo_utf8\" '(utf8) 'utf8 #t))",
            FIXTURE);
   eval(rt, source);
   check_printed(rt,
@@ -220,11 +224,11 @@ TEST(text_survives_collection_in_small_heap) {
 TEST(allocation_reports_heap_exhaustion) {
   ot_state* rt = new_runtime(128, 64);
   ot_value result;
-  const char* exhaustion = "(ffi/alloc 'u8 5)";
+  const char* exhaustion = "(otium.ffi/alloc 'u8 5)";
   CHECK(!ot_eval(rt, exhaustion, strlen(exhaustion), &result));
   CHECK(strstr(ot_error(rt), "heap exhausted"));
-  CHECK(ot_call(rt, "ffi/allocation-count", NULL, 0, &result) && result == ot_int(0));
-  CHECK(ot_call(rt, "ffi/allocation-bytes", NULL, 0, &result) && result == ot_int(0));
+  CHECK(ot_call(rt, "otium.ffi/allocation-count", NULL, 0, &result) && result == ot_int(0));
+  CHECK(ot_call(rt, "otium.ffi/allocation-bytes", NULL, 0, &result) && result == ot_int(0));
   ot_destroy(rt);
 }
 
@@ -234,44 +238,45 @@ TEST(bulk_memory_and_layouts) {
   eval_file(rt, "tests/ffi/bulk.ot");
 
   /* Overlapping copies behave like memmove. */
-  eval(rt, "(def overlap (ffi/alloc 'u8 6)) (ffi/write-bytes! overlap #u8(1 2 3 4 5 6))"
-           "(ffi/copy! (ffi/view overlap 1 5) overlap 5)");
-  check_printed(rt, "(str (ffi/read-bytes overlap 6))", "#u8(1 1 2 3 4 5)");
-  eval(rt, "(ffi/copy! overlap (ffi/view overlap 1 5) 5)");
-  check_printed(rt, "(str (ffi/read-bytes overlap 6))", "#u8(1 2 3 4 5 5)");
-  eval(rt, "(def detached (ffi/read-bytes overlap 6)) (ffi/write-bytes! overlap #u8(9))");
+  eval(rt, "(def overlap (otium.ffi/alloc 'u8 6)) (otium.ffi/write-bytes! overlap #u8(1 2 3 4 5 6))"
+           "(otium.ffi/copy! (otium.ffi/view overlap 1 5) overlap 5)");
+  check_printed(rt, "(str (otium.ffi/read-bytes overlap 6))", "#u8(1 1 2 3 4 5)");
+  eval(rt, "(otium.ffi/copy! overlap (otium.ffi/view overlap 1 5) 5)");
+  check_printed(rt, "(str (otium.ffi/read-bytes overlap 6))", "#u8(1 2 3 4 5 5)");
+  eval(rt,
+       "(def detached (otium.ffi/read-bytes overlap 6)) (otium.ffi/write-bytes! overlap #u8(9))");
   check_int(rt, "(bytevector-u8-ref detached 0)", 1);
-  check_error(rt, "(ffi/copy! overlap (ffi/view overlap 0 2) 3)", "bounds");
-  check_error(rt, "(ffi/copy! (ffi/view overlap 0 2) overlap 3)", "bounds");
-  eval(rt, "(ffi/free! overlap)");
-  check_error(rt, "(ffi/copy! overlap overlap 0)", "released");
+  check_error(rt, "(otium.ffi/copy! overlap (otium.ffi/view overlap 0 2) 3)", "bounds");
+  check_error(rt, "(otium.ffi/copy! (otium.ffi/view overlap 0 2) overlap 3)", "bounds");
+  eval(rt, "(otium.ffi/free! overlap)");
+  check_error(rt, "(otium.ffi/copy! overlap overlap 0)", "released");
 
   /* Layouts copy their specifications and outlive redefinition. */
   eval(rt, "(def spec (list 'array 'double 2))"
            "(def fields (list (list 'tag 'u8) (list 'values spec)))"
-           "(def Layout (ffi/define-struct! 'Layout fields))"
+           "(def Layout (otium.ffi/define-struct! 'Layout fields))"
            "(set-car! (cdr spec) 'u8) (set-car! (car fields) 'changed)");
-  check_int(rt, "(ffi/sizeof Layout)", 24);
-  check_int(rt, "(ffi/alignof Layout)", 8);
-  check_int(rt, "(ffi/offset-of Layout '(values 1))", 16);
-  eval(rt,
-       "(def saved-layout Layout)"
-       "(def Container (ffi/define-struct! 'Container (list (list 'items (list 'array Layout 2)))))"
-       "(set! Layout (ffi/define-struct! 'Layout '((tag u8))))"
-       "(def aggregate (ffi/alloc Container 1))"
-       "(ffi/field-set! aggregate Container '(items 1 values 1) 3.5)");
-  check_int(rt, "(ffi/sizeof Container)", 48);
-  check_true(rt, "(= (ffi/field-ref aggregate Container '(items 1 values 1)) 3.5)");
-  eval(rt, "(def aggregate-view (ffi/field-view aggregate Container '(items 1)))");
-  check_true(rt, "(= (ffi/field-ref aggregate-view saved-layout '(values 1)) 3.5)");
-  eval(rt, "(def Union (ffi/define-union! 'Union '((tag u8) (value double))))");
-  check_int(rt, "(ffi/sizeof Union)", 8);
-  check_int(rt, "(ffi/offset-of Union '(value))", 0);
-  eval(rt, "(ffi/free! aggregate)");
-  check_error(rt, "(ffi/field-ref aggregate-view saved-layout '(tag))", "released");
-  check_error(rt, "(ffi/define-struct! 'Duplicate '((a u8) (a double)))", "duplicate");
-  check_error(rt, "(ffi/offset-of Container '(items 2))", "bounds");
-  check_int(rt, "(ffi/allocation-count)", 0);
+  check_int(rt, "(otium.ffi/sizeof Layout)", 24);
+  check_int(rt, "(otium.ffi/alignof Layout)", 8);
+  check_int(rt, "(otium.ffi/offset-of Layout '(values 1))", 16);
+  eval(rt, "(def saved-layout Layout)"
+           "(def Container (otium.ffi/define-struct! 'Container (list (list 'items (list 'array "
+           "Layout 2)))))"
+           "(set! Layout (otium.ffi/define-struct! 'Layout '((tag u8))))"
+           "(def aggregate (otium.ffi/alloc Container 1))"
+           "(otium.ffi/field-set! aggregate Container '(items 1 values 1) 3.5)");
+  check_int(rt, "(otium.ffi/sizeof Container)", 48);
+  check_true(rt, "(= (otium.ffi/field-ref aggregate Container '(items 1 values 1)) 3.5)");
+  eval(rt, "(def aggregate-view (otium.ffi/field-view aggregate Container '(items 1)))");
+  check_true(rt, "(= (otium.ffi/field-ref aggregate-view saved-layout '(values 1)) 3.5)");
+  eval(rt, "(def Union (otium.ffi/define-union! 'Union '((tag u8) (value double))))");
+  check_int(rt, "(otium.ffi/sizeof Union)", 8);
+  check_int(rt, "(otium.ffi/offset-of Union '(value))", 0);
+  eval(rt, "(otium.ffi/free! aggregate)");
+  check_error(rt, "(otium.ffi/field-ref aggregate-view saved-layout '(tag))", "released");
+  check_error(rt, "(otium.ffi/define-struct! 'Duplicate '((a u8) (a double)))", "duplicate");
+  check_error(rt, "(otium.ffi/offset-of Container '(items 2))", "bounds");
+  check_int(rt, "(otium.ffi/allocation-count)", 0);
   ot_destroy(rt);
 }
 
@@ -295,19 +300,23 @@ TEST(aggregate_calls_and_signature_cache) {
   eval(rt, source);
   eval_file(rt, "c/tests/unit/data/aggregate.ot");
   size_t prepared = ot_get_stats(rt).signatures;
-  eval(rt, "(def SamePoint (ffi/define-struct! 'OtherName '((a double) (b double))))"
-           "(def same-translate (ffi/bind aggregate-lib \"translate\" (list SamePoint 'double "
-           "'double) SamePoint #t))");
+  eval(rt,
+       "(def SamePoint (otium.ffi/define-struct! 'OtherName '((a double) (b double))))"
+       "(def same-translate (otium.ffi/bind aggregate-lib \"translate\" (list SamePoint 'double "
+       "'double) SamePoint #t))");
   CHECK(ot_get_stats(rt).signatures == prepared);
   /* Only prepare these signatures: the fixture has a different C type. */
-  eval(rt, "(def DifferentPoint (ffi/define-struct! 'Point '((a u64) (b double))))"
-           "(def unused-binding (ffi/bind aggregate-lib \"translate\" (list DifferentPoint 'double "
+  eval(rt, "(def DifferentPoint (otium.ffi/define-struct! 'Point '((a u64) (b double))))"
+           "(def unused-binding (otium.ffi/bind aggregate-lib \"translate\" (list DifferentPoint "
+           "'double "
            "'double) DifferentPoint #t))");
   CHECK(ot_get_stats(rt).signatures == prepared + 1);
-  eval(rt, "(dotimes (i 40)"
-           " (let ((layout (ffi/define-struct! 'Temporary (list (list 'data (list 'array 'u8 (+ i "
-           "1)))))))"
-           "   (ffi/bind aggregate-lib \"translate\" (list layout) layout #t)))");
+  eval(
+      rt,
+      "(dotimes (i 40)"
+      " (let ((layout (otium.ffi/define-struct! 'Temporary (list (list 'data (list 'array 'u8 (+ i "
+      "1)))))))"
+      "   (otium.ffi/bind aggregate-lib \"translate\" (list layout) layout #t)))");
   eval(rt, "(+ 20 22)");
   CHECK(ot_get_stats(rt).signatures <= prepared + 6);
   ot_destroy(rt);
@@ -320,7 +329,7 @@ TEST(common_ffi_script) {
   ot_gc_stress(rt, true);
   eval_file(rt, "tests/ffi/support.ot");
   eval_file(rt, "tests/ffi/common.ot");
-  check_int(rt, "(ffi/allocation-count)", 0);
+  check_int(rt, "(otium.ffi/allocation-count)", 0);
   ot_destroy(rt);
 }
 
@@ -334,14 +343,14 @@ TEST(callbacks_and_callback_lifetime) {
   ot_gc_stress(rt, true);
   eval_file(rt, "tests/ffi/support.ot");
   eval_file(rt, "tests/ffi/callbacks.ot");
-  eval(rt, "(def callback-extra (ffi/open-library '(\"" EXTRA "\")))");
+  eval(rt, "(def callback-extra (otium.ffi/open-library '(\"" EXTRA "\")))");
   eval_file(rt, "c/tests/unit/data/callback-lifetime.ot");
 
   /* Freed callbacks release their records. */
   size_t callback_records = ot_get_stats(rt).callback_records;
   for (size_t i = 0; i < 100; i++) {
-    eval(rt, "(def temporary-callback (ffi/callback '(int) 'int (fn (x) (+ x 1))))"
-             "(ffi/free-callback! temporary-callback) (set! temporary-callback nil)");
+    eval(rt, "(def temporary-callback (otium.ffi/callback '(int) 'int (fn (x) (+ x 1))))"
+             "(otium.ffi/free-callback! temporary-callback) (set! temporary-callback nil)");
     CHECK(ot_get_stats(rt).callback_records <= callback_records + 2);
   }
   eval(rt, "(+ 20 22)");

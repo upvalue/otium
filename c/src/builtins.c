@@ -26,7 +26,7 @@ int oti_builtin_index(const char* name) {
 /* Fill the dispatch array and bind each named builtin. Every id must be
  * defined exactly once. */
 bool oti_builtins(ot_state* rt) {
-  uint32_t ffi = oti_namespace(rt, "ffi", 3);
+  uint32_t ffi = oti_namespace(rt, "otium.ffi", 9);
   uint32_t process = oti_namespace(rt, "otium.process", 13);
   uint32_t reader = oti_namespace(rt, "otium.reader", 12);
   uint32_t dev = oti_namespace(rt, "otium.dev", 9);
@@ -43,12 +43,12 @@ bool oti_builtins(ot_state* rt) {
       rt->builtin_run[d->id] = d->run;
       const char* full = d->name;
       if (!full) continue;
-      bool foreign = !strncmp(full, "ffi/", 4);
+      bool foreign = !strncmp(full, "otium.ffi/", 10);
       bool process_binding = !strncmp(full, "otium.process/", 14);
       bool reader_binding = !strncmp(full, "otium.reader/", 13);
       bool dev_binding = !strncmp(full, "otium.dev/", 10);
       bool memory_binding = !strncmp(full, "otium.memory/", 13);
-      const char* name = full + (foreign           ? 4
+      const char* name = full + (foreign           ? 10
                                  : process_binding ? 14
                                  : reader_binding  ? 13
                                  : dev_binding     ? 10

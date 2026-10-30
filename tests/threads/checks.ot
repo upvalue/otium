@@ -51,6 +51,17 @@
 
 ;; --- Failure
 
+(for-each (fn (read-input)
+            (check "buffered reads report the invalid byte's position"
+                   4
+                   (thread/join (spawn (fn ()
+                                         (let ((port (open-input-bytevector #u8(120 40 206 187 255 41))))
+                                           (read-u8 port)
+                                           (try
+                                             (read-input port)
+                                             (catch e (get e :position)))))))))
+          (list read read-all read-line (fn (port) (read-string 10 port))))
+
 (let ((t (spawn (fn () (car 1)))))
   (check "failure raises thread-failed" "E0504" (failure-code (fn () (thread/join t))))
   (check "failure carries the original"

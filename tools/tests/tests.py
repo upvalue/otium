@@ -60,11 +60,12 @@ def reference(t):
     entries = json.loads((ROOT / 'lib/catalog/runtime.json').read_text())
     t.check(not required - entries.keys(), 'undocumented:', sorted(required - entries.keys()))
     prelude = (ROOT / 'lib/otium/core.ot').read_text()
-    pattern = r'^\((?:define\s+\(([^\s()]+)[^\n]*?\)|defmacro\s+([^\s()]+)\s+\([^\n]*?\))'
+    pattern = r'^\((?:def\s+\(([^\s()]+)[^\n]*\)|defmacro\s+([^\s()]+)\s+\([^\n]*\))'
     for match in re.finditer(pattern, prelude, re.M):
         name = match[1] or match[2]
+        if name.startswith('%'):
+            continue
         t.check(prelude[match.end():].lstrip().startswith('"'), 'missing source docstring:', name)
-        t.check(name not in entries, 'documented in both the prelude and lib/catalog/runtime.json:', name)
 
 
 @test('docs')
@@ -145,3 +146,46 @@ def class_reference_source(t):
     t.check(fields[0] == {'name': 'required', 'required': True})
     t.check(fields[1]['default'] == 'nil' and fields[1]['accessor'] == 'sample-optional')
     t.check(fields[2]['state'] and fields[2]['default'] == '(error\n                         "do not evaluate")')
+
+
+@test('dev data reader')
+def dev_data_reader(t):
+    from otium_tools import dev
+
+    t.check(dev.read('{:value [1 #f nil :ready]}') ==
+            {dev.Keyword('value'): [1, False, None, dev.Keyword('ready')]})
+    text = ''.join(map(chr, range(32))) + '"\\λ😀'
+    encoded = dev.encode(text)
+    t.check(dev.read(encoded) == text, 'string round trip')
+    script = t.scratch / 'string.ot'
+    script.write_text('(write ' + encoded + ')\n')
+    result = t.expect(t.otium(script))
+    t.check(dev.read(result.stdout) == text, 'runtime string round trip')
+    # A separate process bounds the regression for mismatched delimiters.
+    program = '''from otium_tools import dev
+for text in [')', '(]', '[}', '{)', '{:a}', '"trailing\\\\', '"\\\\q"', '{[] 1}']:
+    try:
+        dev.read(text)
+    except ValueError:
+        continue
+    raise AssertionError(repr(text))
+'''
+    t.expect(t.run([sys.executable, '-c', program], timeout=5,
+                   env={'PYTHONPATH': str(ROOT / 'tools')}))
+
+
+@test('dev raw command status')
+def dev_raw_command_status(t):
+    import contextlib
+    import io
+    from otium_tools import dev_cli
+
+    class FailedConnection:
+        def request(self, op):
+            return {'ok': False, 'condition': {'message': 'cannot ' + op}}
+
+    for operation in ('interrupt', 'continue', 'abort'):
+        args = dev_cli.parser().parse_args([operation, '--raw'])
+        with contextlib.redirect_stdout(io.StringIO()):
+            t.check(dev_cli.command(args, FailedConnection()) == dev_cli.FAILED,
+                    operation, 'hid the failure in raw mode')

@@ -136,6 +136,11 @@
   (check "delivered in order" '(first second third) (list (receive (m m)) (receive (m m)) (receive (m m))))
   (check "after their delays" #t (>= (- (%scheduler-clock) start) 0.3)))
 
+(actor/send-after 0 (self) nil)
+(check "delayed nil message" :received (receive (nil :received) (:after 1 :missing)))
+(actor/send-after 0 (self) #f)
+(check "delayed false message" :received (receive (#f :received) (:after 1 :missing)))
+
 ;; --- Names
 
 (let ((t (spawn (fn () (serve 10)))))

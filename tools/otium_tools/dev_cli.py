@@ -186,6 +186,7 @@ def command(args, connection):
         response = connection.request(c)
         if args.raw:
             print(show(response))
+            return OK if response.get('ok') else FAILED
         elif not response.get('ok'):
             print(show_condition(response.get('condition') or {}), file=sys.stderr)
             return FAILED

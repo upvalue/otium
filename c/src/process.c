@@ -118,17 +118,23 @@ static ot_value process_arguments(ot_state* rt, size_t first, size_t count) {
 
 /* otium.memory reads these. Allocation is cumulative: bytes collections have
  * reclaimed plus bytes still held. */
+static ot_value memory_counter(uint64_t value) {
+  uint64_t limit = (uint64_t)(INTPTR_MAX / 2);
+  return ot_int((intptr_t)(value > limit ? limit : value));
+}
+
 static ot_value memory_allocated(ot_state* rt, size_t first, size_t count) {
   (void)first;
   if (!process_metadata(rt, count)) return 0;
   const oti_heap* h = &rt->heap;
-  return ot_int((intptr_t)(h->allocated_bytes + (h->start ? h->used : 0)));
+  uint64_t allocated = h->allocated_bytes, current = h->start ? h->used : 0;
+  return memory_counter(current > UINT64_MAX - allocated ? UINT64_MAX : allocated + current);
 }
 
 static ot_value memory_collections(ot_state* rt, size_t first, size_t count) {
   (void)first;
   if (!process_metadata(rt, count)) return 0;
-  return ot_int((intptr_t)rt->heap.collections);
+  return memory_counter(rt->heap.collections);
 }
 
 /* (%heap-stat n): one heap statistic as an integer, so reading it allocates
@@ -163,9 +169,7 @@ static ot_value memory_heap_stat(ot_state* rt, size_t first, size_t count) {
       oti_error(rt, "unknown heap statistic");
       return 0;
   }
-  // Otium integers are 63-bit.
-  uint64_t max = ((uint64_t)1 << 62) - 1;
-  return ot_int((intptr_t)(value > max ? max : value));
+  return memory_counter(value);
 }
 
 const oti_builtin_def oti_process_builtins[] = {

@@ -1,0 +1,68 @@
+(require otium.test :refer (check report))
+
+;; Search uses the initial array length and the value passed to the predicate.
+(let ((xs [1 2]))
+  (check 1
+         (find (fn (_)
+                 (put! xs 0 9)
+                 #t)
+               xs)))
+(let ((xs (list 1 2)))
+  (check 1
+         (find (fn (_)
+                 (set-car! xs 9)
+                 #t)
+               xs)))
+(for-each (fn (search)
+            (let ((xs [1 2 3])
+                  (seen []))
+              (check nil
+                     (search (fn (x)
+                               (push! seen x)
+                               (pop! xs)
+                               #f)
+                             xs))
+              (check [1 2 nil] seen))
+            (let ((xs [1 2])
+                  (seen []))
+              (check nil
+                     (search (fn (x)
+                               (push! seen x)
+                               (push! xs 9)
+                               #f)
+                             xs))
+              (check [1 2] seen)))
+          (list find find-index))
+
+(def half-limit
+  (let loop ((n 1))
+    (let ((next (* n 2)))
+      (if (> next n)
+          (loop next)
+          n))))
+
+(def highest (+ half-limit (- half-limit 1)))
+
+(def lowest (- (- highest) 1))
+
+;; Multiplication before cancellation overflows for these exact results.
+(check highest (lcm highest 3))
+(check highest (lcm 3 highest))
+(check highest (lcm (- highest) 3))
+(check 0 (lcm 0 0))
+(check 1 (lcm))
+
+;; Stepping past the integer boundary must finish without wrapping around.
+(check [(- highest 1)] (range (- highest 1) highest 2))
+(check [(+ lowest 1)] (range (+ lowest 1) lowest -2))
+(check [lowest -1 (- highest 1)] (range lowest highest highest))
+(check [highest -1] (range highest lowest lowest))
+
+;; Merging long runs must not consume a frame per element.
+(def ascending (range 30000))
+
+(check ascending (sort (range 29999 -1 -1)))
+(check ascending (sort ascending))
+(check [[0 :a] [1 :b] [1 :c] [1 :d]] (sort-by first [[1 :b] [1 :c] [0 :a] [1 :d]]))
+(check '(1 2 3) (sort '(3 1 2)))
+(report "library quality")

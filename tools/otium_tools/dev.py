@@ -1,7 +1,5 @@
 """Client side of the development server protocol: framing, a reader for responses, and finding
 running servers."""
-import errno
-import json
 import os
 from pathlib import Path
 import socket
@@ -32,7 +30,8 @@ def read(text):
     return value
 
 
-ESCAPES = {'n': '\n', 't': '\t', 'r': '\r', '\\': '\\', '"': '"', '0': '\0'}
+ESCAPES = {'n': '\n', 't': '\t', 'r': '\r', '\\': '\\', '"': '"', '0': '\0', 'e': '\x1b'}
+STRING_ESCAPES = {value: '\\' + key for key, value in ESCAPES.items()}
 DELIMITERS = set(' \t\r\n()[]{}"')
 
 
@@ -46,6 +45,8 @@ def _read(text, i):
     if i >= len(text):
         raise ValueError('unexpected end of data')
     c = text[i]
+    if c in ')]}':
+        raise ValueError('unexpected closing delimiter ' + c)
     if c in '([{':
         close = {'(': ')', '[': ']', '{': '}'}[c]
         items = []
@@ -57,7 +58,12 @@ def _read(text, i):
         if i >= len(text):
             raise ValueError('unclosed ' + c)
         if c == '{':
-            return dict(zip(items[::2], items[1::2])), i + 1
+            if len(items) % 2:
+                raise ValueError('table requires key/value pairs')
+            try:
+                return dict(zip(items[::2], items[1::2])), i + 1
+            except TypeError as error:
+                raise ValueError('unsupported table key') from error
         return items, i + 1
     if c == '"':
         out = []
@@ -65,12 +71,16 @@ def _read(text, i):
         while i < len(text) and text[i] != '"':
             if text[i] == '\\':
                 i += 1
+                if i >= len(text):
+                    raise ValueError('unclosed string')
                 if text[i] == 'x':
                     end = text.index(';', i)
                     out.append(chr(int(text[i + 1:end], 16)))
                     i = end + 1
                     continue
-                out.append(ESCAPES.get(text[i], text[i]))
+                if text[i] not in ESCAPES:
+                    raise ValueError('invalid string escape')
+                out.append(ESCAPES[text[i]])
             else:
                 out.append(text[i])
             i += 1
@@ -111,7 +121,8 @@ def encode(value):
     if isinstance(value, (int, float)):
         return repr(value)
     if isinstance(value, str):
-        return json.dumps(value, ensure_ascii=False)
+        return '"' + ''.join(STRING_ESCAPES.get(c, '\\x%x;' % ord(c) if ord(c) < 32 else c)
+                             for c in value) + '"'
     if isinstance(value, dict):
         return '{' + ' '.join(encode(k) + ' ' + encode(v) for k, v in value.items()) + '}'
     raise TypeError('cannot encode %r' % (value,))

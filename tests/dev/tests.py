@@ -270,6 +270,19 @@ def attach_and_mcp(t):
     t.check(responses[2]['id'] == 3, responses[2])
     t.check_in(':value "7"', responses[2]['result']['content'][0]['text'])
 
+    result = t.expect(t.run([ROOT / 'otium', 'attach', server.path], timeout=10,
+                            stdin='(+ 20 22)'))
+    t.check_in(':value "42"', result.stdout)
+    result = t.expect(t.run([ROOT / 'otium', 'mcp', server.path], timeout=10,
+                            stdin=json.dumps(messages[1])))
+    t.check(json.loads(result.stdout)['id'] == 2, result.stdout)
+
+    code = '(string-length ' + dev.encode('\0\b\f\x1b') + ')'
+    # Send literal control characters in a comment as part of the request string.
+    code += ' ; \b\f\x1b'
+    result = t.expect(t.run([ROOT / 'otium', 'attach', server.path, '--eval', code], timeout=10))
+    t.check_in(':value "4"', result.stdout)
+
 
 @test('dev events')
 def events(t):

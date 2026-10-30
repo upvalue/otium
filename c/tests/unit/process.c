@@ -1,4 +1,5 @@
 #include "helpers.h"
+#include "internal.h"
 #include <string.h>
 
 static ot_state* process_runtime(void) {
@@ -48,9 +49,36 @@ TEST(arguments_are_copied_and_kept) {
   ot_destroy(rt);
 }
 
+TEST(memory_counters_stay_nonnegative) {
+  ot_state* rt = new_runtime(1024 * 1024, 128 * 1024);
+  CHECK(oti_stack(rt, 1));
+  size_t allocated = rt->heap.allocated_bytes, collections = rt->heap.collections;
+  uint64_t pauses = rt->heap.pause_nanoseconds;
+  size_t limit = (size_t)(INTPTR_MAX / 2);
+  rt->heap.allocated_bytes = 17;
+  CHECK_EQ_INT(ot_to_int(oti_builtin(rt, B_MEMORY_ALLOCATED, 0, 0)),
+               17 + (rt->heap.start ? rt->heap.used : 0));
+  rt->heap.allocated_bytes = limit + 1;
+  CHECK_EQ_INT(ot_to_int(oti_builtin(rt, B_MEMORY_ALLOCATED, 0, 0)), limit);
+  rt->heap.allocated_bytes = SIZE_MAX;
+  CHECK_EQ_INT(ot_to_int(oti_builtin(rt, B_MEMORY_ALLOCATED, 0, 0)), limit);
+  rt->heap.collections = 17;
+  CHECK_EQ_INT(ot_to_int(oti_builtin(rt, B_MEMORY_COLLECTIONS, 0, 0)), 17);
+  rt->heap.collections = SIZE_MAX;
+  CHECK_EQ_INT(ot_to_int(oti_builtin(rt, B_MEMORY_COLLECTIONS, 0, 0)), limit);
+  rt->heap.pause_nanoseconds = UINT64_MAX;
+  rt->stack[0] = ot_int(6);
+  CHECK_EQ_INT(ot_to_int(oti_builtin(rt, B_MEMORY_HEAP_STAT, 0, 1)), limit);
+  rt->heap.allocated_bytes = allocated;
+  rt->heap.collections = collections;
+  rt->heap.pause_nanoseconds = pauses;
+  ot_destroy(rt);
+}
+
 static const test_case tests[] = {
     TEST_ENTRY(error_output_and_environment),
     TEST_ENTRY(arguments_are_copied_and_kept),
+    TEST_ENTRY(memory_counters_stay_nonnegative),
 };
 
 TEST_SUITE(process, tests);

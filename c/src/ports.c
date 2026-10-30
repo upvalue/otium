@@ -696,7 +696,7 @@ static int port_character(ot_state* rt, ot_value* port, size_t ahead, uint32_t* 
     else bytes[i] = (unsigned char)b;
   }
   if (!valid || !oti_utf8_scalar(bytes, 0, *width)) {
-    oti_decode_error(rt, port_object(*port)->position);
+    oti_decode_error(rt, port_object(*port)->position + ahead);
     return -2;
   }
   oti_utf8_next((char*)bytes, *width, 0, cp);

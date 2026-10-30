@@ -6,13 +6,9 @@ import os
 from pathlib import Path
 import re
 import selectors
-import socket
-import struct
 import sys
 
 from otium_tools import dev
-
-LIMIT = 4 * 1024 * 1024
 
 
 def default_socket():
@@ -24,43 +20,22 @@ def default_socket():
     return chosen[0]
 
 
-class Connection:
+class Connection(dev.Connection):
     def __init__(self, path):
-        self.socket = socket.socket(socket.AF_UNIX)
-        self.socket.connect(str(path))
-        self.buffer = bytearray()
-        self.serial = 0
+        super().__init__(path)
         self.outstanding = set()
 
     def send(self, op, fields):
-        self.serial += 1
-        payload = '{:id %d :op :%s%s}' % (self.serial, op, ''.join(
-            ' :%s %s' % (key, json.dumps(value, ensure_ascii=False)) for key, value in fields.items()))
-        payload = payload.encode('utf-8')
-        if len(payload) > LIMIT:
-            raise ValueError('request exceeds 4 MiB')
-        self.socket.sendall(struct.pack('!I', len(payload)) + payload)
+        super().send(op, **fields)
         self.outstanding.add(self.serial)
         return self.serial
 
     def read(self):
-        data = self.socket.recv(65536)
-        if not data:
-            raise EOFError('development server disconnected')
-        self.buffer.extend(data)
-        result = []
-        while len(self.buffer) >= 4:
-            size, = struct.unpack('!I', self.buffer[:4])
-            if size > LIMIT:
-                raise ValueError('response exceeds 4 MiB')
-            if len(self.buffer) < size + 4:
-                break
-            text = self.buffer[4:4+size].decode('utf-8')
-            del self.buffer[:4+size]
+        result = self.frames()
+        for text in result:
             match = re.match(r'^\{:id (\d+)\s', text)
             if match:
                 self.outstanding.discard(int(match[1]))
-            result.append(text)
         return result
 
 
@@ -144,9 +119,12 @@ def main():
                 if not chunk:
                     selector.unregister(sys.stdin)
                     input_closed = True
-                    if not (pending if args.mode == 'mcp' else connection.outstanding):
-                        return 0
-                    continue
+                    if input_buffer:
+                        chunk = b'\n'
+                    else:
+                        if not (pending if args.mode == 'mcp' else connection.outstanding):
+                            return 0
+                        continue
                 input_buffer += chunk
                 lines = input_buffer.split(b'\n')
                 input_buffer = lines.pop()
@@ -192,6 +170,8 @@ def main():
                             rpc(ident, error={'code': -32601, 'message': 'unknown method'})
                     except (ValueError, KeyError, TypeError, AttributeError) as error:
                         rpc(ident, error={'code': -32602, 'message': str(error)})
+                if input_closed and not (pending if args.mode == 'mcp' else connection.outstanding):
+                    return 0
     finally:
         selector.close()
         connection.socket.close()

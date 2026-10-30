@@ -66,7 +66,7 @@
         (let ((entry (car pending)))
           (send (cadr entry) (caddr entry))
           (timer-loop (cdr pending)))
-        (timer-loop (receive ({:send-after at :to to :message m} (insert (list at to m) pending))
+        (timer-loop (receive ({:send-after at :to to :message (opt m nil)} (insert (list at to m) pending))
                              (:after (if (pair? pending)
                                          (- (car (car pending)) now)
                                          nil)

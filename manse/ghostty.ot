@@ -141,7 +141,37 @@
 
 (def- buffer-len-index (/ (ffi/offset-of GBuffer '(len)) (ffi/sizeof 'size-t)))
 
-(def- inverse-offset (ffi/offset-of Style '(inverse)))
+
+;; Style's bool flags, bold to overline, sit in eight consecutive bytes: read
+;; them as one u64.
+(def- flags-index (/ (ffi/offset-of Style '(bold)) 8))
+
+(def- underline-index (/ (ffi/offset-of Style '(underline)) 4))
+
+(def BOLD 1)
+
+(def ITALIC 2)
+
+(def FAINT 4)
+
+(def INVERSE 8)
+
+(def INVISIBLE 16)
+
+(def STRIKETHROUGH 32)
+
+(def UNDERLINE 64)
+
+(def- (style-flags style)
+  (let ((bytes (ffi/ref style 'u64 flags-index))
+        (byte (fn (i) (> (bitwise-and (bitwise-arithmetic-shift bytes (* -8 i)) 255) 0))))
+    (bitwise-ior (if (byte 0) BOLD 0)
+                 (if (byte 1) ITALIC 0)
+                 (if (byte 2) FAINT 0)
+                 (if (byte 4) INVERSE 0)
+                 (if (byte 5) INVISIBLE 0)
+                 (if (byte 6) STRIKETHROUGH 0)
+                 (if (= 0 (ffi/ref style 'i32 underline-index)) 0 UNDERLINE))))
 
 (ffi/defbindings library
                  %load!
@@ -611,7 +641,9 @@
         (ffi/read-utf8-bytes p n))))
 
 (def (each-row-cell term f)
-  "Call (f x text fg bg inverse?) for the current row; colours are RGBA or nil. Text strings may be shared between calls and must not be mutated."
+  "Call (f x text fg bg flags) for the current row; colours are RGBA or nil and
+flags combine BOLD, ITALIC, FAINT, INVERSE, INVISIBLE, STRIKETHROUGH and
+UNDERLINE. Text strings may be shared between calls and must not be mutated."
   ;; Lazy allocation also serves terminals that survived a reload.
   (unless (term :utf8-buffer) (utf8-buffer! term 64))
   (point! ROW-CELLS %row-get (term :row-iter) (term :cells))
@@ -636,7 +668,9 @@
              (and styled? (cell-rgba term CELL-FG-COLOR))
              ;; Erased cells can carry a background in the content tag without a style.
              (and (or styled? (= n 0)) (cell-rgba term CELL-BG-COLOR))
-             (and styled? (ffi/ref (term :style) 'bool inverse-offset))))
+             (if styled?
+                 (style-flags (term :style))
+                 0)))
         (loop (+ x 1))))))
 
 ;; Buffers for manse_row_runs: a row's UTF-8, and up to capacity runs and
@@ -647,16 +681,18 @@
         :run-capacity capacity
         :run-text-capacity text-capacity
         :run-text (ffi/alloc 'u8 text-capacity)
-        :runs (ffi/alloc 'u32 (* 4 capacity))
+        :runs (ffi/alloc 'u32 (* 5 capacity))
         :spans (ffi/alloc 'u32 (* 3 capacity))
         :run-counts (ffi/alloc 'i32 3)))
 
 (def (each-row-run term default-fg default-bg span! run!)
   "For the current row, call (span! start end bg) for each stretch of cells
-sharing a background, then (run! x text fg) for each stretch of text sharing a
-foreground. Colours follow each-row-cell, with defaults applied; spans cover
-cells from start up to end. Returns #f, calling neither, when manse-native was
-built without libghostty-vt."
+sharing a background, then (run! x text fg flags) for each stretch of cells
+sharing a foreground and BOLD, ITALIC, STRIKETHROUGH and UNDERLINE. Each cell's
+text is separated by 0x1F; invisible cells are spaces and faint ones have
+their colour halfway to the background. Colours follow each-row-cell, with
+defaults applied; spans cover cells from start up to end. Returns #f, calling
+neither, when manse-native was built without libghostty-vt."
   ;; Lazy allocation also serves terminals that survived a reload.
   (unless (term :run-text) (runs-buffers! term 256 4096))
   (let ((result (%row-runs (term :row-iter)
@@ -685,10 +721,11 @@ built without libghostty-vt."
                        (ffi/ref spans 'u32 (+ 1 (* 3 i)))
                        (ffi/ref spans 'u32 (+ 2 (* 3 i)))))
               (dotimes (i (ffi/ref counts 'i32 0))
-                (let ((start (ffi/ref runs 'u32 (+ 1 (* 4 i)))))
-                  (run! (ffi/ref runs 'u32 (* 4 i))
-                        (substring text start (+ start (ffi/ref runs 'u32 (+ 2 (* 4 i)))))
-                        (ffi/ref runs 'u32 (+ 3 (* 4 i))))))
+                (let ((start (ffi/ref runs 'u32 (+ 1 (* 5 i)))))
+                  (run! (ffi/ref runs 'u32 (* 5 i))
+                        (substring text start (+ start (ffi/ref runs 'u32 (+ 2 (* 5 i)))))
+                        (ffi/ref runs 'u32 (+ 3 (* 5 i)))
+                        (ffi/ref runs 'u32 (+ 4 (* 5 i))))))
               #t)))))
 
 (def (grid term)

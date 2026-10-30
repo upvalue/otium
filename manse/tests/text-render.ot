@@ -1,0 +1,158 @@
+;; Headless checks on how terminal text lands in its cells: whole-pixel cells,
+;; box drawing that joins across cells, one grapheme per column, styles and
+;; fallback. Run from the repository root: ./otium -L . manse/tests/text-render.ot
+(require manse.terminal)
+(ns manse.terminal)
+(require otium.process :as process)
+(require otium.ui.gpu :as gpu)
+(require otium.sdl :as sdl)
+(require otium.test :refer (check report))
+
+(def scale 2)
+
+(def width-px 640)
+
+(def height-px 400)
+
+(settings/configure! {:font-size 16 :padding 6 :line-height 1.0})
+
+(def w (ui/open {:title "text" :width width-px :height height-px :headless #t :scale scale}))
+
+(def s {:id 1 :term (g/new 40 12) :exit #t})
+
+(def term (s :term))
+
+(defmethod (ui/layout-style (t Terminal))
+  {:width width-px :height height-px})
+
+(def (view)
+  (ui/new Terminal {:key :terminal :session s}))
+
+(ui/set-view! w view)
+
+(def capture (str (or (process/getenv "TMPDIR") "/tmp/") "/manse-text-render.bmp"))
+
+;; A BMP capture as width, height and a function from x, y to packed RGB.
+(def (read-bmp path)
+  (let ((bytes (let ((port (open-binary-input-file path)))
+                 (defer (read-bytevector 67108864 port) (close-port port)))))
+    (def (u16 at)
+      (+ (bytevector-u8-ref bytes at) (* 256 (bytevector-u8-ref bytes (+ at 1)))))
+    (def (u32 at)
+      (+ (u16 at) (* 65536 (u16 (+ at 2)))))
+    (let ((offset (u32 10))
+          (width (u32 18))
+          (height (u32 22))
+          (bpp (quotient (u16 28) 8)))
+      ;; SDL writes bottom-up rows; positive height means bottom-up.
+      (let ((stride (* 4 (quotient (+ (* width bpp) 3) 4))))
+        (list width
+              height
+              (fn (x y)
+                (let ((at (+ offset (* (- height 1 y) stride) (* x bpp))))
+                  (+ (bytevector-u8-ref bytes at)
+                     (* 256 (bytevector-u8-ref bytes (+ at 1)))
+                     (* 65536 (bytevector-u8-ref bytes (+ at 2)))))))))))
+
+(def pixel nil)
+
+(def (frame! text)
+  (g/write! term (str "\x1b;[0m\x1b;[2J\x1b;[H" text))
+  (g/update! term)
+  (put! s :version (+ 1 (get s :version 0)))
+  (ui/reconcile! (w :tree) (view))
+  (gpu/invalidate-paint! (w :tree))
+  (gpu/layout! (w :tree) (w :width) (w :height) (w :scale))
+  (gpu/paint! (w :tree) (w :renderer) (w :width) (w :height) 0x282c33ff)
+  (sdl/check (native/gpu-frame (w :renderer) capture))
+  (set! pixel (caddr (read-bmp capture))))
+
+(frame! "x")
+
+(def cw (s :cell-w-px))
+
+(def ch (s :cell-h-px))
+
+(check "cell width is whole device pixels" #t (and (integer? cw) (exact? cw)))
+(check "cell height is whole device pixels" #t (and (integer? ch) (exact? ch)))
+(check "logical cell size matches" #t (= (s :cell-w) (/ cw scale)))
+
+(def pad (exact (round (* scale (padding)))))
+
+(def background (pixel 1 1))
+
+(def (cell-x col)
+  (+ pad (* col cw)))
+
+(def (cell-y row)
+  (+ pad (* row ch)))
+
+(def (ink? x y)
+  (not (= (pixel x y) background)))
+
+(def (cell col row)
+  "A cell's pixels, as a list of rows."
+  (map (fn (dy) (map (fn (dx) (pixel (+ (cell-x col) dx) (+ (cell-y row) dy))) (array-to-list (range cw))))
+       (array-to-list (range ch))))
+
+(def (ink col row)
+  (reduce (fn (n line) (+ n (length (filter (fn (p) (not (= p background))) line)))) 0 (cell col row)))
+
+(def (brightest col row)
+  (reduce (fn (top line)
+            (reduce (fn (top p)
+                      (max top (bitwise-and p 255) (bitwise-and (bitwise-arithmetic-shift p -8) 255) (bitwise-arithmetic-shift p -16)))
+                    top
+                    line))
+          0
+          (cell col row)))
+
+;; Box drawing joins across cells, down a column and along a row.
+(frame! "┌──┐\r\n│  │\r\n└──┘")
+
+(def (column-ink-every-row? col y0 y1)
+  (for-all (fn (y) (exists (fn (dx) (ink? (+ (cell-x col) dx) y)) (array-to-list (range cw)))) (array-to-list (range y0 y1))))
+
+(def (row-ink-every-column? row x0 x1)
+  (for-all (fn (x) (exists (fn (dy) (ink? x (+ (cell-y row) dy))) (array-to-list (range ch)))) (array-to-list (range x0 x1))))
+
+(check "vertical box line has no gaps between rows"
+       #t
+       (column-ink-every-row? 0 (+ (cell-y 0) (quotient ch 2)) (+ (cell-y 2) (quotient ch 2))))
+(check "horizontal box line has no gaps between cells"
+       #t
+       (row-ink-every-column? 0 (+ (cell-x 0) (quotient cw 2)) (+ (cell-x 3) (quotient cw 2))))
+
+;; Blocks fill their cell.
+(frame! "█▀")
+(check "full block covers its cell" (* cw ch) (ink 0 0))
+(check "upper half block covers half" (* cw (quotient ch 2)) (ink 1 0))
+
+;; Each character is drawn alone in its column: no ligatures, and a character
+;; looks the same wherever it is.
+(frame! "->  -  >\r\nwa  a")
+(check "a ligature pair draws as its parts, left" (cell 4 0) (cell 0 0))
+(check "a ligature pair draws as its parts, right" (cell 7 0) (cell 1 0))
+(check "text after a wide character keeps its column" (cell 4 1) (cell 1 1))
+(frame! "日a  a")
+(check "text after a CJK character keeps its column" (cell 5 0) (cell 2 0))
+
+;; Styles.
+(frame! "M \x1b;[1mM\x1b;[0m \x1b;[3mM\x1b;[0m \x1b;[2mM\x1b;[0m")
+(check "bold is heavier" #t (> (ink 2 0) (ink 0 0)))
+(check "italic differs" #f (equal? (cell 4 0) (cell 0 0)))
+(check "faint is dimmer" #t (< (brightest 6 0) (brightest 0 0)))
+(frame! "   \r\n\x1b;[4m   \x1b;[0m\r\n\x1b;[9m   \x1b;[0m")
+(check "plain spaces draw nothing" 0 (+ (ink 0 0) (ink 1 0) (ink 2 0)))
+(check "underlined spaces draw a line" #t (> (ink 1 1) 0))
+(check "struck spaces draw a line" #t (> (ink 1 2) 0))
+
+;; A character the font lacks comes from a fallback rather than the missing
+;; glyph box, which an unassigned codepoint shows. The built-in font has no
+;; CJK, so this needs a CJK font among the fallbacks.
+(frame! "\x65E5; \x10FFFD;")
+(check "a character the font lacks is found elsewhere" #f (equal? (cell 0 0) (cell 2 0)))
+
+(g/free! term)
+(ui/close! w)
+(report "text render")

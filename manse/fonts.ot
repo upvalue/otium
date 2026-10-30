@@ -1,5 +1,6 @@
 (ns manse.fonts)
 (require otium.process :as process)
+(require otium.ui.native :as native)
 
 (def (expand-home path)
   (if (string-starts-with? path "~/")
@@ -92,3 +93,132 @@
                         ((null? matches) (error "No installed font matches" value))
                         ((null? (cdr matches)) (car matches))
                         (else (error "Ambiguous font name; use one of these paths" value matches))))))))))
+
+;; Faces and families
+
+(defonce described {})
+
+(def- (instances path)
+  ;; A variable font's named instances open as face (instance << 16).
+  (let loop ((i 1)
+             (out '()))
+    (let ((d (and (< i 64) (native/font-describe path (* i 65536)))))
+      (if d
+          (loop (+ i 1) (cons {:path path :index (* i 65536) :family (d :family) :style (d :style)} out))
+          (reverse out)))))
+
+(def (faces-of path)
+  "The faces in a font file as tables of :path, :index, :family and :style,
+with a variable font's named instances after its default face. Cached."
+  (or (get described path)
+      (let ((first (native/font-describe path 0)))
+        (put! described
+              path
+              (if first
+                  (append (map (fn (i)
+                                 (let ((d (if (= i 0)
+                                              first
+                                              (native/font-describe path i))))
+                                   {:path path :index i :family (d :family) :style (d :style)}))
+                               (array-to-list (range (first :faces))))
+                          (if (= (first :faces) 1)
+                              (instances path)
+                              '()))
+                  '()))
+        (described path))))
+
+(def- (squash text)
+  (list->string (filter (fn (c) (or (char-alphabetic? c) (char-numeric? c))) (string->list (string-downcase text)))))
+
+(defonce discovered nil)
+
+(def (installed)
+  "Font files in the standard directories, found once per process."
+  (unless discovered (set! discovered (discover)))
+  discovered)
+
+(def (family-faces family &optional (scan? #t))
+  "Faces whose family is family, ignoring case. Files named like the family's
+first word are read first; the rest only when those have none and scan? is true."
+  (let ((wanted (string-downcase family))
+        (key (squash (get (string-split family " ") 0)))
+        (files (installed)))
+    (def (in paths)
+      (filter (fn (f) (equal? (string-downcase (f :family)) wanted)) (apply append (map faces-of paths))))
+    (let ((likely (filter (fn (path) (string-contains? (squash (path-last path)) key)) files)))
+      (let ((found (in likely)))
+        (if (or (pair? found) (not scan?))
+            found
+            (in (filter (fn (path) (not (member path likely))) files)))))))
+
+(def style-names
+  "Style names tried for each terminal style, in order."
+  {:regular '("Regular" "Book" "Normal" "Roman")
+   :bold '("Bold")
+   :italic '("Italic" "Oblique")
+   :bold-italic '("Bold Italic" "Bold Oblique")})
+
+(def (pick faces style &optional (name nil))
+  "The first face with a style name for style, or named name, ignoring case."
+  (let ((wanted (map string-downcase
+                     (if name
+                         (list name)
+                         (style-names style)))))
+    (exists (fn (w) (exists (fn (f) (and (equal? (string-downcase (f :style)) w) f)) faces)) wanted)))
+
+(def default-fallbacks
+  "Families that fill in characters the terminal font lacks, where installed."
+  '("Menlo" "Apple Symbols" "Hiragino Sans GB" "DejaVu Sans Mono" "Noto Sans Symbols 2" "Noto Sans CJK SC"))
+
+(def- (fallback-face name scan?)
+  (if (or (string-contains? name "/") (font-file? name))
+      {:path (resolve name) :index 0}
+      (let ((faces (family-faces name scan?)))
+        (and (pair? faces) (or (pick faces :regular) (car faces))))))
+
+(def (terminal-faces family path index styles hinting fallbacks)
+  "Register face IDs for :regular, :bold, :italic and :bold-italic terminal text.
+The font is family, or face index of the file at path, or the built-in mono
+font. styles maps a style to a style name in the family. Styles the family
+lacks are synthesized. Missing characters come from fallbacks, a list of
+families or files, or default-fallbacks when #f."
+  (let ((builtin (native/font-builtin 1))
+        (faces (cond
+                 (family (family-faces family))
+                 (path (let ((d (native/font-describe path index)))
+                         (if d
+                             (family-faces (d :family) #f)
+                             '())))
+                 (else (faces-of (native/font-builtin 1)))))
+        (choose (fn (style) (pick faces style (get styles style)))))
+    (when (and family (null? faces)) (error "No installed font family" family))
+    (let ((regular (cond
+                     ((get styles :regular) (choose :regular))
+                     (family (choose :regular))
+                     (path {:path path :index index})
+                     (else (choose :regular))))
+          (bold (choose :bold))
+          (italic (choose :italic))
+          (bold-italic (choose :bold-italic)))
+      (unless regular (error "No regular face in font family" family))
+      (let ((fallback-ids
+             (map (fn (f) (native/font-face (f :path) (f :index) #f #f hinting '()))
+                  (let ((found (filter identity
+                                       (cons (and (or family path) {:path builtin :index 0})
+                                             (map (fn (name) (fallback-face name (not (eq? fallbacks #f))))
+                                                  (or fallbacks default-fallbacks))))))
+                    (take (min 8 (length found)) found)))))
+        (def (face f bold? italic?)
+          (native/font-face (f :path) (f :index) bold? italic? hinting fallback-ids))
+        {:regular (face regular #f #f)
+         :bold (if bold
+                   (face bold #f #f)
+                   (face regular #t #f))
+         :italic (if italic
+                     (face italic #f #f)
+                     (face regular #f #t))
+         :bold-italic (cond
+                        (bold-italic (face bold-italic #f #f))
+                        (italic (face italic #t #f))
+                        (bold (face bold #f #t))
+                        (else (face regular #t #t)))}))))

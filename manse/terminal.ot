@@ -2,7 +2,6 @@
 (require otium.time :as time)
 (require otium.ui :as ui)
 (require otium.gfx :as gfx)
-(require otium.ui.gpu :as gpu)
 (require otium.ui.native :as native)
 (require otium.process :as process)
 (require manse.apps :as apps)
@@ -10,6 +9,7 @@
 (require manse.pty :as pty)
 (require manse.session :as sessions)
 (require manse.settings :as settings)
+(require manse.fonts :as fonts)
 (require manse.keyboard :as keyboard)
 
 (defclass TerminalApp
@@ -54,19 +54,53 @@
 (def (font-size)
   (settings/options :font-size))
 
-(def (font)
-  (or (settings/options :font-path) :mono))
+(def (font-key)
+  "The settings the terminal font depends on. Paint caches key on it."
+  (map settings/options
+       '(:font-family :font-path :font-index :font-styles :hinting :fallback-fonts :font-size :line-height)))
+
+(defonce face-cache {:key nil :faces nil})
+
+(def (faces renderer)
+  "Face IDs for :regular, :bold, :italic and :bold-italic text, registered
+again when the font settings or the renderer change. A font that can't be
+found is reported once and the built-in one used."
+  (let ((key (list (font-key) renderer)))
+    (unless (equal? key (face-cache :key))
+      (put! face-cache
+            :key key
+            :faces (try
+                     (fonts/terminal-faces (settings/options :font-family)
+                                           (settings/options :font-path)
+                                           (settings/options :font-index)
+                                           (settings/options :font-styles)
+                                           (settings/options :hinting)
+                                           (settings/options :fallback-fonts))
+                     (catch (error? e)
+                       (process/write-error (str "manse: " (condition-message e) "; using the built-in font\n"))
+                       (fonts/terminal-faces #f #f 0 {} (settings/options :hinting) #f)))))
+    (face-cache :faces)))
+
+(def (face-for faces flags)
+  (let ((bold? (> (bitwise-and flags g/BOLD) 0))
+        (italic? (> (bitwise-and flags g/ITALIC) 0)))
+    (faces (cond
+             ((and bold? italic?) :bold-italic)
+             (bold? :bold)
+             (italic? :italic)
+             (else :regular)))))
 
 (def (padding)
   (settings/options :padding))
 
 ;; Metrics
 
-(def (cell-metrics scale)
-  "Logical cell width and height for the mono font, from ten shaped Ms."
-  (let ((positions (gpu/caret-positions "MMMMMMMMMM" (font) (font-size) scale))
-        (run (native/text-get "M" (gfx/font-index (font)) (font-size) -1 scale)))
-    (list (/ (get positions 10) 10) (/ (native/text-size run native/TEXT_HEIGHT) scale))))
+(def (cell-metrics renderer scale)
+  "Cell width and height in device pixels, as integers: the regular face's
+advance, and its line height times :line-height."
+  (let ((m (native/font-metrics ((faces renderer) :regular) (font-size) scale)))
+    (list (exact (max 1 (round (m :advance))))
+          (exact (max 1 (round (* (m :height) (settings/options :line-height))))))))
 
 (def (rgba rgb alpha)
   (bitwise-ior (bitwise-arithmetic-shift (car rgb) 24)
@@ -170,7 +204,7 @@
 ;; settled size, depend only on those.
 (defmethod (ui/paint-key (w Terminal))
   (let ((session (w :session)))
-    (list (get session :version 0) (session :exit) (session :closed?) (font) (font-size) (padding))))
+    (list (get session :version 0) (session :exit) (session :closed?) (font-key) (padding))))
 
 ;; The outer cache replays idle terminals; row caches reuse unchanged text
 ;; after output or focus changes. While an enclosing column
@@ -194,8 +228,7 @@
                   (list (get session :version 0)
                         (g :focused?)
                         (session :exit)
-                        (font)
-                        (font-size)
+                        (font-key)
                         (padding)
                         paint-terminal
                         paint-row
@@ -212,20 +245,56 @@
       (g/update! (session :term))
       (put! session :cols cols :rows rows))))
 
-(def (text-run! g x y text color)
-  (gfx/text-line g x y text (font) (font-size) color))
+;; Flags that change how a run of cells is drawn, so they end it.
+(def- run-flags (bitwise-ior g/BOLD g/ITALIC g/STRIKETHROUGH g/UNDERLINE))
+
+(def (cells! session g x y text color flags)
+  "Draw a run of cells, separated by 0x1F, in the face for flags."
+  (gfx/cells g
+             x
+             y
+             text
+             (face-for (session :faces) flags)
+             (font-size)
+             (session :cell-w-px)
+             (session :cell-h-px)
+             color
+             (bitwise-ior (if (> (bitwise-and flags g/UNDERLINE) 0) 1 0)
+                          (if (> (bitwise-and flags g/STRIKETHROUGH) 0) 2 0))))
+
+(def (faint fg bg)
+  "fg halfway to bg, for faint text."
+  (bitwise-ior (bitwise-arithmetic-shift (quotient (+ (bitwise-and (bitwise-arithmetic-shift fg -24) 255)
+                                                      (bitwise-and (bitwise-arithmetic-shift bg -24) 255))
+                                                   2)
+                                         24)
+               (bitwise-arithmetic-shift (quotient (+ (bitwise-and (bitwise-arithmetic-shift fg -16) 255)
+                                                      (bitwise-and (bitwise-arithmetic-shift bg -16) 255))
+                                                   2)
+                                         16)
+               (bitwise-arithmetic-shift (quotient (+ (bitwise-and (bitwise-arithmetic-shift fg -8) 255)
+                                                      (bitwise-and (bitwise-arithmetic-shift bg -8) 255))
+                                                   2)
+                                         8)
+               255))
 
 (def (paint-terminal session g bounds fit?)
   (let ((start (time/seconds))
         (term (session :term)))
-    (let ((metrics-key (list (font) (font-size) (native/gpu-scale (g :renderer)))))
+    (put! session :faces (faces (g :renderer)))
+    (let ((metrics-key (list (font-key) (native/gpu-scale (g :renderer)))))
       (unless (equal? metrics-key (session :metrics-key))
         (put! session :cell-w nil)
         (put! session :metrics-key metrics-key)))
+    ;; Cells are whole device pixels; layout works in their logical size.
     (unless (session :cell-w)
-      (let ((m (cell-metrics (native/gpu-scale (g :renderer)))))
-        (put! session :cell-w (car m))
-        (put! session :cell-h (cadr m))))
+      (let ((scale (native/gpu-scale (g :renderer)))
+            (m (cell-metrics (g :renderer) (native/gpu-scale (g :renderer)))))
+        (put! session
+              :cell-w-px (car m)
+              :cell-h-px (cadr m)
+              :cell-w (/ (car m) scale)
+              :cell-h (/ (cadr m) scale))))
     (when fit? (fit! session bounds))
     (let ((cw (session :cell-w))
           (ch (session :cell-h))
@@ -276,7 +345,7 @@
                             (fn (start end bg)
                               (let ((left (round (+ x0 (* start cw)))))
                                 (gfx/fill g left py (- (round (+ x0 (* end cw))) left) ch bg)))
-                            (fn (x text fg) (text-run! g (+ x0 (* x cw)) py text fg)))
+                            (fn (x text fg flags) (cells! session g (+ x0 (* x cw)) py text fg flags)))
       (paint-row-cells session g area colors))))
 
 ;; Without manse-native's row walker, walk the cells from Otium.
@@ -289,26 +358,36 @@
         (default-bg (rgba (colors :background) 255))
         (run (buffer))
         (run-col 0)
-        (run-color nil))
+        (run-color nil)
+        (run-style 0))
     (def (flush!)
-      (when run-color (text-run! g (+ x0 (* run-col cw)) py (buffer->string run) run-color))
+      (when run-color (cells! session g (+ x0 (* run-col cw)) py (buffer->string run) run-color run-style))
       (set! run (buffer)))
     (g/each-row-cell (session :term)
-                     (fn (x text cell-fg cell-bg inverse?)
-                       (let ((fg (if inverse?
-                                     (or cell-bg default-bg)
-                                     (or cell-fg default-fg)))
-                             (bg (if inverse?
-                                     (or cell-fg default-fg)
-                                     cell-bg)))
-                         (when bg
-                           (let ((left (round (+ x0 (* x cw)))))
-                             (gfx/fill g left py (- (round (+ x0 (* (+ x 1) cw))) left) ch bg)))
-                         (unless (eq? fg run-color)
-                           (flush!)
-                           (set! run-col x)
-                           (set! run-color fg))
-                         (buffer-push! run text))))
+                     (fn (x text cell-fg cell-bg flags)
+                       (let ((inverse? (> (bitwise-and flags g/INVERSE) 0))
+                             (style (bitwise-and flags run-flags)))
+                         (let ((fg (if inverse?
+                                       (or cell-bg default-bg)
+                                       (or cell-fg default-fg)))
+                               (bg (if inverse?
+                                       (or cell-fg default-fg)
+                                       cell-bg)))
+                           (when (> (bitwise-and flags g/FAINT) 0) (set! fg (faint fg (or bg default-bg))))
+                           (when bg
+                             (let ((left (round (+ x0 (* x cw)))))
+                               (gfx/fill g left py (- (round (+ x0 (* (+ x 1) cw))) left) ch bg)))
+                           (if (and run-color (= fg run-color) (= style run-style))
+                               (buffer-push! run "\x1f;")
+                               (begin
+                                 (flush!)
+                                 (set! run-col x)
+                                 (set! run-color fg)
+                                 (set! run-style style)))
+                           (buffer-push! run
+                                         (if (> (bitwise-and flags g/INVISIBLE) 0)
+                                             " "
+                                             text))))))
     (flush!)))
 
 (def (record-time! session elapsed)

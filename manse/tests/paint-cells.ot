@@ -1,4 +1,5 @@
 (require manse.ghostty :as g)
+(require manse.terminal :as terminal)
 (require otium.ffi :as ffi)
 (require otium.test :refer (check report))
 
@@ -16,47 +17,58 @@
 
 (def bg0 0x445566ff)
 
+(def run-flags (bitwise-ior g/BOLD g/ITALIC g/STRIKETHROUGH g/UNDERLINE))
+
 (def (cell-runs)
-  "Spans and runs for each row, built from each-row-cell with paint-row's colour rules."
+  "Spans and runs for each row, built from each-row-cell with paint-row-cells' rules."
   (let ((rows []))
     (g/each-row t
                 (fn (_y _dirty?)
                   (let ((spans [])
                         (runs []))
                     (g/each-row-cell t
-                                     (fn (x text cell-fg cell-bg inverse?)
-                                       (let ((fg (if inverse?
-                                                     (or cell-bg bg0)
-                                                     (or cell-fg fg0)))
-                                             (bg (if inverse?
-                                                     (or cell-fg fg0)
-                                                     cell-bg))
-                                             (span (and (not (empty? spans)) (get spans (- (length spans) 1))))
-                                             (run (and (not (empty? runs)) (get runs (- (length runs) 1)))))
-                                         (when bg
-                                           (if (and span (equal? (get span 2) bg) (= (get span 1) x))
-                                               (put! span 1 (+ x 1))
-                                               (push! spans [x (+ x 1) bg])))
-                                         (if (and run (equal? (get run 2) fg))
-                                             (put! run 1 (str (get run 1) text))
-                                             (push! runs [x text fg])))))
+                                     (fn (x text cell-fg cell-bg flags)
+                                       (let ((inverse? (> (bitwise-and flags g/INVERSE) 0))
+                                             (style (bitwise-and flags run-flags)))
+                                         (let ((fg (if inverse?
+                                                       (or cell-bg bg0)
+                                                       (or cell-fg fg0)))
+                                               (bg (if inverse?
+                                                       (or cell-fg fg0)
+                                                       cell-bg))
+                                               (span (and (not (empty? spans)) (get spans (- (length spans) 1))))
+                                               (run (and (not (empty? runs)) (get runs (- (length runs) 1))))
+                                               (shown (if (> (bitwise-and flags g/INVISIBLE) 0)
+                                                          " "
+                                                          text)))
+                                           (when (> (bitwise-and flags g/FAINT) 0) (set! fg (terminal/faint fg (or bg bg0))))
+                                           (when bg
+                                             (if (and span (equal? (get span 2) bg) (= (get span 1) x))
+                                                 (put! span 1 (+ x 1))
+                                                 (push! spans [x (+ x 1) bg])))
+                                           (if (and run (equal? (get run 2) fg) (= (get run 3) style))
+                                               (put! run 1 (str (get run 1) "\x1f;" shown))
+                                               (push! runs [x shown fg style]))))))
                     (push! rows
                            (list (map array-to-list (array-to-list spans)) (map array-to-list (array-to-list runs)))))))
     (array-to-list rows)))
 
 (def (native-runs)
-  (let ((rows []))
+  "Spans and runs from manse-native's row walker, or nil when it was built without libghostty-vt."
+  (let ((rows [])
+        (native? #t))
     (g/each-row t
                 (fn (_y _dirty?)
                   (let ((spans [])
                         (runs []))
-                    (g/each-row-run t
-                                    fg0
-                                    bg0
-                                    (fn (start end bg) (push! spans (list start end bg)))
-                                    (fn (x text fg) (push! runs (list x text fg))))
+                    (unless (g/each-row-run t
+                                            fg0
+                                            bg0
+                                            (fn (start end bg) (push! spans (list start end bg)))
+                                            (fn (x text fg flags) (push! runs (list x text fg flags))))
+                      (set! native? #f))
                     (push! rows (list (array-to-list spans) (array-to-list runs))))))
-    (array-to-list rows)))
+    (and native? (array-to-list rows))))
 
 (def (compare! label text)
   (g/write! t text)
@@ -67,9 +79,9 @@
     (g/each-row t
                 (fn (y _dirty?)
                   (g/each-row-cell t
-                                   (fn (x text fg bg inverse?)
+                                   (fn (x text fg bg flags)
                                      (let ((c (get (get expected y) x)))
-                                       (push! actual (list text (or fg nil) (or bg nil) inverse?))
+                                       (push! actual (list text (or fg nil) (or bg nil) (> (bitwise-and flags g/INVERSE) 0)))
                                        (push! reference
                                               (list (if (null? (c :codepoints))
                                                         " "
@@ -78,10 +90,13 @@
                                                     (rgba (c :bg))
                                                     (c :inverse))))))))
     (check label (array-to-list reference) (array-to-list actual))
-    (check (str label ": native runs match the cells") (cell-runs) (native-runs))))
+    (let ((native (native-runs)))
+      (when native (check (str label ": native runs match the cells") (cell-runs) native)))))
 
 (compare! "plain, palette, RGB, inverse and wide text"
           "plain λ é 🙂\x1b;[31;44m colour \x1b;[7m inverse \x1b;[0m\r\n\x1b;[38;2;1;2;3;48;2;4;5;6mRGB\x1b;[0m")
+(compare! "bold, italic, faint, underline, strikethrough and hidden"
+          "\x1b;[0m\x1b;[2J\x1b;[Hab\x1b;[1mbo\x1b;[3mbi\x1b;[22mit\x1b;[23;2mfa\x1b;[22;4mun\x1b;[24;9mst\x1b;[29;8mhi\x1b;[0m ok")
 (compare! "palette erase without styling" "\x1b;[44m\x1b;[2J")
 (compare! "RGB erase without styling" "\x1b;[48;2;13;27;39m\x1b;[2J")
 (compare! "alternate screen and status bar"
@@ -92,7 +107,7 @@
 (compare! "a row longer than the run buffer"
           (str "\x1b;[0m\x1b;[H"
                (apply str (map (fn (_) (str "e" (apply str (map (fn (_) "́") (range 60))))) (range 40)))))
-(check "run buffer grew" #t (> (t :run-text-capacity) 4096))
+(when (native-runs) (check "run buffer grew" #t (> (t :run-text-capacity) 4096)))
 
 (def (clear!)
   (g/each-row t (fn (_y _dirty?) (g/clear-row-dirty! t)))

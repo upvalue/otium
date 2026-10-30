@@ -4,7 +4,13 @@
 
 (def setting-specs
   {:font-path {:default #f}
+   :font-family {:default #f :kind :name}
+   :font-index {:default 0 :min 0 :max 16777215}
+   :font-styles {:default {} :kind :styles}
    :font-size {:default 14 :min 1 :max 256}
+   :hinting {:default :light :kind :choice :choices '(:none :light :normal :mono :light-subpixel)}
+   :line-height {:default 1.0 :kind :number :min 0.5 :max 3}
+   :fallback-fonts {:default #f :kind :names}
    :padding {:default 6 :min 0 :max 16384}
    :width {:default 900 :min 1 :max 16384}
    :height {:default 800 :min 1 :max 16384}
@@ -15,8 +21,29 @@
 
 (defonce options (reduce (fn (out key) (put! out key ((setting-specs key) :default))) {} (keys setting-specs)))
 
+;; Settings added since options was made start at their defaults.
+(for-each (fn (key) (unless (contains? options key) (put! options key ((setting-specs key) :default))))
+          (keys setting-specs))
+
+(def- (name? value)
+  (and (string? value) (> (string-length value) 0)))
+
+(def- (valid? spec value)
+  (case (get spec :kind :integer)
+    ((:name) (or (eq? value #f) (name? value)))
+    ((:names)
+     (or (eq? value #f)
+         (and (or (list? value) (array? value))
+              (for-all name? value))))
+    ((:styles)
+     (and (table? value)
+          (for-all (fn (k) (and (memq k '(:regular :bold :italic :bold-italic)) (name? (value k)))) (keys value))))
+    ((:choice) (memq value (spec :choices)))
+    ((:number) (and (number? value) (<= (spec :min) value (spec :max))))
+    (else (and (integer? value) (<= (spec :min) value (spec :max))))))
+
 (def (configure! changes)
-  "Update settings. Font path, size, and padding take effect on the next frame; other settings apply at startup."
+  "Update settings. Font settings, padding and line height take effect on the next frame; other settings apply at startup."
   (unless (table? changes) (error "Manse settings must be a table"))
   (set! changes (copy changes))
   (when (contains? changes :font-path) (put! changes :font-path (fonts/resolve (changes :font-path))))
@@ -26,10 +53,8 @@
                 (unless spec (error "Unknown Manse setting" key))
                 (cond
                   ((eq? key :font-path) nil)
-                  ((eq? key :shell)
-                   (unless (and (string? value) (> (string-length value) 0)) (error "Invalid shell" value)))
-                  (else (unless (and (integer? value) (<= (spec :min) value (spec :max)))
-                          (error "Invalid Manse setting" key value))))))
+                  ((eq? key :shell) (unless (name? value) (error "Invalid shell" value)))
+                  (else (unless (valid? spec value) (error "Invalid Manse setting" key value))))))
             (keys changes))
   (for-each (fn (key) (put! options key (changes key))) (keys changes))
   options)

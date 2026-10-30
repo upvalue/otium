@@ -3,9 +3,9 @@
 
 (defrecord Node (value left right hash))
 
-(def (make depth)
+(def (make-tree depth)
   (if (> depth 0)
-      (record-new Node nil (make (- depth 1)) (make (- depth 1)) nil)
+      (record-new Node nil (make-tree (- depth 1)) (make-tree (- depth 1)) nil)
       (record-new Node 1 nil nil nil)))
 
 (def (check? node)
@@ -36,7 +36,7 @@
       (min-depth 4)
       (max-depth (max (+ min-depth 2) n))
       (stretch-depth (+ max-depth 1))
-      (stretch (make stretch-depth)))
+      (stretch (make-tree stretch-depth)))
   (calculate-hash! stretch)
   (println (str "stretch tree of depth "
                 stretch-depth
@@ -44,12 +44,12 @@
                 (hash-of stretch)
                 " check: "
                 (boolean-text (check? stretch))))
-  (let ((long-lived (make max-depth)))
+  (let ((long-lived (make-tree max-depth)))
     (for ((depth :range min-depth stretch-depth 2))
       (let ((iterations (expt 2 (- (+ max-depth min-depth) depth)))
             (sum 0))
         (dotimes (_ iterations)
-          (let ((tree (make depth)))
+          (let ((tree (make-tree depth)))
             (calculate-hash! tree)
             (set! sum (+ sum (hash-of tree)))))
         (println (str iterations "\t trees of depth " depth "\t root hash sum: " sum))))

@@ -22,36 +22,36 @@
 
 (def registry (apps/registry))
 
-(def first (make Counter))
+(def counter-a (make Counter))
 
-(def second (make Counter))
+(def counter-b (make Counter))
 
-(def id (apps/add! registry "Counter" first))
+(def id (apps/add! registry "Counter" counter-a))
 
-(check "lookup returns the live object" first (apps/find registry id))
+(check "lookup returns the live object" counter-a (apps/find registry id))
 (check "unknown ID" nil (apps/find registry 100))
-(check "duplicate object rejected" #t (fails? (fn () (apps/add! registry "Again" first))))
+(check "duplicate object rejected" #t (fails? (fn () (apps/add! registry "Again" counter-a))))
 (check "non-app rejected" #t (fails? (fn () (apps/add! registry "Invalid" {}))))
-(check "invalid name rejected" #t (fails? (fn () (apps/add! registry "" second))))
-(check "names may repeat" 2 (apps/add! registry "Counter" second))
+(check "invalid name rejected" #t (fails? (fn () (apps/add! registry "" counter-b))))
+(check "names may repeat" 2 (apps/add! registry "Counter" counter-b))
 
 (def metadata (get (apps/query registry) 0))
 
 (put! metadata :name "Changed snapshot")
 (check "query does not expose registry entries" "Counter" ((get (apps/query registry) 0) :name))
-(apps/step! first)
+(apps/step! counter-a)
 (check "query sees current app state" 1 ((get (apps/query registry) 0) :count))
 (check "predicate query" '(1) (array-to-list (map :id (apps/query registry (fn (info) (> (info :count) 0))))))
 
 (def tree (ui/root))
 
-(ui/reconcile! tree (apps/view first))
+(ui/reconcile! tree (apps/view counter-a))
 (check "nonterminal app renders its own view" "1" ((ui/instance (get (ui/children tree) 0)) :text))
 (require manse.apps :reload)
-(check "registry survives code reload" first (apps/find registry id))
+(check "registry survives code reload" counter-a (apps/find registry id))
 (check "app methods survive protocol reload" :counter ((get (apps/query registry) 0) :kind))
 (apps/remove! registry id)
-(check "removal closes app" #t (first :closed?))
+(check "removal closes app" #t (counter-a :closed?))
 (check "removed app no longer found" nil (apps/find registry id))
 (check "removal is idempotent" nil (apps/remove! registry id))
 (check "IDs are not reused" 3 (apps/add! registry "Third" (make Counter)))

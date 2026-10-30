@@ -5,13 +5,13 @@
 
 (def term {:codepoints (ffi/alloc 'u32 16)})
 
-(def count 20)
+(def cell-count 20)
 
 (set! %cell-get
       (fn (_cells key out)
         (if (= key CELL-GRAPHEMES-LEN)
-            (ffi/set! out 'u32 0 count)
-            (dotimes (i count)
+            (ffi/set! out 'u32 0 cell-count)
+            (dotimes (i cell-count)
               (ffi/set! out 'u32 i 65)))
         SUCCESS))
 (cell-codepoints term)
@@ -19,7 +19,7 @@
 
 (def saved (term :codepoints))
 
-(set! count 18)
+(set! cell-count 18)
 (cell-codepoints term)
 (check "capacity reused" #t (eq? saved (term :codepoints)))
 (ffi/free! (term :codepoints))

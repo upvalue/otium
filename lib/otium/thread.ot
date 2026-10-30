@@ -48,6 +48,7 @@
   "(thread/status t)\n:runnable, :waiting, :done, :failed or :killed."
   (%thread-status t))
 
+;; lint: allow(shadowed-core-name) called as thread/name; nothing here uses core name
 (def (name t)
   "A thread's name, or nil."
   (%thread-name t))

@@ -213,6 +213,7 @@
               (let ,binds ,pass)
               ,finish)))))
 
+;; lint: allow(shadowed-core-name) core re-exports this for
 (defmacro for (head . more)
   "(for [name] (clause ...) [=> final] body ...)\nSee for in otium.core."
   (let ((name (if (symbol? head)
@@ -235,6 +236,7 @@
                       (cddr tail)
                       tail)))))
 
+;; lint: allow(shadowed-core-name) core re-exports this dotimes
 (defmacro dotimes (spec . body)
   "(dotimes (index count) body ...)\nSee dotimes in otium.core."
   (let ((sp (if (eq? (car spec) 'array)

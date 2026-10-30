@@ -514,6 +514,7 @@
 (def (scroll-to-bottom! term)
   (scroll-viewport! term SCROLL-BOTTOM 0))
 
+;; lint: allow(shadowed-core-name) called qualified; nothing here uses core update!
 (def (update! term)
   (check! "render_state_update" (%state-update (term :state) (term :handle))))
 

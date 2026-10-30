@@ -34,6 +34,7 @@
     (push! (registry :entries) entry)
     (entry :id)))
 
+;; lint: allow(shadowed-core-name) called as apps/find; nothing here uses core find
 (def (find registry id)
   "Return the live app with this ID, or nil."
   (let loop ((entries (array-to-list (registry :entries))))

@@ -5,7 +5,7 @@
 
 (def libc (ffi/open-library '("/usr/lib/libSystem.B.dylib" "libc.so.6")))
 
-(def abs (ffi/bind libc "abs" '(int) 'int #f))
+(def c-abs (ffi/bind libc "abs" '(int) 'int #f))
 
 (def Cell (ffi/define-struct! 'Cell '((size size-t) (fg u32) (bg u32) (bold bool))))
 
@@ -16,7 +16,7 @@
   (ffi/set! p 'u64 0 3)
   (ffi/field-set! cell Cell '(fg) 4)
   (while (< i 300000)
-    (set! sum (+ sum (abs -2) (ffi/ref p 'u64 0) (ffi/field-ref cell Cell '(fg))))
+    (set! sum (+ sum (c-abs -2) (ffi/ref p 'u64 0) (ffi/field-ref cell Cell '(fg))))
     (set! i (+ i 1)))
   (ffi/free! p)
   (ffi/free! cell)

@@ -242,6 +242,7 @@
       (%try-open names "could not load library:\n")
       (%fail-at "open-library" "type" "expected nonempty list of library names" 0 #f)))
 
+;; lint: allow(shadowed-core-name) the FFI API names it ffi/error?; in this file it means FFI errors
 (def (error? c)
   (eq? (%error-field c "type") 'ffi-error))
 

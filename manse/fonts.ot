@@ -66,6 +66,7 @@
     (sort found)))
 
 ;; lint: allow(rest-arguments) accepts any number of font search roots
+;; lint: allow(shadowed-core-name) called as fonts/find; nothing here uses core find
 (def (find name . roots)
   "Find a filename or filename stem, case-insensitively. Returns every matching path."
   (let ((wanted (string-downcase name)))

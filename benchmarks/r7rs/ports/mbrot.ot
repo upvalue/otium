@@ -1,7 +1,7 @@
 ;; MBROT -- Generate a Mandelbrot set in an array of arrays.
 ;; lint: allow-file(unbound-name) benchmarks/r7rs/run.py prepends benchmarks/r7rs/lib/benchmark.ot
 
-(def (count r i step x y)
+(def (mandelbrot-count r i step x y)
   (let ((max-count 64)
         (radius-squared 16.0)
         (cr (+ r (* (inexact x) step)))
@@ -22,7 +22,7 @@
 (def (mbrot matrix r i step n)
   (for ((y :range (- n 1) -1 -1))
     (for ((x :range (- n 1) -1 -1))
-      (put! (get matrix x) y (count r i step x y)))))
+      (put! (get matrix x) y (mandelbrot-count r i step x y)))))
 
 (def (test n)
   (let ((matrix (bench-make-array n nil)))

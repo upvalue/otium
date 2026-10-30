@@ -10,7 +10,7 @@
 (def (pointer)
   (make PointerState))
 
-(def- (contains? bounds x y)
+(def- (inside? bounds x y)
   (and bounds
        (>= x (bounds :x))
        (>= y (bounds :y))
@@ -23,7 +23,7 @@
     (if (< i 0)
         '()
         (let ((node (get children i)))
-          (if (and (ui/active? node) (contains? (node :bounds) x y))
+          (if (and (ui/active? node) (inside? (node :bounds) x y))
               (append (hit-children (ui/children node) x y) (list node))
               (loop (- i 1)))))))
 

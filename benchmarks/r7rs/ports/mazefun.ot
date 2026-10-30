@@ -26,7 +26,7 @@
 
   (maze-for-aux lo))
 
-(def (concat lists)
+(def (concat-lists lists)
   (foldr append '() lists))
 
 (def (list-read lst i)
@@ -88,10 +88,10 @@
                                  (if (and (even? i) (even? j))
                                      (cons i j)
                                      #f))))
-            (possible-holes (concat (maze-for 0
+            (possible-holes (concat-lists (maze-for 0
                                               n
                                               (fn (i)
-                                                (concat (maze-for 0
+                                                (concat-lists (maze-for 0
                                                                   m
                                                                   (fn (j)
                                                                     (if (equal? (even? i) (even? j))

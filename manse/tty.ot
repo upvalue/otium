@@ -45,16 +45,18 @@
 
 ;; The program's side
 
-(def- (take tty)
+(def- (next-input tty)
   (thread/receive ({:tty (== tty) :input input} input)))
 
+;; lint: allow(shadowed-core-name) called as tty/read; nothing here uses core read
 (def (read tty)
   "The next line in cooked mode, newline included, or the bytes typed since the last read in raw mode, as a string. nil at the end of input."
-  (let ((input (take tty)))
+  (let ((input (next-input tty)))
     (if (eq? input :eof)
         nil
         input)))
 
+;; lint: allow(shadowed-core-name) called as tty/read-line; nothing here uses core read-line
 (def (read-line tty)
   "The next line without its newline, or nil at the end of input."
   (let ((input (read tty)))

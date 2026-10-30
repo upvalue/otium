@@ -1,6 +1,7 @@
 (ns otium.resource)
 (require otium.core :as core)
 
+;; lint: allow(shadowed-core-name) the same binding as core's, re-exported
 (def close core/close)
 
 (defclass Owned
@@ -21,4 +22,5 @@
     (set! (resource :closed?) #t)
     ((resource :destroy) (resource :value))))
 
+;; lint: allow(shadowed-core-name) the same binding as core's, re-exported
 (def with core/with)

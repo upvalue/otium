@@ -1,0 +1,7 @@
+(def (first xs) (car xs)) ;~ L0204
+(def- second 2) ;~ L0204
+(defmacro unless (_c . _body) nil) ;~ L0204
+(def first-of 1)
+(def (uses x) (let ((list x)) list))
+
+(uses (first (list second first-of)))

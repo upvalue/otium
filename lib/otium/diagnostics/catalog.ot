@@ -306,6 +306,14 @@
             :explanation "A named `for` goes round when its body calls the loop's name. That call must be the last thing the pass does. Anywhere else, such as inside an argument, in the middle of a `begin` or inside a nested `fn`, the rest of the loop runs as a nested call and its result comes back to this pass, which then carries on."
             :example "(for next ((x :in xs) (total :sum x))\n  => total\n  (+ 1 (next)))"
             :fixed "(for next ((x :in xs) (total :sum (+ x 1)))\n  => total\n  (next))"}
+   "L0204" {:title "top-level definition hides a core name"
+            :name "shadowed-core-name"
+            :group :suspicious
+            :level :warn
+            :message "`{name}` is also a core name; in this namespace it hides core's `{name}`"
+            :explanation "A top-level definition takes the place of the core binding of the same name everywhere in its namespace, including in code that meant core's. Reading the file, `(first xs)` looks like core's `first`. Pick another name, or suppress the finding with the reason when the namespace means to replace the core name."
+            :example "(def (first xs) (car xs))"
+            :fixed "(def (head xs) (car xs))"}
    "L0301" {:title "local name inside a #` template"
             :name "missed-unquote"
             :group :correctness

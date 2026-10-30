@@ -47,6 +47,20 @@ def generated(t):
         t.expect(t.run([sys.executable, ROOT / 'tools' / tool, '--check']))
 
 
+@test('namespaced builtins')
+def namespaced_builtins(t):
+    """A builtin installed into another namespace, such as otium.ffi/, has a name core
+    doesn't use: it would hide core's inside that namespace, where lint can't see it."""
+    builtins = ''.join(path.read_text() for path in (ROOT / 'c/src').glob('*.c'))
+    names = re.findall(r'\{B_\w+, "([^"]+)",', builtins)
+    core = {name for name in names if '/' not in name}
+    prelude = (ROOT / 'lib/otium/core.ot').read_text()
+    core.update(re.findall(r'^\((?:def-?|defmacro|defonce|defparam)\s+\(?([^\s()]+)', prelude, re.M))
+    for name in names:
+        if '/' in name:
+            t.check(name.split('/', 1)[1] not in core, 'hides a core name:', name)
+
+
 @test('runtime reference')
 def reference(t):
     """Every C builtin and core form is documented, and prelude definitions have docstrings.

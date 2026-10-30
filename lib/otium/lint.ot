@@ -432,7 +432,8 @@
   '("def" "def-" "defonce" "defparam" "defmacro" "defgeneric" "defclass" "defrecord" "defabstract"))
 
 (def- (collect-definitions! context tops)
-  ;; Names defined at top level, so forward references resolve.
+  ;; Names defined at top level, each mapped to its name's node, so forward
+  ;; references resolve.
   (for-each (fn (node)
               (let ((head (syntax/head-name node))
                     (parts (if head
@@ -442,9 +443,9 @@
                   ((and head (member head definition-heads) (> (length parts) 1))
                    (let ((target (nth parts 1)))
                      (cond
-                       ((eq? (target :kind) :atom) (put! (context :defined) (target :text) #t))
+                       ((eq? (target :kind) :atom) (put! (context :defined) (target :text) target))
                        ((and (eq? (target :kind) :list) (syntax/head-name target))
-                        (put! (context :defined) (syntax/head-name target) #t))
+                        (put! (context :defined) (syntax/head-name target) (syntax/head target)))
                        (else nil))))
                   ((equal? head "begin") (collect-definitions! context (rest parts)))
                   (else nil))))
@@ -880,6 +881,29 @@
       ((eq? (car form) 'begin) (for-each (fn (f) (expanded-definitions! context f)) (proper (cdr form))))
       (else nil))))
 
+;; Files the runtime loads into otium.core itself, where core names are
+;; defined rather than hidden.
+(def- core-files '(otium.core otium.expander))
+
+(def- (globals-in? space names)
+  ;; For each name, whether it evaluates to a global in namespace space.
+  ;; Unlike describe, this is false for special forms, which a definition
+  ;; can't hide.
+  (if (null? names)
+      '()
+      (in-namespace space
+                    (list 'map
+                          '(fn (name) (try (begin (eval name) #t) (catch problem #f)))
+                          (list 'quote (map string->symbol names))))))
+
+(def- (check-shadowed! context)
+  ;; Top-level definitions written in the file whose names would otherwise
+  ;; mean a core global, as they do in a namespace that defines nothing.
+  (unless (memq (get context :namespace) core-files)
+    (let ((written (filter (fn (name) (table? (get (context :defined) name))) (sort (keys (context :defined))))))
+      (for ((name :in written) (bound :in (globals-in? (scratch-name) written)))
+        (when bound (report! context "shadowed-core-name" (get (context :defined) name) {:name name}))))))
+
 (def- (check-expanded! context tops)
   ;; Expand every form first, so definitions made by macros anywhere in the
   ;; file are known before names are checked.
@@ -898,6 +922,7 @@
                                                   nil)})
                              nil)))
                        tops)))
+    (check-shadowed! context)
     (for-each (fn (form) (expanded-definitions! context form)) expanded)
     (for-each (fn (node)
                 (when (first expanded) (check-names! context space node (first expanded)))

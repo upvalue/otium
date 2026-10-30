@@ -397,6 +397,16 @@
     "example": "(for next ((x :in xs) (total :sum x))\n  => total\n  (+ 1 (next)))",
     "fixed": "(for next ((x :in xs) (total :sum (+ x 1)))\n  => total\n  (next))"
   },
+  "L0204": {
+    "name": "shadowed-core-name",
+    "group": "suspicious",
+    "level": "warn",
+    "title": "top-level definition hides a core name",
+    "message": "`{name}` is also a core name; in this namespace it hides core's `{name}`",
+    "explanation": "A top-level definition takes the place of the core binding of the same name everywhere in its namespace, including in code that meant core's. Reading the file, `(first xs)` looks like core's `first`. Pick another name, or suppress the finding with the reason when the namespace means to replace the core name.",
+    "example": "(def (first xs) (car xs))",
+    "fixed": "(def (head xs) (car xs))"
+  },
   "L0301": {
     "name": "missed-unquote",
     "group": "correctness",

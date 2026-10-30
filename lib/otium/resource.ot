@@ -3,14 +3,6 @@
 
 (def close core/close)
 
-(def (check-close resource)
-  "Check the close protocol before entering a resource scope."
-  (unless (resource-closable? resource) (error "with: resource has no applicable close method" resource))
-  resource)
-
-(def (release resource outcome release-fn)
-  (release-fn resource outcome))
-
 (defclass Owned
   value
   destroy

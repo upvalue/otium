@@ -20,11 +20,15 @@ static const unsigned char rect_frag[] = {
 // Glyphs and SVGs are tinted masks, so the atlas holds coverage alone.
 #define ATLAS_BYTES (ATLAS_SIZE * ATLAS_SIZE)
 
+// A glyph from a font, or with no font a box-drawing sprite: index is its
+// codepoint and w, h the cell it fills.
 typedef struct {
   TTF_Font* font;
   Uint32 index;
-  int x, y;
+  int x, y, w, h;
 } Glyph;
+
+#define GLYPH_SLOTS 16384
 
 typedef struct Image {
   struct Image* next;
@@ -68,6 +72,7 @@ typedef struct Renderer {
   Image* images;
   int image_count;
   Glyph glyphs[8192];
+  int glyph_slots[GLYPH_SLOTS];  // Glyph index + 1, by hash; 0 is empty.
   int glyph_count, atlas_x, atlas_y, atlas_row;
   bool atlas_dirty;
   SDL_GPUBuffer* buffer;
@@ -715,29 +720,55 @@ bool otui_gpu_image(Renderer* r, const char* path, float x, float y, float w, fl
   return true;
 }
 
+static Uint32 glyph_hash(TTF_Font* font, Uint32 index, int w, int h) {
+  uintptr_t f = (uintptr_t)font;
+  Uint32 x = (Uint32)(f ^ (f >> 32)) * 2654435761u;
+  x ^= index * 2246822519u;
+  x ^= (Uint32)(w << 16 | h) * 3266489917u;
+  return x ^ (x >> 15);
+}
+
+static Glyph* find_glyph(Renderer* r, TTF_Font* font, Uint32 index, int w, int h, Uint32* slot) {
+  for (Uint32 i = glyph_hash(font, index, w, h);; ++i) {
+    *slot = i % GLYPH_SLOTS;
+    int at = r->glyph_slots[*slot];
+    if (!at) return NULL;
+    Glyph* g = &r->glyphs[at - 1];
+    if (g->font == font && g->index == index && g->w == w && g->h == h) return g;
+  }
+}
+
+// Reserve an atlas slot and a glyph entry for a w by h coverage mask.
+static Glyph* add_glyph(Renderer* r, TTF_Font* font, Uint32 index, int w, int h, int pw, int ph,
+                        Uint32 slot) {
+  if (r->glyph_count == 8192) {
+    SDL_SetError("UI glyph cache is full");
+    return NULL;
+  }
+  int x, y;
+  if (!atlas_slot(r, pw, ph, &x, &y)) return NULL;
+  Glyph* g = &r->glyphs[r->glyph_count++];
+  *g = (Glyph){font, index, x, y, w, h};
+  r->glyph_slots[slot] = r->glyph_count;
+  return g;
+}
+
 // Cache a rasterized glyph in the atlas, with a one-pixel transparent gutter.
 // Font objects outlive atlas entries; only new glyphs mark the upload dirty.
-static Glyph* glyph(Renderer* r, TTF_CopyOperation* op) {
-  for (int i = 0; i < r->glyph_count; ++i)
-    if (r->glyphs[i].font == op->glyph_font && r->glyphs[i].index == op->glyph_index)
-      return &r->glyphs[i];
-  SDL_Surface* image = TTF_GetGlyphImageForIndex(op->glyph_font, op->glyph_index, NULL);
+static Glyph* font_glyph(Renderer* r, TTF_Font* font, Uint32 index) {
+  Uint32 slot;
+  Glyph* g = find_glyph(r, font, index, 0, 0, &slot);
+  if (g) return g;
+  SDL_Surface* image = TTF_GetGlyphImageForIndex(font, index, NULL);
   if (!image) return NULL;
   SDL_Surface* pixels = SDL_ConvertSurface(image, SDL_PIXELFORMAT_RGBA32);
   SDL_DestroySurface(image);
   if (!pixels) return NULL;
-  int x, y;
-  if (r->glyph_count == 8192) {
-    SDL_DestroySurface(pixels);
-    SDL_SetError("UI glyph cache is full");
-    return NULL;
-  }
-  if (!atlas_slot(r, pixels->w, pixels->h, &x, &y)) {
+  g = add_glyph(r, font, index, 0, 0, pixels->w, pixels->h, slot);
+  if (!g) {
     SDL_DestroySurface(pixels);
     return NULL;
   }
-  Glyph* g = &r->glyphs[r->glyph_count++];
-  *g = (Glyph){op->glyph_font, op->glyph_index, x, y};
   // RGBA32 is byte-ordered, so alpha is every fourth byte.
   for (int y = 0; y < pixels->h; ++y) {
     const Uint8* src = (const Uint8*)pixels->pixels + y * pixels->pitch;
@@ -746,6 +777,124 @@ static Glyph* glyph(Renderer* r, TTF_CopyOperation* op) {
   }
   SDL_DestroySurface(pixels);
   return g;
+}
+
+static Glyph* glyph(Renderer* r, TTF_CopyOperation* op) {
+  return font_glyph(r, op->glyph_font, op->glyph_index);
+}
+
+#include "sprites.inc"
+
+// Box-drawing, block, braille and powerline characters fill their cell
+// exactly, so they're drawn here rather than taken from the font: lines then
+// meet across cells whatever the font's metrics.
+static Glyph* sprite(Renderer* r, Uint32 cp, int w, int h) {
+  if (!sprite_supported(cp) || w < 1 || h < 1 || w > 512 || h > 512) return NULL;
+  Uint32 slot;
+  Glyph* g = find_glyph(r, NULL, cp, w, h, &slot);
+  if (g) return g;
+  Uint8* mask = calloc((size_t)w * h, 1);
+  if (!mask) {
+    SDL_SetError("Out of memory drawing a cell sprite");
+    return NULL;
+  }
+  sprite_draw(cp, w, h, mask);
+  g = add_glyph(r, NULL, cp, w, h, w, h, slot);
+  if (g)
+    for (int y = 0; y < h; ++y) memcpy(r->atlas_pixels + (g->y + y) * ATLAS_SIZE + g->x, mask + y * w, w);
+  free(mask);
+  return g;
+}
+
+static bool textured_rect(Renderer* r, float x, float y, float w, float h, Uint32 color, Glyph* g,
+                          SDL_Rect src, float cx, float cy, float cw, float ch) {
+  if (!otui_gpu_rect(r, x, y, w, h, 0, color, cx, cy, cw, ch)) return false;
+  Rect* rect = &r->rects[r->count - 1];
+  rect->shape[3] = 1;
+  rect->uv[0] = (float)(g->x + src.x) / ATLAS_SIZE;
+  rect->uv[1] = (float)(g->y + src.y) / ATLAS_SIZE;
+  rect->uv[2] = (float)src.w / ATLAS_SIZE;
+  rect->uv[3] = (float)src.h / ATLAS_SIZE;
+  return true;
+}
+
+static Uint32 first_codepoint(const char* s, size_t len, size_t* used) {
+  const Uint8* p = (const Uint8*)s;
+  Uint32 cp;
+  size_t n;
+  if (p[0] < 0x80) cp = p[0], n = 1;
+  else if ((p[0] & 0xe0) == 0xc0) cp = p[0] & 0x1f, n = 2;
+  else if ((p[0] & 0xf0) == 0xe0) cp = p[0] & 0x0f, n = 3;
+  else cp = p[0] & 0x07, n = 4;
+  if (n > len) n = len;
+  for (size_t i = 1; i < n; ++i) cp = cp << 6 | (p[i] & 0x3f);
+  *used = n;
+  return cp;
+}
+
+// Draw terminal cells, separated by 0x1F in text, from column 0 at x, y.
+// Each grapheme is shaped alone and placed at its column; cells are cell_w by
+// cell_h physical pixels. Flags: 1 underline, 2 strikethrough. On failure,
+// nothing from this call is drawn.
+bool otui_gpu_cells(Renderer* r, const char* text, int face, float size, float x, float y,
+                    int cell_w, int cell_h, Uint32 color, int flags, float cx, float cy, float ccw,
+                    float cch) {
+  float scale = otui_gpu_scale(r);
+  float m[4];
+  if (!text || !isfinite(x) || !isfinite(y) || cell_w < 1 || cell_h < 1 || cell_w > 512 ||
+      cell_h > 512)
+    return SDL_SetError("Invalid terminal cells");
+  if (!otui_font_metrics(face, size, scale, m)) return false;
+  float left = roundf(x * scale), top = roundf(y * scale);
+  // Centre the font's line in the cell, so a taller line height spaces rows evenly.
+  float pad = floorf((cell_h - m[1]) / 2);
+  Uint32 start = r->count;
+  int column = 0;
+  for (const char* p = text;; ++column) {
+    const char* end = strchr(p, 0x1f);
+    size_t len = end ? (size_t)(end - p) : strlen(p);
+    float cell_x = left + column * cell_w;
+    if (len && !(len == 1 && *p == ' ')) {
+      size_t used;
+      Uint32 cp = first_codepoint(p, len, &used);
+      Glyph* g = used == len ? sprite(r, cp, cell_w, cell_h) : NULL;
+      if (g) {
+        if (!textured_rect(r, cell_x / scale, top / scale, cell_w / scale, cell_h / scale, color, g,
+                           (SDL_Rect){0, 0, cell_w, cell_h}, cx, cy, ccw, cch))
+          goto failed;
+      } else if (used == len && sprite_supported(cp)) {
+        goto failed;
+      } else {
+        const OtuiCellOp* ops;
+        int n = otui_text_cell(p, (int)len, face, size, scale, &ops);
+        if (n < 0) goto failed;
+        for (int i = 0; i < n; ++i) {
+          SDL_Rect src = ops[i].src, dst = ops[i].dst;
+          g = font_glyph(r, ops[i].font, ops[i].index);
+          if (!g || !textured_rect(r, (cell_x + dst.x) / scale, (top + pad + dst.y) / scale,
+                                   dst.w / scale, dst.h / scale, color, g, src, cx, cy, ccw, cch))
+            goto failed;
+        }
+      }
+    }
+    if (!end) break;
+    p = end + 1;
+  }
+  int thickness = cell_h / 16 > 1 ? cell_h / 16 : 1;
+  float width = (float)(column + 1) * cell_w / scale;
+  float baseline = top + pad + m[2];
+  if ((flags & 1) &&
+      !otui_gpu_rect(r, left / scale, fminf(baseline + thickness, top + cell_h - thickness) / scale,
+                     width, thickness / scale, 0, color, cx, cy, ccw, cch))
+    goto failed;
+  if ((flags & 2) &&
+      !otui_gpu_rect(r, left / scale, (baseline - roundf(m[2] * 0.3f) - thickness / 2) / scale, width,
+                     thickness / scale, 0, color, cx, cy, ccw, cch))
+    goto failed;
+  return true;
+failed:
+  r->count = start;
+  return false;
 }
 
 // Expand SDL_ttf shaping operations into atlas-backed rectangle instances.

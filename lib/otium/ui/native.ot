@@ -57,6 +57,10 @@
                  (text-resources "otui_text_resources" () int #t)
                  (text-error "otui_text_error" () utf8 #t)
                  (font-register "otui_font_register" (utf8) int #t)
+                 ((private %font-face) "otui_font_face" (utf8 int int int pointer int) int #t)
+                 ((private %font-builtin) "otui_font_builtin" (int) utf8 #t)
+                 ((private %font-describe) "otui_font_describe" (utf8 int pointer int pointer int) int #t)
+                 ((private %font-metrics) "otui_font_metrics" (int float float pointer) bool #t)
                  (text-get "otui_text_get" (utf8 int float float float) pointer #t)
                  (text-size "otui_text_size" (pointer int) float #t)
                  (text-carets "otui_text_carets" (pointer pointer int) bool #t)
@@ -66,6 +70,10 @@
                            (pointer utf8 int float float float float u32 float float float float)
                            bool
                            #t)
+                 (gpu-cells "otui_gpu_cells"
+                            (pointer utf8 int float float float int int u32 int float float float float)
+                            bool
+                            #t)
                  (node-layout "otui_node_layout" (pointer float float) void #t)
                  (node-bounds "otui_node_bounds" (pointer int) float #t)
                  (live-nodes "otui_live_nodes" () int #t)
@@ -99,6 +107,56 @@
                  (gpu-driver "otui_gpu_driver" (pointer) utf8 #t)
                  (gpu-count "otui_gpu_count" (pointer) int #t)
                  (live-renderers "otui_live_renderers" () int #t))
+
+;; Font faces
+
+(def HINTING
+  "SDL_ttf hinting modes by name."
+  {:normal 0 :light 1 :mono 2 :none 3 :light-subpixel 4})
+
+(def (font-face path index bold? italic? hinting fallbacks)
+  "Register face index of a font file, synthesizing bold or italic and with a
+hinting mode from HINTING or nil for the default. Missing glyphs come from the
+earlier face IDs in fallbacks. Returns a face ID."
+  (let ((ids (ffi/alloc 'i32 (max 1 (length fallbacks)))))
+    (defer
+      (begin
+        (for-each (fn (i) (ffi/set! ids 'i32 i (list-ref fallbacks i))) (range (length fallbacks)))
+        (let ((face (%font-face path
+                                index
+                                (bitwise-ior (if bold? 1 0) (if italic? 2 0))
+                                (if hinting (HINTING hinting) -1)
+                                ids
+                                (length fallbacks))))
+          (when (< face 0) (error (text-error)))
+          face))
+      (ffi/free! ids))))
+
+(def (font-builtin face)
+  "The font file behind built-in face 0 (:ui) or 1 (:mono)."
+  (%font-builtin face))
+
+(def (font-describe path index)
+  "Family and style names of face index of a font file, and how many faces it has, or nil."
+  (let ((family (ffi/alloc 'u8 256))
+        (style (ffi/alloc 'u8 256)))
+    (defer
+      (let ((count (%font-describe path index family 256 style 256)))
+        (when (>= count 0) {:family (ffi/read-utf8 family 256) :style (ffi/read-utf8 style 256) :faces count}))
+      (ffi/free! family)
+      (ffi/free! style))))
+
+(def (font-metrics face size scale)
+  "Physical-pixel :advance of M, :height, :ascent and :descent of a face."
+  (let ((out (ffi/alloc 'float 4)))
+    (defer
+      (begin
+        (unless (%font-metrics face size scale out) (error (text-error)))
+        {:advance (ffi/ref out 'float 0)
+         :height (ffi/ref out 'float 1)
+         :ascent (ffi/ref out 'float 2)
+         :descent (ffi/ref out 'float 3)})
+      (ffi/free! out))))
 
 ;; Yoga's own setters, on the YGNodeRef that leads a layout node.
 (def- YG_RELATIVE 1)

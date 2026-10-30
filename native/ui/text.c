@@ -9,7 +9,7 @@ static struct {
   TTF_Font* font;
   float size;
   int face;
-} fonts[64];
+} fonts[256];
 
 static struct {
   TTF_Text* text;
@@ -17,14 +17,24 @@ static struct {
   int width;
 } runs[128];
 
-static char* font_paths[32];
-static int path_count;
+// A registered face: a font file, the face within it, styles SDL_ttf should
+// synthesize, hinting, and fonts to take missing glyphs from. IDs are index + 2.
+typedef struct {
+  char* path;
+  int index, style, hinting, fallback_count;
+  int fallbacks[8];
+} Face;
+
+static Face faces[64];
+static int face_count;
 static int font_count;
 static bool initialized;
 static TTF_TextEngine engine;
 
+static void clear_cells(void);
+
 int otui_text_resources(void) {
-  int count = font_count + path_count;
+  int count = font_count + face_count;
   for (int i = 0; i < 128; ++i)
     if (runs[i].text) ++count;
   return count;
@@ -53,68 +63,155 @@ static bool init_text(void) {
   return true;
 }
 
-int otui_font_register(const char* path) {
+const char* otui_font_builtin(int face) {
+  return face == 1 ? OTUI_FONT_DIR "/JetBrainsMono.ttf"
+       : face == 0 ? OTUI_FONT_DIR "/NotoSans.ttf"
+                   : NULL;
+}
+
+static TTF_Font* open_file(const char* path, int index, float size) {
+  SDL_PropertiesID props = SDL_CreateProperties();
+  if (!props) return NULL;
+  SDL_SetStringProperty(props, TTF_PROP_FONT_CREATE_FILENAME_STRING, path);
+  SDL_SetNumberProperty(props, TTF_PROP_FONT_CREATE_FACE_NUMBER, index);
+  SDL_SetFloatProperty(props, TTF_PROP_FONT_CREATE_SIZE_FLOAT, size);
+  TTF_Font* font = TTF_OpenFontWithProperties(props);
+  SDL_DestroyProperties(props);
+  return font;
+}
+
+int otui_font_face(const char* path, int index, int style, int hinting, const int* fallbacks,
+                   int fallback_count) {
   if (!path || !*path) {
     SDL_SetError("Font path must not be empty");
     return -1;
   }
-  for (int i = 0; i < path_count; ++i)
-    if (strcmp(font_paths[i], path) == 0) return i + 2;
-  if (path_count == 32) {
-    SDL_SetError("UI font file limit reached (32)");
+  if (index < 0 || (style & ~(TTF_STYLE_BOLD | TTF_STYLE_ITALIC)) || hinting < -1 ||
+      hinting > TTF_HINTING_LIGHT_SUBPIXEL || fallback_count < 0 || fallback_count > 8 ||
+      (fallback_count && !fallbacks)) {
+    SDL_SetError("Invalid font face options");
+    return -1;
+  }
+  // Fallbacks must already exist, so they can't form a cycle.
+  for (int i = 0; i < fallback_count; ++i)
+    if (fallbacks[i] < 0 || fallbacks[i] >= face_count + 2) {
+      SDL_SetError("Unknown fallback font face");
+      return -1;
+    }
+  for (int i = 0; i < face_count; ++i) {
+    Face* f = &faces[i];
+    if (f->index == index && f->style == style && f->hinting == hinting &&
+        f->fallback_count == fallback_count && strcmp(f->path, path) == 0 &&
+        memcmp(f->fallbacks, fallbacks ? fallbacks : f->fallbacks,
+               (size_t)fallback_count * sizeof(int)) == 0)
+      return i + 2;
+  }
+  if (face_count == 64) {
+    SDL_SetError("UI font face limit reached (64)");
     return -1;
   }
   if (!init_text()) return -1;
   // Validate before publishing an ID. Failed loads consume no registry slots.
-  TTF_Font* probe = TTF_OpenFont(path, 14);
+  TTF_Font* probe = open_file(path, index, 14);
   if (!probe) return -1;
   TTF_CloseFont(probe);
   char* copy = SDL_strdup(path);
   if (!copy) return -1;
-  font_paths[path_count++] = copy;
-  return path_count + 1;
+  Face* f = &faces[face_count++];
+  *f = (Face){copy, index, style, hinting, fallback_count, {0}};
+  if (fallback_count) memcpy(f->fallbacks, fallbacks, (size_t)fallback_count * sizeof(int));
+  return face_count + 1;
+}
+
+int otui_font_register(const char* path) { return otui_font_face(path, 0, 0, -1, NULL, 0); }
+
+int otui_font_describe(const char* path, int index, char* family, int family_cap, char* style,
+                       int style_cap) {
+  if (!path || index < 0 || !family || !style || family_cap < 1 || style_cap < 1) {
+    SDL_SetError("Invalid font description request");
+    return -1;
+  }
+  if (!init_text()) return -1;
+  TTF_Font* font = open_file(path, index, 12);
+  if (!font) return -1;
+  const char* name = TTF_GetFontFamilyName(font);
+  const char* kind = TTF_GetFontStyleName(font);
+  SDL_strlcpy(family, name ? name : "", (size_t)family_cap);
+  SDL_strlcpy(style, kind ? kind : "", (size_t)style_cap);
+  int count = TTF_GetNumFontFaces(font);
+  TTF_CloseFont(font);
+  return count;
 }
 
 void otui_text_clear(void) {
+  clear_cells();
   for (int i = 0; i < 128; ++i) {
     if (runs[i].text) TTF_DestroyText(runs[i].text);
     memset(&runs[i], 0, sizeof(runs[i]));
   }
   for (int i = 0; i < font_count; ++i) TTF_CloseFont(fonts[i].font);
   font_count = 0;
-  for (int i = 0; i < path_count; ++i) SDL_free(font_paths[i]);
-  memset(font_paths, 0, sizeof(font_paths));
-  path_count = 0;
+  for (int i = 0; i < face_count; ++i) SDL_free(faces[i].path);
+  memset(faces, 0, sizeof(faces));
+  face_count = 0;
   if (initialized) TTF_Quit();
   initialized = false;
 }
 
+// size is in physical pixels.
+static TTF_Font* face_font(int face, float size) {
+  for (int i = 0; i < font_count; ++i)
+    if (fonts[i].face == face && fonts[i].size == size) return fonts[i].font;
+  if (font_count == 256) {
+    SDL_SetError("UI font size limit reached (256)");
+    return NULL;
+  }
+  Face* f = face >= 2 ? &faces[face - 2] : NULL;
+  TTF_Font* font = f ? open_file(f->path, f->index, size) : TTF_OpenFont(otui_font_builtin(face), size);
+  if (!font) return NULL;
+  if (f) {
+    if (f->style) TTF_SetFontStyle(font, f->style);
+    if (f->hinting >= 0) TTF_SetFontHinting(font, f->hinting);
+  }
+  fonts[font_count].font = font;
+  fonts[font_count].face = face;
+  fonts[font_count++].size = size;
+  for (int i = 0; f && i < f->fallback_count; ++i) {
+    TTF_Font* fallback = face_font(f->fallbacks[i], size);
+    if (!fallback || !TTF_AddFallbackFont(font, fallback)) return NULL;
+  }
+  return font;
+}
+
+static bool valid_face(int face, float size, float scale) {
+  if (face < 0 || face >= face_count + 2 || !isfinite(size) || size < 1 || size > 256 ||
+      !isfinite(scale) || scale < 1 || scale > 4)
+    return SDL_SetError("Invalid UI text options");
+  return init_text();
+}
+
+bool otui_font_metrics(int face, float size, float scale, float* out) {
+  if (!out || !valid_face(face, size, scale)) return false;
+  TTF_Font* font = face_font(face, size * scale);
+  if (!font) return false;
+  int advance = 0;
+  if (!TTF_GetGlyphMetrics(font, 'M', NULL, NULL, NULL, NULL, &advance)) return false;
+  out[0] = (float)advance;
+  out[1] = (float)TTF_GetFontHeight(font);
+  out[2] = (float)TTF_GetFontAscent(font);
+  out[3] = (float)TTF_GetFontDescent(font);
+  return true;
+}
+
 TTF_Text* otui_text_get(const char* string, int face, float size, float width, float scale) {
-  if (!string || face < 0 || face >= path_count + 2 || !isfinite(size) || size < 1 || size > 256 ||
-      !isfinite(width) || width > 1048576 || !isfinite(scale) || scale < 1 || scale > 4) {
+  if (!string || !isfinite(width) || width > 1048576 || !valid_face(face, size, scale)) {
     SDL_SetError("Invalid UI text options");
     return NULL;
   }
   size *= scale;
   if (width >= 0) width *= scale;
-  if (!init_text()) return NULL;
-  TTF_Font* font = NULL;
-  for (int i = 0; i < font_count; ++i)
-    if (fonts[i].face == face && fonts[i].size == size) font = fonts[i].font;
-  if (!font) {
-    if (font_count == 64) {
-      SDL_SetError("UI font size limit reached (64)");
-      return NULL;
-    }
-    const char* path = face >= 2 ? font_paths[face - 2]
-                       : face    ? OTUI_FONT_DIR "/JetBrainsMono.ttf"
-                                 : OTUI_FONT_DIR "/NotoSans.ttf";
-    font = TTF_OpenFont(path, size);
-    if (!font) return NULL;
-    fonts[font_count].font = font;
-    fonts[font_count].face = face;
-    fonts[font_count++].size = size;
-  }
+  TTF_Font* font = face_font(face, size);
+  if (!font) return NULL;
   // SDL_ttf uses zero for newline-only wrapping. A zero-width Yoga constraint
   // must still wrap, so use the narrowest representable width for shaping.
   int wrap = width < 0 ? 0 : (int)fmaxf(1, floorf(width));
@@ -139,6 +236,88 @@ TTF_Text* otui_text_get(const char* string, int face, float size, float width, f
   runs[slot].font = font;
   runs[slot].width = wrap;
   return text;
+}
+
+// Terminal cells: one grapheme shaped on its own, so it lands in its column
+// whatever the font's advances or ligatures. Shapes are cached by face, size
+// and bytes; the table empties when it fills, as glyphs live in the atlas.
+#define CELL_SLOTS 8192
+#define CELL_OPS 32768
+#define CELL_BYTES 31
+
+typedef struct {
+  int face;
+  float size;
+  Uint8 len;
+  char bytes[CELL_BYTES];
+  Uint16 count;
+  Uint32 first;
+} CellEntry;
+
+static CellEntry cells[CELL_SLOTS];
+static OtuiCellOp cell_ops[CELL_OPS];
+static int cell_used, cell_op_count;
+static OtuiCellOp scratch_ops[64];
+
+static void clear_cells(void) {
+  memset(cells, 0, sizeof(cells));
+  cell_used = cell_op_count = 0;
+}
+
+static int shape_cell(TTF_Font* font, const char* bytes, int len, OtuiCellOp* out, int cap) {
+  TTF_Text* text = TTF_CreateText(&engine, font, bytes, (size_t)len);
+  if (!text) return -1;
+  if (!TTF_UpdateText(text)) {
+    TTF_DestroyText(text);
+    return -1;
+  }
+  int n = 0;
+  for (int i = 0; i < text->internal->num_ops && n < cap; ++i) {
+    TTF_DrawOperation* op = &text->internal->ops[i];
+    if (op->cmd != TTF_DRAW_COMMAND_COPY) continue;
+    out[n++] = (OtuiCellOp){op->copy.glyph_font, op->copy.glyph_index, op->copy.src, op->copy.dst};
+  }
+  TTF_DestroyText(text);
+  return n;
+}
+
+int otui_text_cell(const char* bytes, int len, int face, float size, float scale,
+                   const OtuiCellOp** ops) {
+  if (!bytes || len < 1 || !ops || !valid_face(face, size, scale)) return -1;
+  size *= scale;
+  TTF_Font* font = face_font(face, size);
+  if (!font) return -1;
+  if (len > CELL_BYTES) {
+    *ops = scratch_ops;
+    return shape_cell(font, bytes, len, scratch_ops, 64);
+  }
+  Uint32 hash = 2166136261u ^ (Uint32)face ^ (Uint32)(size * 64);
+  for (int i = 0; i < len; ++i) hash = (hash ^ (Uint8)bytes[i]) * 16777619u;
+  for (Uint32 probe = 0;; ++probe) {
+    CellEntry* e = &cells[(hash + probe) % CELL_SLOTS];
+    if (!e->len) break;
+    if (e->face == face && e->size == size && e->len == len && memcmp(e->bytes, bytes, (size_t)len) == 0) {
+      *ops = &cell_ops[e->first];
+      return e->count;
+    }
+  }
+  if (cell_used >= CELL_SLOTS * 3 / 4 || cell_op_count > CELL_OPS - 64) clear_cells();
+  OtuiCellOp* out = &cell_ops[cell_op_count];
+  int n = shape_cell(font, bytes, len, out, 64);
+  if (n < 0) return -1;
+  Uint32 slot = hash % CELL_SLOTS;
+  while (cells[slot].len) slot = (slot + 1) % CELL_SLOTS;
+  CellEntry* e = &cells[slot];
+  e->face = face;
+  e->size = size;
+  e->len = (Uint8)len;
+  memcpy(e->bytes, bytes, (size_t)len);
+  e->count = (Uint16)n;
+  e->first = (Uint32)cell_op_count;
+  cell_op_count += n;
+  ++cell_used;
+  *ops = out;
+  return n;
 }
 
 float otui_text_size(TTF_Text* text, int field) {

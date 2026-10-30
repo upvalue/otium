@@ -83,6 +83,26 @@
   "Record unwrapped text at a logical position, like text without a bounds value to allocate."
   (%text g x y -1 string font size color))
 
+(def (cells g x y cells face size cell-width cell-height color &optional (flags 0))
+  "Record terminal cells from x, y: their graphemes separated by 0x1F, each placed
+in its own column. Cell width and height are whole device pixels. face is a
+face ID; flags 1 underlines and 2 strikes through."
+  (let ((clip (g :clip)))
+    (sdl/check (native/gpu-cells (g :renderer)
+                                 cells
+                                 face
+                                 size
+                                 x
+                                 y
+                                 cell-width
+                                 cell-height
+                                 color
+                                 flags
+                                 (clip :x)
+                                 (clip :y)
+                                 (clip :width)
+                                 (clip :height)))))
+
 ;; Paint caches: record a widget's drawing once and replay it, moved, on later
 ;; frames. Each cache has a renderer-wide id; the renderer frees recordings
 ;; that go unused for a while.

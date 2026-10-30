@@ -56,8 +56,10 @@
    ["Meta+Right" "Cmd+Right" :right "Focus the column to the right"]
    ["Meta+Shift+Left" "Cmd+Shift+Left" :move-left "Move the column left"]
    ["Meta+Shift+Right" "Cmd+Shift+Right" :move-right "Move the column right"]
-   ["Meta+R" "Cmd+R" :widen "Widen the column"]
-   ["Meta+Shift+R" "Cmd+Shift+R" :narrow "Narrow the column"]
+   ["Meta+=" "Cmd+=" :widen "Widen the column"]
+   ["Meta+-" "Cmd+-" :narrow "Narrow the column"]
+   ["Meta+Shift+=" "Cmd+Shift+=" :font-larger "Larger text"]
+   ["Meta+Shift+-" "Cmd+Shift+-" :font-smaller "Smaller text"]
    ["Meta+J" "Cmd+J" :jump "Jump to a column by its letters"]
    ["Meta+I" "Cmd+I" :sysinfo "Show or hide system info"]
    ["Meta+Shift+/" "Cmd+?" :help "Show or hide these keys"]])
@@ -85,6 +87,12 @@
           ((:move-right) (strip/column-move! s 1))
           ((:widen) (strip/width-step! s 1))
           ((:narrow) (strip/width-step! s -1))
+          ((:font-larger :font-smaller)
+           (let ((spec (settings/setting-specs :font-size)))
+             (settings/configure! {:font-size (clamp (+ (settings/options :font-size)
+                                                        (if (eq? action :font-larger) 1 -1))
+                                                     (spec :min)
+                                                     (spec :max))})))
           ((:jump) (strip/hints-start! s))
           ((:help :sysinfo) (put! workspace :popup (if (eq? action (workspace :popup)) nil action)))
           ((:close-popup) (put! workspace :popup nil))
@@ -267,16 +275,25 @@ one the last view asked for, e.g. by a click. Record the focus this view asks fo
 (def- (megabytes bytes)
   (str (/ (round (/ bytes 104857.6)) 10.0) " MB"))
 
+(def- (milliseconds nanoseconds)
+  (str (/ (round (/ nanoseconds 10000.0)) 100.0) " ms"))
+
 (def (sysinfo-panel)
   (let ((info (sysinfo/snapshot))
         (fp (info :footprint))
+        (heap (info :heap))
         (row (fn (label value)
                (ui/row {:gap 10 :align-items :center}
                        (ui/label {:color theme/muted :size 12 :width 130} label)
                        (ui/label {:color theme/text :size 12 :width 0 :grow 1} value)))))
     (card "System"
           (list (row "Uptime" (duration (info :uptime)))
-                (row "Memory" (if fp (str (megabytes (fp :current)) " (peak " (megabytes (fp :peak)) ")") "unknown"))
+                (row "Process memory" (if fp (str (megabytes (fp :current)) " (peak " (megabytes (fp :peak)) ")") "unknown"))
+                (row "Otium heap" (str (megabytes (heap :live)) " live, " (megabytes (heap :held)) " held"))
+                (row "Peak heap in use" (megabytes (heap :peak)))
+                (row "Collections" (str (heap :collections)))
+                (row "Time collecting"
+                     (str (milliseconds (* 1000000 (heap :gc-ms))) ", longest " (milliseconds (info :longest-gc-ns))))
                 (row "Allocated in total" (megabytes (info :allocated)))
                 (row "Native threads" (if (info :native-threads) (str (info :native-threads)) "unknown"))
                 (row "Otium threads" (str (info :threads)))))))

@@ -43,6 +43,8 @@
 (def (snapshot)
   {:uptime (uptime)
    :footprint (memory/footprint)
+   :heap (memory/heap)
+   :longest-gc-ns (memory/heap-stat :longest-gc-ns)
    :allocated (memory/allocated)
    :threads (length (thread/all))
    :native-threads (native-threads)})

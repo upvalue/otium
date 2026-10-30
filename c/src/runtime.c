@@ -517,13 +517,8 @@ uint32_t oti_namespace(ot_state* rt, const char* name, size_t length) {
       !oti_grow(rt, (void**)&rt->namespaces, &rt->namespace_capacity, rt->namespace_count + 1,
                 sizeof(char*)))
     return UINT32_MAX;
-  char* copy = malloc(length + 1);
-  if (!copy) {
-    oti_error(rt, "out of host memory");
-    return UINT32_MAX;
-  }
-  memcpy(copy, name, length);
-  copy[length] = 0;
+  char* copy = oti_strndup(rt, name, length);
+  if (!copy) return UINT32_MAX;
   uint32_t id = (uint32_t)rt->namespace_count++;
   rt->namespaces[id] = copy;
   return id;
@@ -579,13 +574,8 @@ static uint32_t namespace_global(ot_state* rt, uint32_t space, const char* name,
   if (!oti_grow(rt, (void**)&rt->global_info, &rt->global_info_capacity, rt->global_count + 1,
                 sizeof(oti_global_info)))
     return UINT32_MAX;
-  char* copy = malloc(length + 1);
-  if (!copy) {
-    oti_error(rt, "out of host memory");
-    return UINT32_MAX;
-  }
-  memcpy(copy, name, length);
-  copy[length] = 0;
+  char* copy = oti_strndup(rt, name, length);
+  if (!copy) return UINT32_MAX;
   uint32_t index = (uint32_t)rt->global_count++;
   rt->global_info[index] = (oti_global_info){.name = copy, .space = space, .length = (uint32_t)length};
   if (!global_index(rt, index)) return UINT32_MAX;
@@ -829,10 +819,8 @@ static bool document(ot_state* rt, uint32_t index, const oti_ast* doc) {
   char* text = NULL;
   size_t length = doc ? doc->as.text.size : 0;
   if (doc) {
-    text = malloc(length + 1);
-    if (!text) return oti_error(rt, "out of host memory");
-    memcpy(text, doc->as.text.data, length);
-    text[length] = 0;
+    text = oti_strndup(rt, doc->as.text.data, length);
+    if (!text) return false;
   }
   free(rt->global_info[index].doc.text);
   rt->global_info[index].doc = (oti_documentation){text, length};

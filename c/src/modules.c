@@ -31,23 +31,12 @@ static oti_module_state* state(ot_state* rt) {
   return rt->modules;
 }
 
-static char* copy_text(ot_state* rt, const char* s, size_t n) {
-  char* copy = malloc(n + 1);
-  if (!copy) {
-    oti_error(rt, "out of host memory");
-    return NULL;
-  }
-  memcpy(copy, s, n);
-  copy[n] = 0;
-  return copy;
-}
-
 bool ot_add_load_path(ot_state* rt, const char* path) {
   if (!oti_host_entry(rt)) return false;
   oti_module_state* m = state(rt);
   if (!m || !oti_grow(rt, (void**)&m->paths, &m->path_capacity, m->path_count + 1, sizeof(char*)))
     return false;
-  char* copy = copy_text(rt, path, strlen(path));
+  char* copy = oti_strndup(rt, path, strlen(path));
   if (!copy) return false;
   m->paths[m->path_count++] = copy;
   return true;
@@ -158,7 +147,7 @@ static bool install_import(ot_state* rt, const oti_ast* name, uint32_t target, b
   if (!oti_grow(rt, (void**)&m->imports, &m->import_capacity, m->import_count + 1,
                 sizeof(oti_import)))
     return false;
-  char* copy = copy_text(rt, name->as.text.data, name->as.text.size);
+  char* copy = oti_strndup(rt, name->as.text.data, name->as.text.size);
   if (!copy) return false;
   m->imports[m->import_count++] = (oti_import){rt->current_namespace, target, copy, alias};
   return true;

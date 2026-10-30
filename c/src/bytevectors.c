@@ -179,12 +179,7 @@ static ot_value bytes_utf8_string(ot_state* rt, size_t first, size_t count) {
     if (!next) return oti_decode_error(rt, p);
     p = next;
   }
-  char* copy = malloc(end - start + 1);
-  if (!copy) return oti_fail(rt, "out of host memory");
-  memcpy(copy, oti_bytes_data(a) + start, end - start);
-  ot_value result = oti_text(rt, K_STRING, copy, end - start);
-  free(copy);
-  return result;
+  return oti_text_from(rt, K_STRING, a, start, end - start);
 }
 
 const oti_builtin_def oti_bytes_builtins[] = {

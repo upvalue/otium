@@ -336,14 +336,7 @@ static ot_value support_symbol_string(ot_state* rt, size_t first, size_t count) 
   if (!oti_check_arity(rt, "symbol->string", count, 1, 1)) return 0;
   ot_value v = rt->stack[first];
   if (!oti_kind(v, K_SYMBOL)) return oti_fail(rt, "expected symbol");
-  size_t n;
-  const char* s = oti_text_bytes(v, &n);
-  char* copy = malloc(n ? n : 1);
-  if (!copy) return oti_fail(rt, "out of host memory");
-  memcpy(copy, s, n);
-  ot_value result = oti_text(rt, K_STRING, copy, n);
-  free(copy);
-  return result;
+  return oti_text_from(rt, K_STRING, v, 0, oti_bytes_length(v));
 }
 
 ot_value oti_string_length_builtin(ot_state* rt, size_t first, size_t count) {
@@ -388,12 +381,7 @@ static ot_value support_substring(ot_state* rt, size_t first, size_t count) {
   }
   if ((size_t)start == length) a = n;
   if ((size_t)end == length) b = n;
-  char* copy = malloc(b - a + 1);
-  if (!copy) return oti_fail(rt, "out of host memory");
-  memcpy(copy, s + a, b - a);
-  ot_value result = oti_text(rt, K_STRING, copy, b - a);
-  free(copy);
-  return result;
+  return oti_text_from(rt, K_STRING, v, a, b - a);
 }
 
 const oti_builtin_def oti_support_builtins[] = {

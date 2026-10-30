@@ -58,15 +58,6 @@ static char* display(ot_state* rt, size_t first, size_t count, size_t* length) {
   return bytes;
 }
 
-static ot_value copied(ot_state* rt, const char* bytes, size_t n) {
-  char* copy = malloc(n ? n : 1);
-  if (!copy) return oti_fail(rt, "out of host memory");
-  memcpy(copy, bytes, n);
-  ot_value result = oti_text(rt, K_STRING, copy, n);
-  free(copy);
-  return result;
-}
-
 static bool append_buffer(ot_state* rt, ot_value* buffer, const char* bytes, size_t n) {
   oti_buffer_obj* info = oti_as_buffer(*buffer);
   if (n > SIZE_MAX - info->length) return oti_error(rt, "buffer too large");
@@ -159,7 +150,7 @@ static ot_value string_buffer_string(ot_state* rt, size_t first, size_t count) {
   if (!value) return 0;
   if (!oti_kind(value, K_BUFFER)) return oti_fail(rt, "expected buffer");
   size_t n = oti_as_buffer(value)->length;
-  return copied(rt, n ? (char*)oti_as_buffer_data(oti_as_buffer(value)->data)->bytes : "", n);
+  return oti_text_from(rt, K_STRING, n ? oti_as_buffer(value)->data : OT_NIL, 0, n);
 }
 
 /* The text of a string, symbol or keyword without a keyword's leading colon. */
@@ -181,7 +172,8 @@ static ot_value string_name(ot_state* rt, size_t first, size_t count) {
   if (!value) return 0;
   size_t n;
   const char* bytes = string_name_text(rt, value, &n);
-  return bytes ? copied(rt, bytes, n) : 0;
+  if (!bytes) return 0;
+  return oti_text_from(rt, K_STRING, value, oti_kind(value, K_KEYWORD) ? 1 : 0, n);
 }
 
 static ot_value string_symbol(ot_state* rt, size_t first, size_t count) {

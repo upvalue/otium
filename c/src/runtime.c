@@ -633,16 +633,33 @@ uint32_t oti_resolve_global(ot_state* rt, const char* name, size_t length) {
   return resolve_global(rt, name, length, true);
 }
 
-ot_value oti_text(ot_state* rt, uint32_t kind, const char* text, size_t length) {
+/* A text object of kind with room for length bytes, all zero. */
+static ot_value text_alloc(ot_state* rt, uint32_t kind, size_t length) {
   if (length > SIZE_MAX - sizeof(size_t) - 1 - sizeof(uint64_t)) {
     oti_error(rt, "text too large");
     return 0;
   }
   ot_value v = oti_alloc(rt, kind, 0,
                          sizeof(size_t) + length + 1 + (kind == K_SYMBOL ? sizeof(uint64_t) : 0));
-  if (v) {
-    oti_as_bytes(v)->length = length;
-    memcpy(oti_as_bytes(v)->bytes, text, length);
+  if (v) oti_as_bytes(v)->length = length;
+  return v;
+}
+
+ot_value oti_text(ot_state* rt, uint32_t kind, const char* text, size_t length) {
+  ot_value v = text_alloc(rt, kind, length);
+  if (v) memcpy(oti_as_bytes(v)->bytes, text, length);
+  return v;
+}
+
+ot_value oti_text_from(ot_state* rt, uint32_t kind, ot_value source, size_t start, size_t length) {
+  oti_roots roots;
+  oti_roots_push(&rt->heap, &roots, &source, 1);
+  ot_value v = text_alloc(rt, kind, length);
+  oti_roots_pop(&rt->heap, &roots);
+  if (v && length) {
+    const unsigned char* bytes = oti_kind(source, K_BUFFER_DATA) ? oti_as_buffer_data(source)->bytes
+                                                                 : oti_as_bytes(source)->bytes;
+    memcpy(oti_as_bytes(v)->bytes, bytes + start, length);
   }
   return v;
 }

@@ -1042,6 +1042,10 @@ uint32_t oti_alias_namespace(ot_state* rt, const char* name, size_t length);
 const char* oti_namespace_alias(ot_state* rt, uint32_t owner, uint32_t target);
 uint32_t oti_constant(ot_state* rt, ot_value value);
 ot_value oti_text(ot_state* rt, uint32_t kind, const char* text, size_t length);
+/* Like oti_text, for length bytes from start in source, a string, symbol,
+ * keyword, bytevector or buffer data object, which may move while this
+ * allocates. */
+ot_value oti_text_from(ot_state* rt, uint32_t kind, ot_value source, size_t start, size_t length);
 ot_value oti_float(ot_state* rt, double number);
 ot_value oti_evaluator(ot_state* rt, uint32_t space);
 ot_value oti_eval_value(ot_state* rt, ot_value value);

@@ -82,8 +82,12 @@
       (when (and (= (length parts) 4) (equal? (syntax/head-name (nth parts 3)) "if"))
         (report! context "if-chain" node {})))))
 
+;; The definition and binding forms among diagnostics/foreign-names.
 (def- foreign-forms
-  {"define" "def" "defn" "def" "defun" "def" "lambda" "fn" "let*" "let" "letrec" "let" "letrec*" "let"})
+  (let ((out {}))
+    (for-each (fn (name) (put! out name (get diagnostics/foreign-names name)))
+              ["define" "defn" "defun" "lambda" "let*" "letrec" "letrec*"])
+    out))
 
 (def- (foreign-definition context node quoted)
   (let ((name (syntax/head-name node)))
@@ -653,52 +657,6 @@
     ((and (eq? (car x) 'quote) (pair? (cdr x))) (walk-quasi walk scope (second x) depth #t))
     (else (walk-quasi walk scope (car x) depth data) (walk-quasi walk scope (cdr x) depth data))))
 
-;; Core form names and markers, which #` leaves bare (lib/otium/expander.ot).
-(def- template-bare
-  '(quote quasiquote
-          syntax-quote
-          unquote
-          unquote-splicing
-          if
-          begin
-          fn
-          def
-          def-
-          defonce
-          set!
-          let
-          while
-          and
-          or
-          cond
-          defmacro
-          ns
-          require
-          handler-bind
-          restart-case
-          try
-          unwind-protect
-          defer
-          defparam
-          with-params
-          symbol-macrolet
-          with-slots
-          reset-generic!
-          defclass
-          defabstract
-          defgeneric
-          defmethod
-          reset-class!
-          when
-          unless
-          else
-          catch
-          &
-          &optional
-          _
-          array
-          table))
-
 ;; A #` template qualifies its symbols with the namespace being linted, so a
 ;; local name there was meant to be unquoted. A bare symbol in a plain
 ;; template that names one of the file's definitions resolves wherever the
@@ -706,7 +664,7 @@
 (def- (template-symbol! walk scope symbol data)
   (let ((name (symbol->string symbol)))
     (cond
-      ((member symbol template-bare) nil)
+      ((expander-template-bare? symbol) nil)
       ((string-starts-with? name (walk :space))
        (let ((member (substring name (string-length (walk :space)))))
          (let ((index (note! walk member)))

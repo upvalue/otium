@@ -617,8 +617,12 @@
          (cons (exp-sq (car x) depth data table) (exp-sq-list (cdr x) depth data table))))
     (else (exp-sq x depth data table))))
 
+(def (expander-template-bare? sym)
+  "True when #` leaves sym bare: a core form name or a marker word."
+  (or (exp-core? sym) (exp-memq sym exp-sq-bare)))
+
 (def- (exp-sq-symbol sym)
-  (if (or (exp-core? sym) (exp-memq sym exp-sq-bare))
+  (if (expander-template-bare? sym)
       sym
       (or (expander-qualify sym) sym)))
 

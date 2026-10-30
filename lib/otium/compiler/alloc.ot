@@ -74,7 +74,7 @@
         ((and (array? op) (eq? (get op 0) :mem) (vreg? (get op 1))) (push! out (get op 1)))))
 
 ;; The registers an instruction reads.
-(def (uses ins fc)
+(def (uses ins)
   (let ((out []))
     (case (get ins 0)
       ((:mov)
@@ -124,24 +124,24 @@
 
 ;; Successor instruction indices of the last instruction of a block.
 (def (successors ins i labels n)
-  (let ((next (if (< (+ i 1) n) [(+ i 1)] []))
-        (handlers (fn (h) (map (fn (l) (get labels l)) h))))
-    (case (get ins 0)
-      ((:jump) [(get labels (get ins 1))])
-      ((:cmpj) (list-to-array (cons (get labels (get ins 4)) (array-to-list next))))
-      ((:jcond) (list-to-array (cons (get labels (get ins 2)) (array-to-list next))))
-      ((:poll) (list-to-array (cons (get labels (get ins 1)) (array-to-list next))))
-      ((:fcmpj) (list-to-array (cons (get labels (get ins 4)) (array-to-list next))))
-      ((:ret) [])
-      ((:call)
-       (if (get ins 5)
-           []
-           (list-to-array (append (array-to-list next) (handlers (get ins 6))))))
-      ((:ccall)
-       (if (get noreturn-helpers (get ins 1))
-           (list-to-array (handlers (get ins 4)))
-           (list-to-array (append (array-to-list next) (handlers (get ins 4))))))
-      (else next))))
+  (let ((out []))
+    (let ((target! (fn (l) (push! out (get labels l))))
+          (next! (fn () (when (< (+ i 1) n) (push! out (+ i 1))))))
+      (case (get ins 0)
+        ((:jump) (target! (get ins 1)))
+        ((:cmpj :fcmpj) (target! (get ins 4)) (next!))
+        ((:jcond) (target! (get ins 2)) (next!))
+        ((:poll) (target! (get ins 1)) (next!))
+        ((:ret) nil)
+        ((:call)
+         (unless (get ins 5)
+           (next!)
+           (for-each target! (get ins 6))))
+        ((:ccall)
+         (unless (get noreturn-helpers (get ins 1)) (next!))
+         (for-each target! (get ins 4)))
+        (else (next!))))
+    out))
 
 ;; --- Allocation -----------------------------------------------------------------
 
@@ -168,7 +168,7 @@
                 (let walk ((i (get starts b)))
                   (when (<= i (get ends b))
                     (let ((ins (get code i)))
-                      (for ((u :in (uses ins fc))) (unless (set-has? k u) (set-add! g u)))
+                      (for ((u :in (uses ins))) (unless (set-has? k u) (set-add! g u)))
                       (for ((d :in (defs ins fc))) (set-add! k d)))
                     (walk (+ i 1))))
                 (push! gen g)
@@ -176,8 +176,7 @@
                 (push! live-in (set-copy g))
                 (push! live-out (set-new words))
                 (push! succ (map (fn (i) (get block-of i))
-                                 (array-to-list (successors (get code (get ends b)) (get ends b)
-                                                            labels n))))))
+                                 (successors (get code (get ends b)) (get ends b) labels n)))))
             ;; Backward dataflow to a fixed point.
             (let iterate ()
               (let ((changed #f))
@@ -212,7 +211,7 @@
                           (start-range! ranges d i))
                         (when (or (safepoint? ins) (eq? (get ins 0) :landing))
                           (put! live i (set-members now)))
-                        (for ((u :in (uses ins fc)))
+                        (for ((u :in (uses ins)))
                           (set-add! now u)
                           (add-range! ranges u from (+ i 1))))
                       (walk (- i 1))))))
@@ -256,26 +255,47 @@
         ((<= (get (car b) 1) (get (car a) 0)) (overlap? a (cdr b)))
         (else #t)))
 
+;; Drop the holders whose last range ends by start. Registers are taken in
+;; order of start, so none after this one can overlap them.
+(def (prune holders start ends)
+  (cond ((null? holders) holders)
+        ((<= (get ends (car holders)) start) (prune (cdr holders) start ends))
+        (else
+         (let ((rest (prune (cdr holders) start ends)))
+           (if (eq? rest (cdr holders)) holders (cons (car holders) rest))))))
+
+;; True when ranges rs, starting at start, overlap none of holders'.
+(def (fits? rs start holders ranges ends)
+  (cond ((null? holders) #t)
+        ((and (> (get ends (car holders)) start) (overlap? rs (get ranges (car holders)))) #f)
+        (else (fits? rs start (cdr holders) ranges ends))))
+
 ;; Give each register, in order of where it starts, the first pool register
-;; or spill slot none of whose holders it overlaps.
+;; or spill slot none of whose live holders it overlaps. A later register can
+;; still fit into a gap between a holder's ranges, so a holder stays until
+;; its last range ends. Cold code is at the end of the function, so a value
+;; live into a slow path stays a holder until then.
 (def (assign fc ranges)
   (let ((order (sort-by (fn (v) (get (car (get ranges v)) 0)) (filter (fn (v) (get ranges v)) (range (length ranges)))))
-        (location (filled (length ranges) nil)) (holders (filled (+ 1 (apply max (array-to-list pool))) '()))
+        (location (filled (length ranges) nil)) (holders (filled (length pool) '()))
+        (ends (map (fn (rs) (and rs (get (last rs) 1))) ranges))
         (slot-holders []))
     (for ((v :in order))
       (let ((rs (get ranges v)))
-        (let ((fits (fn (others) (not (find (fn (o) (overlap? rs (get ranges o))) others)))))
-          (let ((r (find (fn (r) (fits (get holders r))) (array-to-list pool))))
-            (if r
-                (begin
-                  (put! location v [:reg r])
-                  (put! holders r (cons v (get holders r))))
-                (let ((k (find-index (fn (others) (fits others)) slot-holders)))
-                  (when (nil? k)
-                    (push! slot-holders '())
-                    (set! k (- (length slot-holders) 1)))
-                  (put! location v [:slot k])
-                  (put! slot-holders k (cons v (get slot-holders k)))))))))
+        (let ((start (get (car rs) 0)))
+          (let try-reg ((i 0))
+            (cond ((= i (length pool))
+                   (let try-slot ((k 0))
+                     (when (= k (length slot-holders)) (push! slot-holders '()))
+                     (if (fits? rs start (get slot-holders k) ranges ends)
+                         (begin
+                           (put! location v [:slot k])
+                           (put! slot-holders k (cons v (prune (get slot-holders k) start ends))))
+                         (try-slot (+ k 1)))))
+                  ((fits? rs start (get holders i) ranges ends)
+                   (put! location v [:reg (get pool i)])
+                   (put! holders i (cons v (prune (get holders i) start ends))))
+                  (else (try-reg (+ i 1))))))))
     (set-fc-location! fc location)
     (set-fc-spills! fc (length slot-holders))
     fc))

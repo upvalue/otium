@@ -16,6 +16,8 @@
 
 (def border-variant 0x363c46ff)
 
+(def scrim 0x00000099)
+
 (def text 0xdce0e5ff)
 
 (def muted 0xa9afbcff)

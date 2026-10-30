@@ -263,13 +263,34 @@ one the last view asked for, e.g. by a click. Record the focus this view asks fo
                (ui/row {:gap 10 :align-items :center}
                        (ui/label {:color theme/muted :size 12 :width 130} label)
                        (ui/label {:color theme/text :size 12 :width 0 :grow 1} value)))))
-    (ui/column {:width 360 :padding 16 :gap 10 :background theme/panel}
+    (ui/column {:width 360
+                :padding 16
+                :gap 10
+                :radius 8
+                :background theme/panel
+                :border theme/border
+                ;; Take clicks so only the backdrop closes the overlay.
+                :on-press (fn () nil)}
                (w/text theme/text theme/ui-size "System")
                (row "Uptime" (duration (info :uptime)))
                (row "Memory" (if fp (str (megabytes (fp :current)) " (peak " (megabytes (fp :peak)) ")") "unknown"))
                (row "Allocated in total" (megabytes (info :allocated)))
                (row "Native threads" (if (info :native-threads) (str (info :native-threads)) "unknown"))
                (row "Otium threads" (str (info :threads))))))
+
+(def (sysinfo-overlay)
+  "System info over the whole window. Escape, Cmd+I or a click outside closes it."
+  (ui/column {:key :sysinfo
+              :overlay #t
+              :modal #t
+              :align-items :center
+              :background theme/scrim
+              :keymap {"Escape" :sysinfo "Meta+I" :sysinfo}
+              :on-action (fn (action) (action! action))
+              :on-press (fn () (action! :sysinfo))}
+             (w/spacer)
+             (sysinfo-panel)
+             (w/spacer)))
 
 (def (view tree)
   (let ((s (workspace :strip))
@@ -280,19 +301,15 @@ one the last view asked for, e.g. by a click. Record the focus this view asks fo
     (strip/sync! s (map :id entries))
     (restore-focus! tree)
     (adopt-focus! tree)
-    (ui/row {:grow 1 :background theme/background :keymap (keymap) :on-action (fn (action) (action! action))}
+    (list
+     (ui/row {:key :workspace :grow 1 :background theme/background :keymap (keymap) :on-action (fn (action) (action! action))}
             ;; Columns size against the window, not the strip, so the help
             ;; panel scrolls the strip rather than resizing every terminal.
             (ui/scroll {:key :strip :axis :x :width 0 :grow 1 :padding padding :gap gap :reveal (strip/focused s)}
                        (map (fn (id) (column s (find (fn (entry) (equal? (entry :id) id)) entries) viewport))
                             (strip/ids s)))
-            (when (or (workspace :help?) (workspace :sysinfo?))
-              (list (ui/column {:width 1 :background theme/border-variant})
-                    (ui/column {:background theme/panel}
-                               (when (workspace :sysinfo?) (sysinfo-panel))
-                               (when (and (workspace :sysinfo?) (workspace :help?))
-                                 (ui/row {:height 1 :background theme/border-variant}))
-                               (when (workspace :help?) (help))))))))
+            (when (workspace :help?) (list (ui/column {:width 1 :background theme/border-variant}) (help))))
+     (when (workspace :sysinfo?) (sysinfo-overlay)))))
 
 (def- (script-path relative fallback)
   (let ((script (process/script-name)))

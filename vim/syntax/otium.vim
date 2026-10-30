@@ -47,8 +47,8 @@ syntax keyword otiumBuiltin
       \ expander-lexical? expander-macro-var false? filter find-restart first float?
       \ floor for-each frequencies gensym get get-in group-by identity inc int?
       \ invoke-restart keys keyword keyword? last length list list->array list? macro?
-      \ macroexpand macroexpand-1 map max merge min modulo name neg? newline nil? not
-      \ nth null? number->string number? odd? pair? partial pop! pos? print println
+      \ macroexpand macroexpand-1 map max merge min modulo name negative? newline nil? not
+      \ nth null? number->string number? odd? pair? partial pop! positive? print println
       \ procedure? push! put! quit quotient range read-string reduce remainder rest
       \ restart-description restart-name reverse round second signal sort sort-by str
       \ string->number string->symbol string-append string-contains? string-downcase

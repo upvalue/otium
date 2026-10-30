@@ -47,7 +47,7 @@
 ;; definitions until declarations exist. Each is kept only if inlining it
 ;; measures well.
 (def inline-candidates
-  '(identity inc dec zero? true? false? even? odd? first second third rest))
+  '(identity inc dec zero? positive? negative? true? false? even? odd? first second third rest))
 
 (def (inline-candidate? name) (and (memq name inline-candidates) #t))
 
@@ -141,10 +141,6 @@
 (defknown min rest number :flags (:foldable :direct))
 
 (defknown max rest number :flags (:foldable :direct))
-
-(defknown pos? (number) boolean :flags (:foldable :flushable-if-typed :direct))
-
-(defknown neg? (number) boolean :flags (:foldable :flushable-if-typed :direct))
 
 (defknown floor (number) number :flags (:foldable :flushable-if-typed :direct))
 

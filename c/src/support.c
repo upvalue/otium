@@ -85,18 +85,6 @@ static ot_value support_number_string(ot_state* rt, size_t first, size_t count) 
   return oti_text(rt, K_STRING, buffer, (size_t)n);
 }
 
-/* pos? and neg? */
-static ot_value support_sign_p(ot_state* rt, const char* who, bool positive, size_t first,
-                               size_t count) {
-  if (!oti_check_arity(rt, who, count, 1, 1)) return 0;
-  ot_value v = rt->stack[first];
-  double number;
-  if (ot_is_int(v)) number = (double)ot_to_int(v);
-  else if (oti_kind(v, K_FLOAT)) number = oti_as_float(v)->value;
-  else return oti_fail(rt, "expected number");
-  return ot_bool(positive ? number > 0 : number < 0);
-}
-
 bool oti_procedure(ot_value v) {
   return oti_kind(v, K_PARAM) || oti_kind(v, K_MACRO) || oti_kind(v, K_NEXT) ||
          oti_kind(v, K_GENERIC) || oti_kind(v, K_CLOSURE) || oti_kind(v, K_FOREIGN_FUNCTION) ||
@@ -167,14 +155,6 @@ static ot_value support_macro_p(ot_state* rt, size_t first, size_t count) {
 
 static ot_value support_char_p(ot_state* rt, size_t first, size_t count) {
   return support_type_p(rt, "char?", B_CHAR_P, first, count);
-}
-
-static ot_value support_pos_p(ot_state* rt, size_t first, size_t count) {
-  return support_sign_p(rt, "pos?", true, first, count);
-}
-
-static ot_value support_neg_p(ot_state* rt, size_t first, size_t count) {
-  return support_sign_p(rt, "neg?", false, first, count);
 }
 
 static ot_value support_eval(ot_state* rt, size_t first, size_t count) {
@@ -411,8 +391,6 @@ const oti_builtin_def oti_support_builtins[] = {
     {B_EXP_LOCAL, "expander-local-name", support_expander_local_name},
     {B_STRING_APPEND, "string-append", support_string_append},
     {B_NUMBER_STRING, "number->string", support_number_string},
-    {B_POS, "pos?", support_pos_p},
-    {B_NEG, "neg?", support_neg_p},
     {B_READ_STRING, "read-string", support_read_string},
     {B_EVAL, "eval", support_eval},
     {0, NULL, NULL},

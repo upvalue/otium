@@ -87,8 +87,8 @@
            (else (error "append: expected proper lists"))))))
     (else (error "append: expected proper lists"))))
 
-(def positive? pos?)
-(def negative? neg?)
+(def (positive? value) (> value 0))
+(def (negative? value) (< value 0))
 
 (def (list->string chars)
   (unless (list? chars) (error "list->string: expected proper list"))

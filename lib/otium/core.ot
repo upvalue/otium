@@ -1025,14 +1025,6 @@ Includes runtime builtins, special forms, and the Otium prelude."
               (loop (sequence-tails sequences) (+ i 1) value)
               value)))))
 
-(def positive?
-  "Alias for pos?."
-  pos?)
-
-(def negative?
-  "Alias for neg?."
-  neg?)
-
 ;; lint: allow(rest-arguments) accepts any number of integers
 (def (gcd & xs)
   "(gcd integer ...)\nGreatest common divisor; no arguments gives 0."

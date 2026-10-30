@@ -969,7 +969,7 @@ to float.
 | `(= n n…)` → bool | Numeric equality chain across int/float. |
 | `(< …)` `(> …)` `(<= …)` `(>= …)` → bool | Comparison chains; at least two arguments. |
 | `(inc n)` / `(dec n)` → num | `n±1`. |
-| `(zero? n)` `(pos? n)` `(neg? n)` → bool | Sign tests (numeric). `positive?` and `negative?` alias `pos?` and `neg?`. |
+| `(zero? n)` `(positive? n)` `(negative? n)` → bool | Sign tests (numeric). |
 | `(even? n)` / `(odd? n)` → bool | Parity (ints). |
 
 `bitwise-and`, `bitwise-ior`, `bitwise-xor`, `bitwise-not`, and

@@ -182,8 +182,6 @@ enum {
   B_EXP_LOCAL,
   B_STRING_APPEND,
   B_NUMBER_STRING,
-  B_POS,
-  B_NEG,
   B_READ_STRING,
   B_EVAL,
   B_INT_P,

@@ -461,7 +461,7 @@ service. The remaining drawing primitives below are still proposed. See
           (let ((dx (- (o :x) x)) (dy (- (o :y) y))
                 (d (sqrt (+ (* dx dx) (* dy dy)))))
             ;; d is 0 only for this bird itself.
-            (when (and (pos? d) (< d (rules :sight)))
+            (when (and (positive? d) (< d (rules :sight)))
               (set! n (inc n))
               (set! cx (+ cx dx)) (set! cy (+ cy dy))
               (set! ax (+ ax (o :vx))) (set! ay (+ ay (o :vy)))
@@ -469,7 +469,7 @@ service. The remaining drawing primitives below are still proposed. See
                 (set! sx (- sx (/ dx d))) (set! sy (- sy (/ dy d)))))))
         flock)
       ;; Mix the three pulls into the velocity, each scaled by its rule.
-      (when (pos? n)
+      (when (positive? n)
         (set! vx (+ vx (* (rules :cohere) cx)
                        (* (rules :align) (- (/ ax n) vx))
                        (* (rules :separate) sx)))

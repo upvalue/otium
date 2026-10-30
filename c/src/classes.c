@@ -2,8 +2,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-static ot_value cons(ot_state* rt, ot_value a, ot_value b);
-
 /* A K_NEXT carries the argument count of the call that made it. */
 static size_t arity(ot_value generic) {
   return oti_kind(generic, K_GENERIC) ? oti_as_generic(generic)->arity
@@ -161,7 +159,7 @@ bool oti_generic_prepare(ot_state* rt, size_t call, size_t* count) {
     ot_value m = oti_car(live[0]);
     if (m != live[1] && (around || !oti_as_method(m)->around) &&
         (!initial || applicable(rt, oti_as_method(m)->signature, call + 1))) {
-      ot_value node = cons(rt, m, live[2]);
+      ot_value node = oti_cons(rt, m, live[2]);
       ok = node != 0;
       if (ok) live[2] = node;
     }
@@ -191,19 +189,6 @@ bool oti_generic_prepare(ot_state* rt, size_t call, size_t* count) {
   return ok;
 }
 
-static ot_value cons(ot_state* rt, ot_value a, ot_value b) {
-  ot_value slots[] = {a, b};
-  oti_roots roots;
-  oti_roots_push(&rt->heap, &roots, slots, 2);
-  ot_value pair = oti_alloc(rt, K_PAIR, 2, OTI_BYTES(oti_pair_obj, 2));
-  if (pair) {
-    oti_as_pair(pair)->car = slots[0];
-    oti_as_pair(pair)->cdr = slots[1];
-  }
-  oti_roots_pop(&rt->heap, &roots);
-  return pair;
-}
-
 static ot_value copy_signature(ot_state* rt, ot_value source) {
   ot_value slots[] = {source, OT_EMPTY, OT_EMPTY};
   oti_roots roots;
@@ -211,7 +196,7 @@ static ot_value copy_signature(ot_state* rt, ot_value source) {
   bool ok = true;
   while (slots[0] != OT_EMPTY) {
     ot_value item = oti_car(slots[0]);
-    ot_value node = cons(rt, item == OT_FALSE ? rt->classes[C_OBJECT] : item, OT_EMPTY);
+    ot_value node = oti_cons(rt, item == OT_FALSE ? rt->classes[C_OBJECT] : item, OT_EMPTY);
     if (!node) {
       ok = false;
       break;
@@ -352,7 +337,7 @@ static ot_value class_define_method(ot_state* rt, size_t first, size_t count) {
       result = slots[0];
       goto done;
     }
-  slots[3] = cons(rt, slots[2], oti_as_generic(slots[0])->methods);
+  slots[3] = oti_cons(rt, slots[2], oti_as_generic(slots[0])->methods);
   if (!slots[3]) goto done;
   oti_as_generic(slots[0])->methods = slots[3];
   result = slots[0];
@@ -410,14 +395,14 @@ static ot_value class_generic_methods(ot_state* rt, size_t first, size_t count) 
   while (slots[0] != OT_EMPTY) {
     slots[1] = copy_signature(rt, oti_as_method(oti_car(slots[0]))->signature);
     if (!slots[1]) goto done;
-    slots[1] = cons(rt, slots[1], OT_EMPTY);
+    slots[1] = oti_cons(rt, slots[1], OT_EMPTY);
     if (!slots[1]) goto done;
     bool around = oti_as_method(oti_car(slots[0]))->around;
     slots[2] = oti_intern(rt, around ? K_KEYWORD : K_SYMBOL, around ? ":around" : "primary", 7);
     if (!slots[2]) goto done;
-    slots[1] = cons(rt, slots[2], slots[1]);
+    slots[1] = oti_cons(rt, slots[2], slots[1]);
     if (!slots[1]) goto done;
-    slots[3] = cons(rt, slots[1], slots[3]);
+    slots[3] = oti_cons(rt, slots[1], slots[3]);
     if (!slots[3]) goto done;
     slots[0] = oti_cdr(slots[0]);
   }

@@ -98,9 +98,6 @@
 
 ;; --- Constants ------------------------------------------------------------
 
-(def (constant-form? form)
-  (or (not (pair? form)) (eq? (car form) 'quote)))
-
 (def (literal form off) [:const off form])
 
 ;; --- The converter -------------------------------------------------------
@@ -443,8 +440,6 @@
            [:seq off [[:lset off var value] (literal nil off)]]))))
 
 ;; --- Functions -----------------------------------------------------------
-
-(def (symbol-named? x name) (and (symbol? x) (eq? x name)))
 
 ;; Convert (fn params . body). self, when given, is the variable whose name
 ;; refers to the function itself inside its body.

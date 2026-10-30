@@ -37,7 +37,7 @@
     (receive ({:reply (== ref) :from (== target) :error e} (error e))
              ({:reply (== ref) :from (== target) :value (opt v nil)} v)
              (:after timeout
-                     (restart-case (error {:type 'timeout :message "actor/call timed out" :code "E0505"})
+                     (restart-case (error (thread/timeout-condition "actor/call"))
                        (use-value "Return a value instead" (v) v))))))
 
 (def (monitor t)

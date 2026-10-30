@@ -61,7 +61,8 @@
   "Whether c is a timeout condition."
   (and (table? c) (eq? (get c :type) 'timeout)))
 
-(def- (timeout-condition what)
+(def (timeout-condition what)
+  "The condition raised when what, such as \"thread/join\", timed out."
   {:type 'timeout :message (str what " timed out") :code "E0505"})
 
 (def (join t &optional (timeout nil))

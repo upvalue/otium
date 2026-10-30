@@ -217,12 +217,6 @@ ot_value oti_table_get_builtin(ot_state* rt, size_t first, size_t count) {
                        count == 3 ? rt->stack[first + 2] : OT_NIL);
 }
 
-ot_value oti_table_contains_builtin(ot_state* rt, size_t first, size_t count) {
-  if (!table_arguments(rt, "contains?", first, count, 2, 2)) return 0;
-  ot_value value = oti_table_get(rt, rt->stack[first], rt->stack[first + 1], OT_NIL);
-  return !value ? 0 : value == OT_NIL ? OT_FALSE : OT_TRUE;
-}
-
 ot_value oti_table_put_builtin(ot_state* rt, size_t first, size_t count) {
   if (!table_arity(rt, count, 3, SIZE_MAX)) return 0;
   if (!(count % 2)) return oti_fail(rt, "wrong number of collection arguments");

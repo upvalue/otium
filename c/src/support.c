@@ -1,4 +1,5 @@
 #include "internal.h"
+#include <assert.h>
 #include <stdlib.h>
 #include <string.h>
 #include <inttypes.h>
@@ -16,18 +17,9 @@ void oti_symbol_set_id(ot_value v, uint64_t id) {
 }
 
 ot_value oti_intern(ot_state* rt, unsigned kind, const char* bytes, size_t n) {
-  if (kind == K_SYMBOL || kind == K_KEYWORD) {
-    ot_value found = oti_text_constant(rt, kind, 0, bytes, n);
-    if (found) return found;
-  } else {
-    for (size_t i = 0; i < rt->constant_count; i++) {
-      ot_value v = rt->constants[i];
-      if (!oti_kind(v, kind)) continue;
-      size_t length;
-      const char* s = oti_text_bytes(v, &length);
-      if (length == n && !memcmp(s, bytes, n)) return v;
-    }
-  }
+  assert(kind == K_SYMBOL || kind == K_KEYWORD);
+  ot_value found = oti_text_constant(rt, kind, 0, bytes, n);
+  if (found) return found;
   /* The source may be in the moving heap. */
   char* copy = malloc(n ? n : 1);
   if (!copy) return oti_fail(rt, "out of host memory");

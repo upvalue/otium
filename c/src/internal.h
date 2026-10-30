@@ -1616,7 +1616,6 @@ ot_value oti_table_put_builtin(ot_state* rt, size_t first, size_t count);
 ot_value oti_table_push_builtin(ot_state* rt, size_t first, size_t count);
 ot_value oti_table_pop_builtin(ot_state* rt, size_t first, size_t count);
 ot_value oti_table_copy_builtin(ot_state* rt, size_t first, size_t count);
-ot_value oti_table_contains_builtin(ot_state* rt, size_t first, size_t count);
 ot_value oti_string_length_builtin(ot_state* rt, size_t first, size_t count);
 ot_value oti_bytes_copy_builtin(ot_state* rt, size_t first, size_t count);
 

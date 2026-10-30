@@ -4,7 +4,6 @@
 ;; entries and loop heads. Waiting for a thread, a lock, a message or a timer
 ;; parks only the waiting thread. POSIX fd ports also park on input and
 ;; output readiness. Foreign calls and custom port callbacks still block.
-;; See scratch/threaded-io.md.
 ;;
 ;;   (require otium.thread :as thread :refer (spawn self sleep yield send receive))
 ;;

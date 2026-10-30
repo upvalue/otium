@@ -1,6 +1,6 @@
 ;; types.ot -- the types pass: what kinds of value variables and expressions
 ;; can hold, and checked operations rewritten to unchecked ones where the
-;; kinds are proven. See scratch/optimizer-design.md, section 5.7.
+;; kinds are proven.
 ;;
 ;; A type is a bitset of kinds. The walk goes forward through each function
 ;; with an environment, a table from variable id to type; a variable that

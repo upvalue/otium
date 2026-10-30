@@ -2,8 +2,7 @@
 ;;
 ;; One walk over a unit's tree, (simplify s node ctx), returns the node to use
 ;; instead. ctx is how the value is used: :value, :test (only its truth), or
-;; :effect (thrown away). It follows Chez's cp0 at a smaller scale. See
-;; scratch/optimizer-design.md, section 5.6.
+;; :effect (thrown away). It follows Chez's cp0 at a smaller scale.
 ;;
 ;; What it does:
 ;;
@@ -215,11 +214,11 @@
 
 ;; --- Simple facts ----------------------------------------------------------------
 
-;; What's known about variables without loop analysis (design 5.6): what a
-;; variable is bound to, and in each branch of an if, what its test proves.
-;; Only variables that are never assigned have facts, so a fact holds
-;; wherever the variable is in scope, loops included. The types pass does
-;; the rest, with loops.
+;; What's known about variables without loop analysis: what a variable is
+;; bound to, and in each branch of an if, what its test proves. Only
+;; variables that are never assigned have facts, so a fact holds wherever the
+;; variable is in scope, loops included. The types pass does the rest, with
+;; loops.
 
 (def (fact s var)
   (let ((b (and (not (cv/var-assigned var)) (binding s var))))
@@ -629,8 +628,7 @@
 
 ;; Calls of core functions whose bodies the boot file keeps, in
 ;; %inline-bodies (known.ot's inline candidates), are inlined like calls of
-;; local functions. Core is locked, so the body can't change. Design,
-;; step 3.
+;; local functions. Core is locked, so the body can't change.
 
 (def- inline-core? (options/enabled? "inline-core"))
 

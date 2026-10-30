@@ -3,8 +3,7 @@
 ;; compile-top takes one expanded top-level form and returns a unit for the
 ;; bridge (c/src/native.c): convert to tree IR, lower each function to
 ;; virtual code, allocate registers, emit the stream. In a native process
-;; run-top installs the unit and calls it. See
-;; scratch/native-compiler-design.md, section 10.
+;; run-top installs the unit and calls it.
 
 (ns otium.compiler
   (:require (otium.compiler.convert :as convert)

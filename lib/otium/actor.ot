@@ -1,8 +1,7 @@
 ;; actor.ot -- actors: threads that serve requests from their mailbox.
 ;;
 ;; An actor is a thread with a mailbox, as otium.thread provides. This adds
-;; request/reply with timeouts, monitors, delayed sends and a name table. See
-;; scratch/green-threads.md.
+;; request/reply with timeouts, monitors, delayed sends and a name table.
 ;;
 ;;   (require otium.actor :as actor)
 ;;   (require otium.thread :refer (spawn send receive))

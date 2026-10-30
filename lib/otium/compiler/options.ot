@@ -2,7 +2,7 @@
 ;;
 ;; OTIUM_OPT is all (the default), none, or a comma-separated list of
 ;; components to switch off, such as -direct,-inline. It's read when this
-;; module loads. See scratch/optimizer-design.md, section 9.1.
+;; module loads.
 
 (ns otium.compiler.options)
 
@@ -44,7 +44,7 @@
 
 ;; OTIUM_OPT_CHECK=1 makes lower keep the check of every unchecked operation
 ;; the types pass made, and trap when one fails: a wrong proof then stops
-;; where it was made instead of corrupting memory. See section 9.5.
+;; where it was made instead of corrupting memory.
 (def check-mode (equal? (otium.process/getenv "OTIUM_OPT_CHECK") "1"))
 
 ;; OTIUM_OPT_INLINE_BUDGET scales the inline pass's limits, as a percentage:
@@ -58,7 +58,7 @@
 
 (def (scaled n) (quotient (* n inline-budget) 100))
 
-;; Efficiency notes (design 5.10): when on, the passes record where they left
+;; Efficiency notes: when on, the passes record where they left
 ;; code slow and why, as [offset text] pairs. Off, they cost one test.
 (def notes? #f)
 

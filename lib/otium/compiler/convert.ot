@@ -638,9 +638,9 @@
   (and (known/direct? builtin) (%native-core-cell? cell) (%core-locked?) (options/enabled? "direct")
        (options/rewrite? (str "direct " builtin) off)))
 
-;; Whether a transform from the known-function table (section 6.4 of the
-;; design) applies: it's switched on, the call is to the cell of locked core
-;; it names, and its arguments suit.
+;; Whether a transform from the known-function table applies: it's switched
+;; on, the call is to the cell of locked core it names, and its arguments
+;; suit.
 (def (transform? name names-it cell suits off)
   (and names-it suits (%native-core-cell? cell) (%core-locked?)
        (options/enabled? (str "transform:" name)) (options/rewrite? (str "transform:" name) off)))

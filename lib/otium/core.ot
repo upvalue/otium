@@ -2,14 +2,8 @@
 
 Includes runtime builtins, special forms, and the Otium prelude."
 
-;; prelude.ot -- the derived core (spec 10.x), loaded through the real
-;; expander, so defmacro and everything native is available.
-;;
-;; Runtime dependencies: cons car cdr list append length reverse for-each
-;; get put! push! pop! keys values copy table array apply identity
-;; arithmetic, comparisons, string natives (10.6), type predicates, not,
-;; eq? equal?, error, condition-of-type?, gensym.
-;; Additionally assumed for sort: (string<? a b) lexicographic order.
+;; core.ot -- the part of core written in Otium, loaded through the real
+;; expander, so defmacro and every builtin are available.
 
 (def (is-a? value class)
   "(is-a? value Class)\nTest whether value belongs to Class or a descendant, including built-in types. Class must be a class descriptor."
@@ -134,7 +128,7 @@ Includes runtime builtins, special forms, and the Otium prelude."
                     (names (cdr more)
                            (cons #`(%declared ,(car more) (quote ,(car (car specs))) (quote ,(car more))) checks)))))))))
 
-;; --- macros (10.11) ---------------------------------------------------------
+;; --- macros -----------------------------------------------------------------
 
 (defmacro when (test . body)
   "(when test body ...)\nEvaluate body when test is truthy; otherwise return nil."
@@ -167,7 +161,7 @@ Includes runtime builtins, special forms, and the Otium prelude."
   "(case expression ((literal ...) body ...) ... (else body ...))\nEvaluate expression once and run the first equal? literal clause. Return nil if none matches."
   (let ((value (gensym "case"))) #`(let ((,value ,expression)) (cond ,@(case-clauses value clauses)))))
 
-;; --- sequences (10.4) -------------------------------------------------------
+;; --- sequences --------------------------------------------------------------
 
 (def (caar p)
   "(caar pair)\nEquivalent to (car (car pair))."
@@ -542,7 +536,7 @@ Includes runtime builtins, special forms, and the Otium prelude."
   "(sort sequence)\nReturn an ascending sorted copy, preserving list/array kind. Keys must belong to a supported, consistent orderable class."
   (sort-by identity seq))
 
-;; --- tables (10.5) ----------------------------------------------------------
+;; --- tables -----------------------------------------------------------------
 
 ;; lint: allow(rest-arguments) accepts any number of key/value pairs
 (def (put coll . kvs)
@@ -586,7 +580,7 @@ Includes runtime builtins, special forms, and the Otium prelude."
         default
         c)))
 
-;; --- conditions (10.9) ------------------------------------------------------
+;; --- conditions -------------------------------------------------------------
 
 (def (condition-type c)
   "(condition-type condition)\nReturn a condition table's :type, or nil."
@@ -866,7 +860,7 @@ Includes runtime builtins, special forms, and the Otium prelude."
   "(match value (pattern body ...) (pattern :when guard body ...) ...)\nEvaluate value once and run the body of the first clause whose pattern matches and whose guard is truthy, with the pattern's names bound. No match signals match-error. See specs/match.md for patterns."
   (let ((v (gensym "value"))) #`(let ((,v ,expr)) ,(match-clauses v clauses))))
 
-;; --- functional (10.8) ------------------------------------------------------
+;; --- functional -------------------------------------------------------------
 
 ;; Scheme list helpers.
 (def (cdar p)

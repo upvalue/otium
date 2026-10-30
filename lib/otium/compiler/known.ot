@@ -1,8 +1,7 @@
 ;; known.ot -- what the compiler knows about core functions.
 ;;
 ;; One entry per core function the compiler knows something about, by the
-;; name of the builtin or core function the cell holds. See
-;; scratch/optimizer-design.md, section 5.2.
+;; name of the builtin or core function the cell holds.
 ;;
 ;;   (defknown name argument-types result-type :flags (flag ...) :narrows type)
 ;;
@@ -45,8 +44,8 @@
 
 ;; Core functions written in Otium whose bodies the compiler keeps, in text
 ;; form, for the inline pass. This stands in for (declare inline) in their
-;; definitions (design, section 6.2) until declarations exist. Each is kept
-;; only if inlining it measures well.
+;; definitions until declarations exist. Each is kept only if inlining it
+;; measures well.
 (def inline-candidates
   '(identity inc dec zero? true? false? even? odd? first second third rest))
 

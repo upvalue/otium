@@ -543,7 +543,7 @@
   (when acknowledged (acknowledged))
   (defer
     (let ((held (frame-lend!)))
-      ;; Requests run while paused, as they did in the legacy pause loop.
+      ;; Requests still run while paused.
       (thread/atomically (let loop ()
                            (unless (get state :action)
                              (%park (get state :waiters) nil)

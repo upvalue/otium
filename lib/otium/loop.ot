@@ -100,9 +100,8 @@
 (def- (var-clause name init step)
   (plan '() (list (list name init step)) '() '() '()))
 
-;; Results are consed in reverse and reversed at the end. Adding to the tail
-;; with set-cdr! would allocate once, but Otium's set-cdr! checks for cycles
-;; and costs far more than the reverse. The name is bound only in =>.
+;; Results are consed in reverse and reversed at the end. The name is bound
+;; only in =>.
 (def- (collect-clause name expr test)
   (let ((acc (gensym "acc")))
     (plan '()

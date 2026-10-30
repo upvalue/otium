@@ -810,29 +810,15 @@
       (car (cdr x))
       x))
 
-(def- (exp-option? x)
-  (or (keyword? x)
-      (and (symbol? x)
-           (or (equal? (symbol->string x) ":as")
-               (equal? (symbol->string x) ":refer")
-               (equal? (symbol->string x) ":reload")))))
-
-(def- (exp-option x)
-  (cond
-    ((and (symbol? x) (equal? (symbol->string x) ":as")) :as)
-    ((and (symbol? x) (equal? (symbol->string x) ":refer")) :refer)
-    ((and (symbol? x) (equal? (symbol->string x) ":reload")) :reload)
-    (else x)))
-
 (def- (exp-require-spec x)
   (let ((x (exp-unquote x)))
     (if (pair? x)
-        (exp-map exp-option (exp-proper! x x))
+        (exp-proper! x x)
         x)))
 
 (def- (exp-require-specs args)
   (exp-proper! args args)
-  (if (and (pair? args) (symbol? (car args)) (pair? (cdr args)) (exp-option? (car (cdr args))))
+  (if (and (pair? args) (symbol? (car args)) (pair? (cdr args)) (keyword? (car (cdr args))))
       (list (exp-require-spec args))
       (exp-map exp-require-spec args)))
 

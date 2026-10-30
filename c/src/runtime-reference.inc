@@ -174,7 +174,6 @@ static const char* oti_runtime_documentation(const char* name) {
     {"reset-generic!", "(reset-generic! (name argument ...))\nReplace this declaration with a fresh generic of the given arity and no methods."},
     {"expander-locate", "(expander-locate from to)\nInternal shared-expander adapter that carries source positions through expansion."},
     {"expander-fail", "(expander-fail code message form)\nInternal shared-expander adapter that raises a coded syntax error."},
-    {"read-file", "(read-file path)\nRead a whole UTF-8 text file into a string; raise an error if it cannot be read."},
     {"symbol-macrolet", "(symbol-macrolet ((name expansion [(parameter write-form)]) ...) body ...)\nReplace references to name with expansion in body. With a writer, (set! name value) becomes (let ((parameter value)) write-form)."},
     {"remove-method!", "(remove-method! generic signature [qualifier])\nRemove a method with the given class/#f signature and return whether one existed. Object and #f both mean unspecialized. The qualifier defaults to primary; :around removes a wrapper."},
     {"set-applied!", "(set-applied! object key value)\nAssign an instance slot, table key, or existing array index and return value. (set! (object key) value) evaluates object, key, and value once, in that order. Table values of nil delete keys."},

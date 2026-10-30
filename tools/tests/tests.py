@@ -60,12 +60,17 @@ def reference(t):
     entries = json.loads((ROOT / 'lib/catalog/runtime.json').read_text())
     t.check(not required - entries.keys(), 'undocumented:', sorted(required - entries.keys()))
     prelude = (ROOT / 'lib/otium/core.ot').read_text()
-    pattern = r'^\((?:def\s+\(([^\s()]+)[^\n]*\)|defmacro\s+([^\s()]+)\s+\([^\n]*\))'
+    # A parameter list, allowing two levels of nested parentheses.
+    params = r'(?:[^()\n]|\((?:[^()\n]|\([^()\n]*\))*\))*\)'
+    pattern = rf'^\((?:def\s+\(([^\s()]+){params}|defmacro\s+([^\s()]+)\s+\({params})'
     for match in re.finditer(pattern, prelude, re.M):
         name = match[1] or match[2]
         if name.startswith('%'):
             continue
         t.check(prelude[match.end():].lstrip().startswith('"'), 'missing source docstring:', name)
+        # The prelude may wrap a builtin, such as read-string, which keeps its catalog entry.
+        t.check(name in required or name not in entries,
+                'documented in both the prelude and lib/catalog/runtime.json:', name)
 
 
 @test('docs')

@@ -4,6 +4,7 @@
 (require otium.sdl :as sdl)
 (require manse.apps :as apps)
 (require manse.strip :as strip)
+(require manse.sysinfo :as sysinfo)
 (require manse.terminal :as terminal)
 (require manse.pty :as pty)
 (require manse.settings :as settings)
@@ -58,6 +59,7 @@
    ["Meta+R" "Cmd+R" :widen "Widen the column"]
    ["Meta+Shift+R" "Cmd+Shift+R" :narrow "Narrow the column"]
    ["Meta+J" "Cmd+J" :jump "Jump to a column by its letters"]
+   ["Meta+I" "Cmd+I" :sysinfo "Show or hide system info"]
    ["Meta+Shift+/" "Cmd+?" :help "Show or hide these keys"]])
 
 (def (keymap)
@@ -85,6 +87,7 @@
           ((:narrow) (strip/width-step! s -1))
           ((:jump) (strip/hints-start! s))
           ((:help) (put! workspace :help? (not (workspace :help?))))
+          ((:sysinfo) (put! workspace :sysinfo? (not (workspace :sysinfo?))))
           (else nil)))
     (invalidate!)
     :handled))
@@ -117,7 +120,13 @@ MANSE_KEYS runs actions by key name, separated by spaces, at iteration 40."
   (for-each (fn (entry)
               (when (apps/step! (entry :app)) (ui/invalidate! window))
               (when (apps/finished? (entry :app)) (close-app! (entry :id))))
-            (copy ((workspace :apps) :entries))))
+            (copy ((workspace :apps) :entries)))
+  ;; System info counts seconds, so redraw it when the uptime ticks over.
+  (when (workspace :sysinfo?)
+    (let ((uptime (sysinfo/uptime)))
+      (unless (equal? uptime (workspace :sysinfo-shown))
+        (put! workspace :sysinfo-shown uptime)
+        (ui/invalidate! window)))))
 
 ;; On macOS, SDL's default menu binds Cmd+W to Window > Close. SDL delivers
 ;; the keydown first, then the menu asks to close the window in the same
@@ -237,6 +246,31 @@ one the last view asked for, e.g. by a click. Record the focus this view asks fo
                             (ui/label {:color theme/muted :size 12 :width 0 :grow 1} (get b 3))))
                   bindings)))
 
+(def- (duration seconds)
+  (let ((h (quotient seconds 3600))
+        (m (quotient (modulo seconds 3600) 60))
+        (s (modulo seconds 60))
+        (two (fn (n) (if (< n 10) (str "0" n) (str n)))))
+    (str h ":" (two m) ":" (two s))))
+
+(def- (megabytes bytes)
+  (str (/ (round (/ bytes 104857.6)) 10.0) " MB"))
+
+(def (sysinfo-panel)
+  (let ((info (sysinfo/snapshot))
+        (fp (info :footprint))
+        (row (fn (label value)
+               (ui/row {:gap 10 :align-items :center}
+                       (ui/label {:color theme/muted :size 12 :width 130} label)
+                       (ui/label {:color theme/text :size 12 :width 0 :grow 1} value)))))
+    (ui/column {:width 360 :padding 16 :gap 10 :background theme/panel}
+               (w/text theme/text theme/ui-size "System")
+               (row "Uptime" (duration (info :uptime)))
+               (row "Memory" (if fp (str (megabytes (fp :current)) " (peak " (megabytes (fp :peak)) ")") "unknown"))
+               (row "Allocated in total" (megabytes (info :allocated)))
+               (row "Native threads" (if (info :native-threads) (str (info :native-threads)) "unknown"))
+               (row "Otium threads" (str (info :threads))))))
+
 (def (view tree)
   (let ((s (workspace :strip))
         (entries ((workspace :apps) :entries))
@@ -252,7 +286,13 @@ one the last view asked for, e.g. by a click. Record the focus this view asks fo
             (ui/scroll {:key :strip :axis :x :width 0 :grow 1 :padding padding :gap gap :reveal (strip/focused s)}
                        (map (fn (id) (column s (find (fn (entry) (equal? (entry :id) id)) entries) viewport))
                             (strip/ids s)))
-            (when (workspace :help?) (list (ui/column {:width 1 :background theme/border-variant}) (help))))))
+            (when (or (workspace :help?) (workspace :sysinfo?))
+              (list (ui/column {:width 1 :background theme/border-variant})
+                    (ui/column {:background theme/panel}
+                               (when (workspace :sysinfo?) (sysinfo-panel))
+                               (when (and (workspace :sysinfo?) (workspace :help?))
+                                 (ui/row {:height 1 :background theme/border-variant}))
+                               (when (workspace :help?) (help))))))))
 
 (def- (script-path relative fallback)
   (let ((script (process/script-name)))

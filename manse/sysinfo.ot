@@ -1,0 +1,48 @@
+;; Process uptime, memory and threads for the system info panel.
+(ns manse.sysinfo)
+(require (otium.ffi :as ffi))
+(require (otium.memory :as memory))
+(require (otium.thread :as thread))
+
+;; Loading at startup stands in for the application's start time.
+(defonce started (current-second))
+
+(def (uptime)
+  "Seconds since Manse started."
+  (floor (- (current-second) started)))
+
+;; macOS only: proc_pidinfo reports the native thread count. Elsewhere it
+;; comes back nil.
+(ffi/defbindings libc
+                 %load-libc!
+                 ((private %getpid) "getpid" () int #f)
+                 ((private %pidinfo) "proc_pidinfo" (int int u64 pointer int) int #f))
+
+(defonce libc-tried? #f)
+
+(def- (libc!)
+  (unless libc-tried?
+    (set! libc-tried? #t)
+    (try
+      (%load-libc! "/usr/lib/libSystem.B.dylib")
+      (catch (ffi/error? _) nil)))
+  libc)
+
+;; struct proc_taskinfo is 96 bytes, pti_threadnum an i32 at byte 84.
+(def- PROC_PIDTASKINFO 4)
+
+(def (native-threads)
+  "Native threads in the process, or nil outside macOS."
+  (when (libc!)
+    (let ((info (ffi/alloc 'u8 96)))
+      (defer
+        (when (= 96 (%pidinfo (%getpid) PROC_PIDTASKINFO 0 info 96))
+          (ffi/ref info 'u32 21))
+        (ffi/free! info)))))
+
+(def (snapshot)
+  {:uptime (uptime)
+   :footprint (memory/footprint)
+   :allocated (memory/allocated)
+   :threads (length (thread/all))
+   :native-threads (native-threads)})

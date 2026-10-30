@@ -820,6 +820,14 @@ smoothing. Within a quarter pixel, return target."
 (def (close! window)
   (window-call "close!" (list window)))
 
+(defonce %wake {:woken? #f})
+
+(def (wake!)
+  "Have the event loop go round again without waiting for an event, so its
+:step! hooks run. For green threads with something new to show."
+  (put! %wake :woken? #t)
+  nil)
+
 (def (invalidate! window)
   "Request a frame for a window using :render-on-demand?."
   (put! window :dirty? #t :view-dirty? #t)

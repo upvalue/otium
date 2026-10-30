@@ -339,4 +339,21 @@
 
 (check "only main is left" 1 (length (thread/all)))
 
+;; --- Idle time, for event loops
+
+(check "nothing due" nil (thread/idle-ms))
+
+(let ((t (spawn (fn () (sleep 0.5)))))
+  (settle)
+  (let ((ms (thread/idle-ms)))
+    (check "until the next timer" #t (and (> ms 400) (<= ms 500))))
+  (thread/kill! t)
+  (thread/join t))
+
+(let ((done? #f)
+      (t (spawn (fn () (while (not done?) (yield))))))
+  (check "a runnable thread is due now" 0 (thread/idle-ms))
+  (set! done? #t)
+  (thread/join t))
+
 (report "threads")

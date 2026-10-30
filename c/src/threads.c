@@ -1542,6 +1542,20 @@ static ot_value clock_builtin(ot_state* rt, size_t first, size_t count) {
   return oti_float(rt, (double)now(rt->threads) / 1e9);
 }
 
+/* (%thread-idle-ms): how long the running thread may block outside the
+ * scheduler, as a UI loop does waiting for events, before another thread
+ * needs to run. 0 when one is runnable, the milliseconds to the next timer or
+ * watchdog, or nil when nothing is due. */
+static ot_value idle_ms_builtin(ot_state* rt, size_t first, size_t count) {
+  (void)first;
+  if (count) return oti_fail(rt, "wrong number of arguments");
+  oti_threads* ts = rt->threads;
+  if (!ts) return OT_NIL;
+  if (ts->run.head) return ot_int(0);
+  int ms = idle_timeout(ts);
+  return ms < 0 ? OT_NIL : ot_int(ms);
+}
+
 #define THREAD_BUILTIN(id, name, fn) {id, name, fn},
 #else
 #define THREAD_BUILTIN(id, name, fn) {id, name, no_threads},
@@ -1609,12 +1623,25 @@ static ot_value no_threads(ot_state* rt, size_t first, size_t count) {
   (void)count;
   return oti_fail(rt, "threads need native code, which this build lacks");
 }
+
+/* With no other threads, yielding has nothing to do and nothing is due. */
+static ot_value yield_builtin(ot_state* rt, size_t first, size_t count) {
+  (void)first;
+  if (count) return oti_fail(rt, "wrong number of arguments");
+  return OT_NIL;
+}
+
+static ot_value idle_ms_builtin(ot_state* rt, size_t first, size_t count) {
+  (void)first;
+  if (count) return oti_fail(rt, "wrong number of arguments");
+  return OT_NIL;
+}
 #endif
 
 const oti_builtin_def oti_thread_builtins[] = {
     THREAD_BUILTIN(B_SPAWN, "%spawn", spawn_builtin)
     THREAD_BUILTIN(B_SELF, "%self", self_builtin)
-    THREAD_BUILTIN(B_YIELD, "%yield", yield_builtin)
+    {B_YIELD, "%yield", yield_builtin},
     THREAD_BUILTIN(B_SLEEP, "%sleep", sleep_builtin)
     THREAD_BUILTIN(B_THREAD_JOIN, "%thread-join", join_builtin)
     THREAD_BUILTIN(B_THREAD_STATUS, "%thread-status", status_builtin)
@@ -1639,5 +1666,6 @@ const oti_builtin_def oti_thread_builtins[] = {
     THREAD_BUILTIN(B_DEMONITOR, "%demonitor", demonitor_builtin)
     THREAD_BUILTIN(B_THREAD_WATCHDOG, "%thread-watchdog", watchdog_builtin)
     THREAD_BUILTIN(B_WAIT_FDS, "%wait-fds", wait_fds_builtin)
+    {B_THREAD_IDLE_MS, "%thread-idle-ms", idle_ms_builtin},
     {0, NULL, NULL},
 };

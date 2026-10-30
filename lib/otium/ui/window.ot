@@ -9,6 +9,7 @@
 (require (otium.objc :as objc))
 (require (otium.dev :as dev))
 (require (otium.memory :as memory))
+(require (otium.thread :as thread))
 
 (defonce running? #f)
 
@@ -327,6 +328,19 @@ follow the swapchain's vsync rather than the poll interval."
           100
           (ui/windows)))
 
+(def- (wait!)
+  "Let threads the frame woke run, then wait for an event, no longer than
+until a thread needs to run again. Skip the wait after ui/wake!."
+  (thread/yield)
+  (if (ui/%wake :woken?)
+      (put! ui/%wake :woken? #f)
+      (let ((ms (wait-ms))
+            (threads (thread/idle-ms)))
+        (sdl/wait-event-timeout ffi/null
+                                (if threads
+                                    (min ms threads)
+                                    ms)))))
+
 (def (run)
   (unless running?
     (set! running? #t)
@@ -354,7 +368,7 @@ follow the swapchain's vsync rather than the poll interval."
                           (dev/end!))))
                     (ui/windows))
           (dev/leave-frame!))
-        (when (pair? (ui/windows)) (sdl/wait-event-timeout ffi/null (wait-ms))))
+        (when (pair? (ui/windows)) (wait!)))
       (dev/frame-loop! #f)
       (set! running? #f)
       (for-each close! (ui/windows)))))

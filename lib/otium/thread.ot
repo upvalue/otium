@@ -8,7 +8,8 @@
 ;;
 ;;   (require otium.thread :as thread :refer (spawn self sleep yield send receive))
 ;;
-;; Threads need native code: on the VM (--c.vm) these raise an error.
+;; Threads need native code: on the VM (--c.vm) these raise an error, apart
+;; from yield and idle-ms, which have nothing to do there.
 
 (ns otium.thread)
 
@@ -31,6 +32,10 @@
 (def (yield)
   "Let other runnable threads go first."
   (%yield))
+
+(def (idle-ms)
+  "How long the running thread can block outside the scheduler, as a UI loop does waiting for events, before another thread needs to run: 0 when one is runnable, the milliseconds until the next timer, or nil when nothing is due."
+  (%thread-idle-ms))
 
 (def (sleep seconds)
   "Park the running thread for seconds, an integer or float."

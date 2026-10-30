@@ -77,7 +77,9 @@ TEST(large_objects_live_apart_and_are_freed) {
 TEST(holes_are_reused) {
   oti_heap h;
   CHECK(oti_heap_init(&h, 4 << 20));
+
   enum { KEPT = 2000 };
+
   static ot_value kept[KEPT];
   oti_roots roots;
   for (size_t i = 0; i < KEPT; i++) kept[i] = OT_NIL;
@@ -106,7 +108,9 @@ TEST(holes_are_reused) {
 TEST(medium_objects_survive) {
   oti_heap h;
   CHECK(oti_heap_init(&h, 4 << 20));
+
   enum { COUNT = 200 };
+
   static ot_value live[COUNT];
   oti_roots roots;
   for (size_t i = 0; i < COUNT; i++) live[i] = OT_NIL;
@@ -141,7 +145,9 @@ TEST(evacuation_moves_survivors_out_of_sparse_blocks) {
 #endif
   oti_heap h;
   CHECK(oti_heap_init(&h, 8 << 20));
+
   enum { KEPT = 4000 };
+
   static ot_value kept[KEPT];
   static uint32_t identities[KEPT];
   oti_roots roots;
@@ -185,7 +191,9 @@ TEST(mark_stack_borrows_free_blocks) {
 #endif
   oti_heap h;
   CHECK(oti_heap_init(&h, 16 << 20));
+
   enum { WIDTH = 100000 };
+
   ot_value live[] = {OT_NIL};
   oti_roots roots;
   oti_roots_push(&h, &roots, live, 1);

@@ -31,6 +31,7 @@ typedef struct {
   Uint32 index;
   SDL_Rect src, dst;
 } OtuiCellOp;
+
 /* Shape one cell's grapheme. Returns the op count and points ops at them, or
  * -1. The ops are borrowed until the next call. */
 int otui_text_cell(const char* bytes, int len, int face, float size, float scale,

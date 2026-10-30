@@ -303,4 +303,3 @@ const oti_builtin_def oti_collection_builtins[] = {
     {B_POP, "pop!", collection_pop},         {B_COPY, "copy", collection_copy},
     {B_EQUAL, "equal?", collection_equal},   {0, NULL, NULL},
 };
-

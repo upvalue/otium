@@ -1,8 +1,6 @@
 #include "internal.h"
 
-void oti_restore_params(ot_state* rt, size_t count) {
-  rt->param_count = count;
-}
+void oti_restore_params(ot_state* rt, size_t count) { rt->param_count = count; }
 
 bool oti_bind_param(ot_state* rt, ot_value param, ot_value value) {
   if (!oti_kind(param, K_PARAM)) return oti_error(rt, "with-params requires a param");

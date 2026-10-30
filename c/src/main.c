@@ -607,9 +607,9 @@ static void print_gc_stats(ot_state* rt, const options* o) {
             "\"copied_bytes\":%zu,\"reclaimed_bytes\":%zu,\"used_bytes\":%zu,"
             "\"peak_used_bytes\":%zu,\"capacity_bytes\":%zu,\"limit_bytes\":%zu,"
             "\"gc_microseconds\":%zu,\"gc_longest_microseconds\":%zu}\n",
-            s.collections, s.heap_allocated_bytes, s.heap_copied_bytes,
-            s.heap_reclaimed_bytes, s.heap_used, s.heap_peak_used, s.heap_capacity, s.heap_limit,
-            s.gc_microseconds, s.gc_longest_microseconds);
+            s.collections, s.heap_allocated_bytes, s.heap_copied_bytes, s.heap_reclaimed_bytes,
+            s.heap_used, s.heap_peak_used, s.heap_capacity, s.heap_limit, s.gc_microseconds,
+            s.gc_longest_microseconds);
 }
 
 int main(int argc, char** argv) {

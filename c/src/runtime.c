@@ -482,9 +482,9 @@ uint32_t oti_constant(ot_state* rt, ot_value value) {
   unsigned kind;
   uint64_t id;
   bool text = text_key(value, &kind, &id);
-  uint32_t found = text ? text_find(rt, kind, id, (const char*)oti_bytes_data(value),
-                                    oti_bytes_length(value))
-                        : UINT32_MAX;
+  uint32_t found =
+      text ? text_find(rt, kind, id, (const char*)oti_bytes_data(value), oti_bytes_length(value))
+           : UINT32_MAX;
   if (found != UINT32_MAX && rt->constants[found] == value) return found;
   /* Every symbol and keyword constant is indexed, by its text if not
    * itself, so only another kind of value, or a second constant with the
@@ -577,7 +577,8 @@ static uint32_t namespace_global(ot_state* rt, uint32_t space, const char* name,
   char* copy = oti_strndup(rt, name, length);
   if (!copy) return UINT32_MAX;
   uint32_t index = (uint32_t)rt->global_count++;
-  rt->global_info[index] = (oti_global_info){.name = copy, .space = space, .length = (uint32_t)length};
+  rt->global_info[index] =
+      (oti_global_info){.name = copy, .space = space, .length = (uint32_t)length};
   if (!global_index(rt, index)) return UINT32_MAX;
   oti_set_global(rt, index, oti_unbound_marker(index));
   return index;
@@ -766,7 +767,8 @@ bool ot_use_native(ot_state* rt) {
   if (!oti_host_entry(rt)) return false;
 #ifdef OTIUM_NATIVE
   if (rt->native_mode) return true;
-  if (rt->shared_expander || rt->frame_count) return oti_error(rt, "too late to switch to native code");
+  if (rt->shared_expander || rt->frame_count)
+    return oti_error(rt, "too late to switch to native code");
   return oti_native_init(rt);
 #else
   return oti_error(rt, "native code is not available in this build");
@@ -1254,7 +1256,8 @@ static bool load_boot(ot_state* rt) {
     oti_error_record* e = &rt->error;
     fprintf(stderr, "error: %s\n", e->message);
     for (size_t i = 0; i < e->frame_count; i++) {
-      const char* file = e->frames[i].source < rt->source_count ? rt->sources[e->frames[i].source] : "?";
+      const char* file =
+          e->frames[i].source < rt->source_count ? rt->sources[e->frames[i].source] : "?";
       fprintf(stderr, "  at %s:%u %s\n", file ? file : "?", e->frames[i].offset,
               e->frames[i].name ? e->frames[i].name : "");
     }

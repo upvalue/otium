@@ -693,7 +693,8 @@ static _Noreturn void enter(ot_state* rt, oti_thread* t) {
     for (ot_value p = t->args; oti_kind(p, K_PAIR); p = oti_cdr(p)) argc++;
     if (!oti_native_args(rt, argc)) finish(rt, 0);
     size_t i = 0;
-    for (ot_value p = t->args; oti_kind(p, K_PAIR); p = oti_cdr(p)) rt->native.args[i++] = oti_car(p);
+    for (ot_value p = t->args; oti_kind(p, K_PAIR); p = oti_cdr(p))
+      rt->native.args[i++] = oti_car(p);
     rt->native.callee = t->entry;
     rt->native.argc = argc;
     t->entry = t->args = OT_NIL;
@@ -1477,7 +1478,8 @@ static ot_value mailbox_take_builtin(ot_state* rt, size_t first, size_t count) {
   oti_thread* me = rt->threads->current;
   if (me->cursor) {
     size_t at = me->cursor - 1;
-    memmove(me->mailbox + at, me->mailbox + at + 1, (me->mailbox_count - at - 1) * sizeof(ot_value));
+    memmove(me->mailbox + at, me->mailbox + at + 1,
+            (me->mailbox_count - at - 1) * sizeof(ot_value));
     me->mailbox_count--;
     for (oti_interruption* saved = me->interruptions; saved; saved = saved->previous) {
       if (saved->cursor && at < saved->cursor) {
@@ -1613,32 +1615,38 @@ static ot_value idle_ms_builtin(ot_state* rt, size_t first, size_t count) {
 
 const oti_builtin_def oti_thread_builtins[] = {
     THREAD_BUILTIN(B_SPAWN, "%spawn", spawn_builtin)
-    THREAD_BUILTIN(B_SELF, "%self", self_builtin)
-    {B_YIELD, "%yield", yield_builtin},
-    THREAD_BUILTIN(B_SLEEP, "%sleep", sleep_builtin)
-    THREAD_BUILTIN(B_THREAD_JOIN, "%thread-join", join_builtin)
-    THREAD_BUILTIN(B_THREAD_STATUS, "%thread-status", status_builtin)
-    THREAD_BUILTIN(B_THREAD_RESULT, "%thread-result", result_builtin)
-    THREAD_BUILTIN(B_THREAD_NAME, "%thread-name", name_builtin)
-    THREAD_BUILTIN(B_THREADS, "%threads", threads_builtin)
-    THREAD_BUILTIN(B_THREAD_DAEMON, "%thread-daemon", daemon_builtin)
-    THREAD_BUILTIN(B_THREAD_KILL, "%thread-kill", kill_builtin)
-    THREAD_BUILTIN(B_MAKE_WAITQ, "%make-waitq", make_waitq_builtin)
-    THREAD_BUILTIN(B_PARK, "%park", park_builtin)
-    THREAD_BUILTIN(B_WAKE_ONE, "%wake-one", wake_one_builtin)
-    THREAD_BUILTIN(B_WAKE_ALL, "%wake-all", wake_all_builtin)
-    THREAD_BUILTIN(B_ATOMIC, "%atomic", atomic_builtin)
-    THREAD_BUILTIN(B_SEND, "%send", send_builtin)
-    THREAD_BUILTIN(B_MAILBOX_NEXT, "%mailbox-next", mailbox_next_builtin)
-    THREAD_BUILTIN(B_MAILBOX_TAKE, "%mailbox-take", mailbox_take_builtin)
-    THREAD_BUILTIN(B_MAILBOX_REWIND, "%mailbox-rewind", mailbox_rewind_builtin)
-    THREAD_BUILTIN(B_THREAD_DEADLINE, "%thread-deadline", deadline_builtin)
-    THREAD_BUILTIN(B_SCHEDULER_CLOCK, "%scheduler-clock", clock_builtin)
-    THREAD_BUILTIN(B_THREAD_INTERRUPT, "%thread-interrupt", interrupt_builtin)
-    THREAD_BUILTIN(B_MONITOR, "%monitor", monitor_builtin)
-    THREAD_BUILTIN(B_DEMONITOR, "%demonitor", demonitor_builtin)
-    THREAD_BUILTIN(B_THREAD_WATCHDOG, "%thread-watchdog", watchdog_builtin)
-    THREAD_BUILTIN(B_WAIT_FDS, "%wait-fds", wait_fds_builtin)
-    {B_THREAD_IDLE_MS, "%thread-idle-ms", idle_ms_builtin},
+        THREAD_BUILTIN(B_SELF, "%self", self_builtin){B_YIELD, "%yield", yield_builtin},
+    THREAD_BUILTIN(B_SLEEP, "%sleep", sleep_builtin) THREAD_BUILTIN(
+        B_THREAD_JOIN, "%thread-join",
+        join_builtin) THREAD_BUILTIN(B_THREAD_STATUS, "%thread-status", status_builtin)
+        THREAD_BUILTIN(B_THREAD_RESULT, "%thread-result", result_builtin) THREAD_BUILTIN(
+            B_THREAD_NAME, "%thread-name", name_builtin) THREAD_BUILTIN(B_THREADS, "%threads",
+                                                                        threads_builtin)
+            THREAD_BUILTIN(B_THREAD_DAEMON, "%thread-daemon", daemon_builtin) THREAD_BUILTIN(
+                B_THREAD_KILL, "%thread-kill",
+                kill_builtin) THREAD_BUILTIN(B_MAKE_WAITQ, "%make-waitq",
+                                             make_waitq_builtin) THREAD_BUILTIN(B_PARK, "%park",
+                                                                                park_builtin)
+                THREAD_BUILTIN(B_WAKE_ONE, "%wake-one", wake_one_builtin) THREAD_BUILTIN(
+                    B_WAKE_ALL, "%wake-all", wake_all_builtin) THREAD_BUILTIN(B_ATOMIC, "%atomic",
+                                                                              atomic_builtin)
+                    THREAD_BUILTIN(B_SEND, "%send", send_builtin) THREAD_BUILTIN(
+                        B_MAILBOX_NEXT, "%mailbox-next",
+                        mailbox_next_builtin) THREAD_BUILTIN(B_MAILBOX_TAKE, "%mailbox-take",
+                                                             mailbox_take_builtin)
+                        THREAD_BUILTIN(B_MAILBOX_REWIND, "%mailbox-rewind", mailbox_rewind_builtin)
+                            THREAD_BUILTIN(B_THREAD_DEADLINE, "%thread-deadline", deadline_builtin)
+                                THREAD_BUILTIN(B_SCHEDULER_CLOCK, "%scheduler-clock",
+                                               clock_builtin) THREAD_BUILTIN(B_THREAD_INTERRUPT,
+                                                                             "%thread-interrupt",
+                                                                             interrupt_builtin)
+                                    THREAD_BUILTIN(B_MONITOR, "%monitor", monitor_builtin)
+                                        THREAD_BUILTIN(B_DEMONITOR, "%demonitor", demonitor_builtin)
+                                            THREAD_BUILTIN(B_THREAD_WATCHDOG, "%thread-watchdog",
+                                                           watchdog_builtin)
+                                                THREAD_BUILTIN(B_WAIT_FDS, "%wait-fds",
+                                                               wait_fds_builtin){B_THREAD_IDLE_MS,
+                                                                                 "%thread-idle-ms",
+                                                                                 idle_ms_builtin},
     {0, NULL, NULL},
 };

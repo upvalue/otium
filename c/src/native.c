@@ -37,37 +37,37 @@
 /* The stream format. Integers are unsigned or signed LEB128. */
 enum {
   NS_END,
-  NS_FUNC,     /* f */
-  NS_ENTER,    /* scratches slots */
-  NS_LABEL,    /* label */
-  NS_MOV,      /* mode dst src */
-  NS_OP2,      /* op flags dst a b */
-  NS_OP2U,     /* op flags a b */
-  NS_CMPJ,     /* cond a b label */
-  NS_JUMP,     /* label */
-  NS_JCOND,    /* cond label */
-  NS_FLAGS,    /* op dst cond */
-  NS_CALL,     /* tail src descriptor */
-  NS_CCALL,    /* helper args descriptor */
-  NS_RET,      /* src */
-  NS_ADDR,     /* dst label */
-  NS_SPBASE,   /* dst offset */
-  NS_POLL,     /* label: jump there when the stack pointer is below poll_limit */
-  NS_FMOV,     /* dst src, doubles */
-  NS_FOP2,     /* op dst a b: add, sub, mul, div of doubles */
-  NS_FCMPJ,    /* cond a b label, comparing doubles */
+  NS_FUNC,   /* f */
+  NS_ENTER,  /* scratches slots */
+  NS_LABEL,  /* label */
+  NS_MOV,    /* mode dst src */
+  NS_OP2,    /* op flags dst a b */
+  NS_OP2U,   /* op flags a b */
+  NS_CMPJ,   /* cond a b label */
+  NS_JUMP,   /* label */
+  NS_JCOND,  /* cond label */
+  NS_FLAGS,  /* op dst cond */
+  NS_CALL,   /* tail src descriptor */
+  NS_CCALL,  /* helper args descriptor */
+  NS_RET,    /* src */
+  NS_ADDR,   /* dst label */
+  NS_SPBASE, /* dst offset */
+  NS_POLL,   /* label: jump there when the stack pointer is below poll_limit */
+  NS_FMOV,   /* dst src, doubles */
+  NS_FOP2,   /* op dst a b: add, sub, mul, div of doubles */
+  NS_FCMPJ,  /* cond a b label, comparing doubles */
   NS_COUNT
 };
 
 enum {
-  NO_REG,     /* R n */
-  NO_IMM,     /* signed value */
-  NO_MEM,     /* base offset */
-  NO_MEM2,    /* base index shift */
-  NO_SLOT,    /* i */
-  NO_CELL,    /* unit cell, field */
-  NO_CONST,   /* unit literal */
-  NO_STATE,   /* state field */
+  NO_REG,   /* R n */
+  NO_IMM,   /* signed value */
+  NO_MEM,   /* base offset */
+  NO_MEM2,  /* base index shift */
+  NO_SLOT,  /* i */
+  NO_CELL,  /* unit cell, field */
+  NO_CONST, /* unit literal */
+  NO_STATE, /* state field */
   NO_RT,
   NO_ALLOC,
   NO_CELL_INDEX, /* immediate: the cell number of a unit cell */
@@ -90,9 +90,8 @@ enum {
 
 static const sljit_s32 mov_ops[] = {SLJIT_MOV,     SLJIT_MOV_U8,  SLJIT_MOV_S8,  SLJIT_MOV_U16,
                                     SLJIT_MOV_S16, SLJIT_MOV_U32, SLJIT_MOV_S32, SLJIT_MOV32};
-static const sljit_s32 op2_ops[] = {SLJIT_ADD, SLJIT_SUB,  SLJIT_MUL,  SLJIT_AND,
-                                    SLJIT_OR,  SLJIT_XOR,  SLJIT_SHL,  SLJIT_LSHR,
-                                    SLJIT_ASHR};
+static const sljit_s32 op2_ops[] = {SLJIT_ADD, SLJIT_SUB, SLJIT_MUL,  SLJIT_AND, SLJIT_OR,
+                                    SLJIT_XOR, SLJIT_SHL, SLJIT_LSHR, SLJIT_ASHR};
 
 typedef struct {
   uint32_t ra;       /* return address, as an offset from the code start */
@@ -140,6 +139,7 @@ struct oti_native_runtime {
    * carved from. */
   oti_segment* free_segments;
   struct oti_segment_chunk* segment_chunks;
+
   /* Frame sizes by the return address of their entry check's call, so
    * moving a frame to a new segment (oti_poll) needn't look up its
    * descriptor. Cleared when code is freed. */
@@ -147,6 +147,7 @@ struct oti_native_runtime {
     uintptr_t ra;
     size_t frame;
   } frames[FRAME_CACHE];
+
   FILE* perf_map;
   bool verbose;
 };
@@ -206,6 +207,7 @@ typedef struct oti_segment_chunk {
 /* The machine's assembly reads these state fields; the C compiler gives
  * the assembler their offsets. */
 void oti_native_offsets(void);
+
 void oti_native_offsets(void) {
   __asm__(".set OFF_SP, %c0\n"
           ".set OFF_ENTRY, %c1\n"
@@ -246,20 +248,21 @@ void oti_native_offsets(void) {
             "i"(offsetof(ot_state, poll_limit)), "i"(STACK_MAX >> 16));
 }
 
-
 /* Assembler directives, for ELF and Mach-O. A function's inner entry points
  * (ASM_INNER) stay in its block, which Mach-O's linker could otherwise
  * split at any global symbol. */
 #ifdef __APPLE__
 #define ASM_SYM(name) "_" #name
 #define ASM_FUNC(name) ".globl _" #name "\n.private_extern _" #name "\n_" #name ":\n"
-#define ASM_INNER(name) ".globl _" #name "\n.private_extern _" #name "\n.alt_entry _" #name "\n_" #name ":\n"
+#define ASM_INNER(name)                                                                            \
+  ".globl _" #name "\n.private_extern _" #name "\n.alt_entry _" #name "\n_" #name ":\n"
 #define ASM_END(name) ""
 #define ASM_TEXT ".text\n"
 #define ASM_TEXT_END ""
 #else
 #define ASM_SYM(name) #name
-#define ASM_FUNC(name) ".globl " #name "\n.hidden " #name "\n.type " #name ",@function\n" #name ":\n"
+#define ASM_FUNC(name)                                                                             \
+  ".globl " #name "\n.hidden " #name "\n.type " #name ",@function\n" #name ":\n"
 #define ASM_INNER(name) ".globl " #name "\n.hidden " #name "\n" #name ":\n"
 #define ASM_END(name) ".size " #name ", .-" #name "\n"
 #define ASM_TEXT ".pushsection .text\n"
@@ -458,6 +461,7 @@ static bool grow_frame(ot_state* rt) {
  * new segment's link record, under which the trampoline continues the
  * function. */
 uintptr_t oti_segment_grow_entry(ot_state* rt, size_t size, uintptr_t sp);
+
 uintptr_t oti_segment_grow_entry(ot_state* rt, size_t size, uintptr_t sp) {
   oti_segment* s = grow_segment(rt, size);
   if (!s) {
@@ -473,7 +477,6 @@ static void unwind_segments(ot_state* rt, uintptr_t sp) {
   while (!(sp > segment_base(rt->native.segment) && sp <= segment_top(rt->native.segment)))
     drop_segment(rt);
 }
-
 
 /* --- Code space -------------------------------------------------------- */
 
@@ -764,8 +767,7 @@ static void pend(oti_bridge* b, struct sljit_jump* jump, uint32_t label) {
 }
 
 static void site(oti_bridge* b, uint64_t descriptor) {
-  if (!oti_grow(b->rt, (void**)&b->sites, &b->site_capacity, b->site_count + 1,
-                sizeof(oti_site))) {
+  if (!oti_grow(b->rt, (void**)&b->sites, &b->site_capacity, b->site_count + 1, sizeof(oti_site))) {
     b->bad = true;
     return;
   }
@@ -780,8 +782,8 @@ static const void* helper_address(uint64_t id);
  * and is reloaded after. The state goes in R0, ahead of the arguments the
  * stream put in R1 up. */
 static void c_call(struct sljit_compiler* c, const void* bridge, uint64_t args) {
-  static const sljit_s32 types[] = {
-      SLJIT_ARGS1(W, P), SLJIT_ARGS2(W, P, W), SLJIT_ARGS3(W, P, W, W), SLJIT_ARGS4(W, P, W, W, W)};
+  static const sljit_s32 types[] = {SLJIT_ARGS1(W, P), SLJIT_ARGS2(W, P, W),
+                                    SLJIT_ARGS3(W, P, W, W), SLJIT_ARGS4(W, P, W, W, W)};
   sljit_emit_op2(c, SLJIT_SUB, SLJIT_MEM1(SLJIT_S0), (sljit_sw)offsetof(ot_state, heap.used),
                  SLJIT_S1, 0, SLJIT_MEM1(SLJIT_S0), (sljit_sw)offsetof(ot_state, heap.start));
   sljit_emit_op1(c, SLJIT_MOV, SLJIT_R0, 0, SLJIT_S0, 0);
@@ -844,7 +846,9 @@ static bool translate(oti_bridge* b) {
       case NS_OP2U: {
         uint64_t code = read_unsigned(b), flags = read_unsigned(b);
         if (code >= sizeof(op2_ops) / sizeof(op2_ops[0])) return false;
-        sljit_s32 o = op2_ops[code] | (flags == 1 ? SLJIT_SET_Z : flags ? SLJIT_SET((sljit_s32)(flags - 2)) : 0);
+        sljit_s32 o = op2_ops[code] | (flags == 1 ? SLJIT_SET_Z
+                                       : flags    ? SLJIT_SET((sljit_s32)(flags - 2))
+                                                  : 0);
         if (op == NS_OP2) {
           operand(b, &d, &dw);
           operand(b, &s1, &s1w);
@@ -886,8 +890,8 @@ static bool translate(oti_bridge* b) {
         uint64_t tail = read_unsigned(b);
         operand(b, &s1, &s1w);
         uint64_t descriptor = read_unsigned(b);
-        sljit_emit_icall(c, SLJIT_CALL_REG_ARG | (tail ? SLJIT_CALL_RETURN : 0), SLJIT_ARGS0(W),
-                         s1, s1w);
+        sljit_emit_icall(c, SLJIT_CALL_REG_ARG | (tail ? SLJIT_CALL_RETURN : 0), SLJIT_ARGS0(W), s1,
+                         s1w);
         if (!tail) site(b, descriptor);
         break;
       }
@@ -922,7 +926,8 @@ static bool translate(oti_bridge* b) {
         sljit_emit_fop1(c, SLJIT_MOV_F64, d, dw, s1, s1w);
         break;
       case NS_FOP2: {
-        static const sljit_s32 fops[] = {SLJIT_ADD_F64, SLJIT_SUB_F64, SLJIT_MUL_F64, SLJIT_DIV_F64};
+        static const sljit_s32 fops[] = {SLJIT_ADD_F64, SLJIT_SUB_F64, SLJIT_MUL_F64,
+                                         SLJIT_DIV_F64};
         uint64_t code = read_unsigned(b);
         if (code > 3) return false;
         operand(b, &d, &dw);
@@ -1033,8 +1038,8 @@ static void write_perf_map(ot_state* rt, oti_code* code) {
   if (!n->perf_map) return;
   for (size_t i = 0; i < code->function_count; i++) {
     oti_function* f = rt->functions[code->functions[i]];
-    uintptr_t end = i + 1 < code->function_count ? rt->functions[code->functions[i + 1]]->entry
-                                                 : code->end;
+    uintptr_t end =
+        i + 1 < code->function_count ? rt->functions[code->functions[i + 1]]->entry : code->end;
     fprintf(n->perf_map, "%lx %lx %s\n", (unsigned long)f->entry, (unsigned long)(end - f->entry),
             f->name ? f->name : "fn");
   }
@@ -1142,7 +1147,8 @@ ot_value oti_native_install(ot_state* rt, size_t slot) {
     size_t n, slot_count;
     ot_value* info = array_items(items[i], &n);
     uint32_t function = UINT32_MAX, offset = UINT32_MAX;
-    if (n < 3 || (info[0] != OT_NIL && (!unit_int(info[0], &function) || function >= function_count))) {
+    if (n < 3 ||
+        (info[0] != OT_NIL && (!unit_int(info[0], &function) || function >= function_count))) {
       ok = oti_error(rt, "native unit: bad descriptor");
       break;
     }
@@ -1163,9 +1169,12 @@ ot_value oti_native_install(ot_state* rt, size_t slot) {
       uint32_t slot = (uint32_t)ot_to_int(slots[s]);
       bitmaps[bitmap_count + slot / 64] |= (uint64_t)1 << (slot % 64);
     }
-    descriptors[i] = (oti_descriptor){0, 0, offset,
+    descriptors[i] = (oti_descriptor){0,
+                                      0,
+                                      offset,
                                       function == UINT32_MAX ? UINT32_MAX : functions[function],
-                                      (uint32_t)bitmap_count, (uint16_t)words,
+                                      (uint32_t)bitmap_count,
+                                      (uint16_t)words,
                                       n > 3 && oti_truth(info[3])};
     bitmap_count += words;
   }
@@ -1204,7 +1213,8 @@ ot_value oti_native_install(ot_state* rt, size_t slot) {
       ok = machine != NULL;
     }
     if (!ok && !oti_failed(rt))
-      oti_errorf(rt, "native unit rejected (sljit error %d)", b.c ? sljit_get_compiler_error(b.c) : -1);
+      oti_errorf(rt, "native unit rejected (sljit error %d)",
+                 b.c ? sljit_get_compiler_error(b.c) : -1);
   }
   if (ok) {
     size_t size = sljit_get_generated_code_size(b.c);
@@ -1768,9 +1778,15 @@ static W h_try(ot_state* rt, W pc, W sp) {
   if (!oti_grow(rt, (void**)&rt->tries, &rt->try_capacity, rt->try_count + 1,
                 sizeof(oti_try_frame)))
     oti_native_raise(rt);
-  rt->tries[rt->try_count++] =
-      (oti_try_frame){rt->frame_count,     rt->sp,        pc, rt->param_count, rt->handler_count,
-                      rt->handler_top,     rt->restart_scope_count, rt->cleanup_count, sp};
+  rt->tries[rt->try_count++] = (oti_try_frame){rt->frame_count,
+                                               rt->sp,
+                                               pc,
+                                               rt->param_count,
+                                               rt->handler_count,
+                                               rt->handler_top,
+                                               rt->restart_scope_count,
+                                               rt->cleanup_count,
+                                               sp};
   return OT_NIL;
 }
 
@@ -1911,40 +1927,41 @@ static W h_evaluator(ot_state* rt, W name) {
 }
 
 /* The helpers the stream can call, by number. */
-#define HELPERS(X) \
-  X(H_ALLOC, h_alloc)  \
-  X(H_PRIM1, h_prim1)  \
-  X(H_PRIM2, h_prim2)  \
-  X(H_ARITY, h_arity)  \
-  X(H_UNBOUND, h_unbound)  \
-  X(H_UNINITIALIZED, h_uninitialized)  \
-  X(H_DEFINE, h_define)  \
-  X(H_SET_GLOBAL, h_set_global)  \
-  X(H_POLL, h_poll)  \
-  X(H_REST, h_rest)  \
-  X(H_TRY, h_try)  \
-  X(H_END_TRY, h_end_try)  \
-  X(H_RAISE, h_raise)  \
-  X(H_CLEANUP, h_cleanup)  \
-  X(H_RUN_CLEANUP, h_run_cleanup)  \
-  X(H_HANDLERS, h_handlers)  \
-  X(H_UNHANDLERS, h_unhandlers)  \
-  X(H_BIND_PARAM, h_bind_param)  \
-  X(H_UNBIND_PARAMS, h_unbind_params)  \
-  X(H_MAKE_PARAM, h_make_param)  \
-  X(H_RESTARTS, h_restarts)  \
-  X(H_END_RESTARTS, h_end_restarts)  \
-  X(H_RESTART_APPLY, h_restart_apply)  \
-  X(H_EVALUATOR, h_evaluator)  \
-  X(H_POP_CLEANUP, h_pop_cleanup)  \
-  X(H_BUILTIN, h_builtin)  \
+#define HELPERS(X)                                                                                 \
+  X(H_ALLOC, h_alloc)                                                                              \
+  X(H_PRIM1, h_prim1)                                                                              \
+  X(H_PRIM2, h_prim2)                                                                              \
+  X(H_ARITY, h_arity)                                                                              \
+  X(H_UNBOUND, h_unbound)                                                                          \
+  X(H_UNINITIALIZED, h_uninitialized)                                                              \
+  X(H_DEFINE, h_define)                                                                            \
+  X(H_SET_GLOBAL, h_set_global)                                                                    \
+  X(H_POLL, h_poll)                                                                                \
+  X(H_REST, h_rest)                                                                                \
+  X(H_TRY, h_try)                                                                                  \
+  X(H_END_TRY, h_end_try)                                                                          \
+  X(H_RAISE, h_raise)                                                                              \
+  X(H_CLEANUP, h_cleanup)                                                                          \
+  X(H_RUN_CLEANUP, h_run_cleanup)                                                                  \
+  X(H_HANDLERS, h_handlers)                                                                        \
+  X(H_UNHANDLERS, h_unhandlers)                                                                    \
+  X(H_BIND_PARAM, h_bind_param)                                                                    \
+  X(H_UNBIND_PARAMS, h_unbind_params)                                                              \
+  X(H_MAKE_PARAM, h_make_param)                                                                    \
+  X(H_RESTARTS, h_restarts)                                                                        \
+  X(H_END_RESTARTS, h_end_restarts)                                                                \
+  X(H_RESTART_APPLY, h_restart_apply)                                                              \
+  X(H_EVALUATOR, h_evaluator)                                                                      \
+  X(H_POP_CLEANUP, h_pop_cleanup)                                                                  \
+  X(H_BUILTIN, h_builtin)                                                                          \
   X(H_PROOF_FAILED, h_proof_failed)
 
 enum {
+
 #define HELPER_ID(id, fn) id,
   HELPERS(HELPER_ID)
 #undef HELPER_ID
-  H_COUNT
+      H_COUNT
 };
 
 static W dispatch(ot_state* rt);
@@ -1955,6 +1972,7 @@ HELPERS(HELPER_DECLARE)
 extern char oti_bridge_dispatch[], oti_bridge_h_continue_unwind[];
 
 void oti_native_bridges(void);
+
 void oti_native_bridges(void) {
   HELPERS(HELPER_BRIDGE)
   BRIDGE(dispatch);
@@ -2173,7 +2191,12 @@ static bool build_stubs(ot_state* rt) {
   for (int i = 0; i < 4; i++)
     code->descriptors[i] =
         (oti_descriptor){(uint32_t)(sljit_get_label_addr(sites[i].label) - code->start),
-                         sites[i].frame, UINT32_MAX, UINT32_MAX, 0, 0, false};
+                         sites[i].frame,
+                         UINT32_MAX,
+                         UINT32_MAX,
+                         0,
+                         0,
+                         false};
   code->descriptor_count = 4;
   qsort(code->descriptors, 4, sizeof(oti_descriptor), compare_descriptors);
   n->redispatch = sljit_get_label_addr(redispatch);

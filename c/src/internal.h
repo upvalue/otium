@@ -644,6 +644,7 @@ typedef struct {
   uint16_t builtin;
   uint32_t length;
 } oti_global_info;
+
 _Static_assert(B_COUNT < UINT16_MAX, "builtin ids fit oti_global_info.builtin");
 
 /* A builtin reads its arguments from rt->stack[first, first + count). It
@@ -755,47 +756,47 @@ typedef struct {
  * names them as rt->stack, rt->sp and so on while a thread switch copies
  * rt->exec as one block. The native block comes first: trampolines and
  * generated code address it at fixed offsets. */
-#define OTI_EXEC_FIELDS                                                                            \
-  oti_native_exec native;                                                                          \
-  ot_value* stack;                                                                                 \
-  size_t sp, stack_capacity;                                                                       \
-  /* Slots usable without growing the stack: the lesser of capacity and limit. */                  \
-  size_t stack_room;                                                                               \
+#define OTI_EXEC_FIELDS                                                                              \
+  oti_native_exec native;                                                                            \
+  ot_value* stack;                                                                                   \
+  size_t sp, stack_capacity;                                                                         \
+  /* Slots usable without growing the stack: the lesser of capacity and limit. */                    \
+  size_t stack_room;                                                                                 \
   /* Every stack slot below stack_stale holds a valid value, even above sp. Slots                  \
-   * above sp at a collection, or never written, may not. */                                       \
-  size_t stack_stale;                                                                              \
-  oti_frame* frames;                                                                               \
+   * above sp at a collection, or never written, may not. */ \
+  size_t stack_stale;                                                                                \
+  oti_frame* frames;                                                                                 \
   /* frame_capacity never exceeds frame_limit, so the call fast path needs no                      \
-   * separate depth check. In native code frame_count counts entries. */                           \
-  size_t frame_count, frame_capacity;                                                              \
-  ot_value* handlers;                                                                              \
-  size_t* handler_previous;                                                                        \
-  size_t handler_count, handler_capacity, handler_previous_capacity, handler_top, callback_depth;  \
-  ot_value *restarts, restart_transfer[2];                                                         \
-  size_t restart_count, restart_capacity, restart_scope_count, restart_scope_capacity;             \
-  oti_restart_scope* restart_scopes;                                                               \
-  bool restart_pending;                                                                            \
-  ot_value* cleanups;                                                                              \
-  oti_cleanup* cleanup_states;                                                                     \
-  size_t cleanup_count, cleanup_capacity, cleanup_state_capacity;                                  \
-  bool interrupted, signaled, raised;                                                              \
-  ot_value* params;                                                                                \
-  size_t param_count, param_capacity;                                                              \
-  /* A parked write already appended its bytes to this port. */                                   \
-  ot_value pending_output;                                                                        \
-  /* The condition being raised. */                                                                \
-  ot_value condition_values[1];                                                                    \
-  oti_try_frame* tries;                                                                            \
-  size_t try_count, try_capacity;                                                                  \
-  oti_error_record error;                                                                          \
-  uint32_t current_namespace, required_namespace;                                                  \
-  /* The source being evaluated now, an index into ot_state.sources. */                            \
-  uint32_t source;                                                                                 \
-  bool compiling, evaluating, expanding;                                                           \
-  size_t expansion_calls, eval_depth;                                                              \
-  /* Nesting of sections no other thread may preempt. */                                           \
-  size_t atomic;                                                                                   \
-  oti_unwind_save* unwinds;                                                                        \
+   * separate depth check. In native code frame_count counts entries. */ \
+  size_t frame_count, frame_capacity;                                                                \
+  ot_value* handlers;                                                                                \
+  size_t* handler_previous;                                                                          \
+  size_t handler_count, handler_capacity, handler_previous_capacity, handler_top, callback_depth;    \
+  ot_value *restarts, restart_transfer[2];                                                           \
+  size_t restart_count, restart_capacity, restart_scope_count, restart_scope_capacity;               \
+  oti_restart_scope* restart_scopes;                                                                 \
+  bool restart_pending;                                                                              \
+  ot_value* cleanups;                                                                                \
+  oti_cleanup* cleanup_states;                                                                       \
+  size_t cleanup_count, cleanup_capacity, cleanup_state_capacity;                                    \
+  bool interrupted, signaled, raised;                                                                \
+  ot_value* params;                                                                                  \
+  size_t param_count, param_capacity;                                                                \
+  /* A parked write already appended its bytes to this port. */                                      \
+  ot_value pending_output;                                                                           \
+  /* The condition being raised. */                                                                  \
+  ot_value condition_values[1];                                                                      \
+  oti_try_frame* tries;                                                                              \
+  size_t try_count, try_capacity;                                                                    \
+  oti_error_record error;                                                                            \
+  uint32_t current_namespace, required_namespace;                                                    \
+  /* The source being evaluated now, an index into ot_state.sources. */                              \
+  uint32_t source;                                                                                   \
+  bool compiling, evaluating, expanding;                                                             \
+  size_t expansion_calls, eval_depth;                                                                \
+  /* Nesting of sections no other thread may preempt. */                                             \
+  size_t atomic;                                                                                     \
+  oti_unwind_save* unwinds;                                                                          \
   size_t unwind_count, unwind_capacity;
 
 typedef struct {
@@ -812,10 +813,12 @@ struct ot_state {
 
   union {
     oti_exec exec;
+
     struct {
       OTI_EXEC_FIELDS
     };
   };
+
   oti_heap heap;
   ot_value process_values[2];
   oti_roots process_roots;
@@ -967,11 +970,13 @@ bool oti_arity_error(ot_state* rt, const oti_function* fn, size_t argc);
 /* Record E0301 for the builtin who called with count arguments, outside
  * [min, max]; a max of SIZE_MAX means no upper limit. */
 bool oti_builtin_arity_error(ot_state* rt, const char* who, size_t count, size_t min, size_t max);
+
 /* Whether count is in [min, max], else record E0301 for the builtin who. */
 static inline bool oti_check_arity(ot_state* rt, const char* who, size_t count, size_t min,
                                    size_t max) {
   return (count >= min && count <= max) || oti_builtin_arity_error(rt, who, count, min, max);
 }
+
 /* Record E0302, "value is not callable", with :value. */
 bool oti_callable_error(ot_state* rt, ot_value value);
 /* Record E0201 for the unbound global cell, with :name. */
@@ -1122,6 +1127,7 @@ ot_value oti_record_copy(ot_state* rt, ot_value record);
 static inline void oti_copy_words(ot_value* dst, const ot_value* src, size_t n) {
   for (size_t i = 0; i < n; i++) dst[i] = src[i];
 }
+
 /* The symbol or keyword constant with this kind, gensym serial (0 for an
  * interned symbol) and text, or 0. */
 ot_value oti_text_constant(ot_state* rt, unsigned kind, uint64_t id, const char* text, size_t n);
@@ -1634,10 +1640,10 @@ static inline ot_value oti_cdr(ot_value pair) { return oti_as_pair(pair)->cdr; }
 /* Builtin tables, one per module. */
 extern const oti_builtin_def oti_bytes_builtins[], oti_class_builtins[], oti_collection_builtins[],
     oti_condition_builtins[], oti_dev_builtins[], oti_filesystem_builtins[], oti_foreign_builtins[],
-    oti_codegen_builtins[], oti_thread_builtins[],
-    oti_instance_builtins[], oti_numeric_builtins[], oti_port_builtins[], oti_process_builtins[],
-    oti_record_builtins[], oti_reflection_builtins[], oti_restart_builtins[], oti_string_builtins[],
-    oti_support_builtins[], oti_table_builtins[], oti_time_builtins[];
+    oti_codegen_builtins[], oti_thread_builtins[], oti_instance_builtins[], oti_numeric_builtins[],
+    oti_port_builtins[], oti_process_builtins[], oti_record_builtins[], oti_reflection_builtins[],
+    oti_restart_builtins[], oti_string_builtins[], oti_support_builtins[], oti_table_builtins[],
+    oti_time_builtins[];
 
 /* Plain helpers other modules use in place of calling a builtin. */
 ot_value oti_table_new(ot_state* rt);

@@ -134,11 +134,11 @@ bool oti_reclaim(ot_state* rt) {
     if (rt->native_mode) oti_native_sweep(rt);
     else
 #endif
-    for (size_t i = 0; i < rt->function_count; i++)
-      if (!m.functions[i]) {
-        oti_free_function(rt->functions[i]);
-        rt->functions[i] = NULL;
-      }
+      for (size_t i = 0; i < rt->function_count; i++)
+        if (!m.functions[i]) {
+          oti_free_function(rt->functions[i]);
+          rt->functions[i] = NULL;
+        }
     while (rt->function_count && !rt->functions[rt->function_count - 1]) rt->function_count--;
     while (rt->constant_count && !rt->constant_state[rt->constant_count - 1]) rt->constant_count--;
     rt->constant_roots.count = rt->constant_count;

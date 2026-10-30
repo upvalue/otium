@@ -103,9 +103,10 @@ TEST(core_evaluation) {
   check_error(rt, "(set! + (fn (a b) 100))", "cannot redefine builtin");
   check_int(rt, "(+ 20 22)", 42);
   ot_value first;
-  const char* snapshot = "(def (snapshot-target a b) (+ a b)) "
-                         "(def (change-target) (set! snapshot-target (fn (a b) 100)) 2)"
-                         "(def (snapshot-call) (snapshot-target 1 (change-target))) (snapshot-call)";
+  const char* snapshot =
+      "(def (snapshot-target a b) (+ a b)) "
+      "(def (change-target) (set! snapshot-target (fn (a b) 100)) 2)"
+      "(def (snapshot-call) (snapshot-target 1 (change-target))) (snapshot-call)";
   CHECK(ot_eval(rt, snapshot, strlen(snapshot), &first));
   CHECK(first == ot_int(3) || first == ot_int(100));
   check_int(rt, "(snapshot-call)", 100);

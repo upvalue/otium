@@ -167,7 +167,9 @@ static bool datum(oti_fasl* f, unsigned depth) {
       return push(rt, oti_float(rt, strtod(buffer, NULL)));
     }
     case D_STRING: text = f_text(f, &length); return push(rt, oti_text(rt, K_STRING, text, length));
-    case D_SYMBOL: text = f_text(f, &length); return push(rt, oti_intern(rt, K_SYMBOL, text, length));
+    case D_SYMBOL:
+      text = f_text(f, &length);
+      return push(rt, oti_intern(rt, K_SYMBOL, text, length));
     case D_GENSYM: {
       text = f_text(f, &length);
       return push(rt, gensym(f, text, length, f_unsigned(f)));
@@ -251,8 +253,14 @@ static bool skip_datum(oti_fasl* f) {
     case D_SYMBOL:
     case D_KEYWORD:
     case D_BYTES: f_text(f, &length); return !f->bad;
-    case D_GENSYM: f_text(f, &length); f_unsigned(f); return !f->bad;
-    case D_CELL: f_text(f, &length); f_text(f, &length); return !f->bad;
+    case D_GENSYM:
+      f_text(f, &length);
+      f_unsigned(f);
+      return !f->bad;
+    case D_CELL:
+      f_text(f, &length);
+      f_text(f, &length);
+      return !f->bad;
     case D_LIST: {
       size_t count = (size_t)f_unsigned(f);
       for (size_t i = 0; i <= count; i++)
@@ -429,7 +437,8 @@ static bool load(ot_state* rt, const unsigned char* bytes, size_t length, size_t
 
 /* Index a boot file's module sections. */
 static bool index_modules(ot_state* rt, oti_boot* boot) {
-  oti_fasl f = {.rt = rt, .base = boot->bytes, .p = boot->bytes + 8, .end = boot->bytes + boot->length};
+  oti_fasl f = {
+      .rt = rt, .base = boot->bytes, .p = boot->bytes + 8, .end = boot->bytes + boot->length};
   size_t capacity = 0;
   while (f.p < f.end && *f.p != F_END) {
     if (*f.p != F_MODULE) {
@@ -451,7 +460,8 @@ static bool index_modules(ot_state* rt, oti_boot* boot) {
       return false;
     char* copy = oti_strndup(rt, name, length);
     if (!copy) return false;
-    boot->modules[boot->module_count++] = (oti_boot_section){copy, body, (size_t)(f.p - boot->bytes)};
+    boot->modules[boot->module_count++] =
+        (oti_boot_section){copy, body, (size_t)(f.p - boot->bytes)};
   }
   return true;
 }

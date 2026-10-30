@@ -165,9 +165,7 @@ static ot_value memory_heap_stat(ot_state* rt, size_t first, size_t count) {
     case 7: value = h->longest_pause; break;
     case 8: value = h->reclaimed_bytes; break;
     case 9: value = h->copied_bytes; break;
-    default:
-      oti_error(rt, "unknown heap statistic");
-      return 0;
+    default: oti_error(rt, "unknown heap statistic"); return 0;
   }
   return memory_counter(value);
 }

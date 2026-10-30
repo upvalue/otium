@@ -801,7 +801,8 @@ static Glyph* sprite(Renderer* r, Uint32 cp, int w, int h) {
   sprite_draw(cp, w, h, mask);
   g = add_glyph(r, NULL, cp, w, h, w, h, slot);
   if (g)
-    for (int y = 0; y < h; ++y) memcpy(r->atlas_pixels + (g->y + y) * ATLAS_SIZE + g->x, mask + y * w, w);
+    for (int y = 0; y < h; ++y)
+      memcpy(r->atlas_pixels + (g->y + y) * ATLAS_SIZE + g->x, mask + y * w, w);
   free(mask);
   return g;
 }
@@ -888,8 +889,8 @@ bool otui_gpu_cells(Renderer* r, const char* text, int face, float size, float x
                      width, thickness / scale, 0, color, cx, cy, ccw, cch))
     goto failed;
   if ((flags & 2) &&
-      !otui_gpu_rect(r, left / scale, (baseline - roundf(m[2] * 0.3f) - thickness / 2) / scale, width,
-                     thickness / scale, 0, color, cx, cy, ccw, cch))
+      !otui_gpu_rect(r, left / scale, (baseline - roundf(m[2] * 0.3f) - thickness / 2) / scale,
+                     width, thickness / scale, 0, color, cx, cy, ccw, cch))
     goto failed;
   return true;
 failed:

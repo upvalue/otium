@@ -61,8 +61,7 @@ static ot_value message_condition(ot_state* rt, ot_value message, size_t first, 
       registered = registry != 0;
       if (registered) rt->condition_types = registry;
     }
-    if (registered &&
-        oti_table_get(rt, rt->condition_types, values[2], V_UNBOUND) == V_UNBOUND) {
+    if (registered && oti_table_get(rt, rt->condition_types, values[2], V_UNBOUND) == V_UNBOUND) {
       values[4] = oti_intern(rt, K_SYMBOL, "error", 5);
       registered = values[4] && oti_table_set(rt, rt->condition_types, values[2], values[4]);
     }

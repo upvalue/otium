@@ -189,7 +189,8 @@ bool oti_core_locked_error(ot_state* rt, uint32_t global) {
 }
 
 bool oti_accessor_locked_error(ot_state* rt, uint32_t global) {
-  return oti_coded_errorf(rt, "E0210", "`%s` was defined by defrecord; change the defrecord instead",
+  return oti_coded_errorf(rt, "E0210",
+                          "`%s` was defined by defrecord; change the defrecord instead",
                           rt->global_info[global].name);
 }
 

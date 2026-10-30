@@ -1,9 +1,7 @@
 #include "internal.h"
 #include <string.h>
 
-void oti_restore_cleanups(ot_state* rt, size_t count) {
-  rt->cleanup_count = count;
-}
+void oti_restore_cleanups(ot_state* rt, size_t count) { rt->cleanup_count = count; }
 
 bool oti_install_cleanup(ot_state* rt, bool outcome) {
   size_t count = rt->cleanup_count;

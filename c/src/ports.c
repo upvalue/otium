@@ -151,13 +151,12 @@ static void port_readiness(ot_value port) {
   if (p->host.read == posix_read && p->host.write == posix_write) {
     struct stat st;
     if (!fstat((int)p->handle, &st)) {
-      bool regular = S_ISREG(st.st_mode),
-           terminal = S_ISCHR(st.st_mode) && isatty((int)p->handle),
+      bool regular = S_ISREG(st.st_mode), terminal = S_ISCHR(st.st_mode) && isatty((int)p->handle),
            device = S_ISCHR(st.st_mode) && !terminal && !p->input;
       p->may_block = !regular && !device;
       p->poll_reads = p->input && !regular;
       p->socket = S_ISSOCK(st.st_mode);
-      p->write_chunk = regular || device || p->socket       ? SIZE_MAX
+      p->write_chunk = regular || device || p->socket     ? SIZE_MAX
                        : S_ISFIFO(st.st_mode) || terminal ? PIPE_BUF
                                                           : 1;
     }
@@ -812,8 +811,7 @@ static ot_value read_datum(ot_state* rt, ot_value* port) {
  * ports still flush every call and other ports when full, as without threads.
  * pending_output marks bytes a call appended before parking in its flush; a
  * call larger than the buffer is the only other one appended before a flush. */
-static bool append_owned(ot_state* rt, ot_value* port, const char* bytes, size_t n,
-                         bool waits) {
+static bool append_owned(ot_state* rt, ot_value* port, const char* bytes, size_t n, bool waits) {
   if (!write_lock(rt, port)) return false;
   if (waits && rt->pending_output == *port) return flush(rt, port);
   oti_port_obj* p = port_object(*port);
@@ -879,8 +877,8 @@ static bool append(ot_state* rt, ot_value* port, const char* bytes, size_t n) {
   return true;
 }
 
-static ot_value port_print_values(ot_state* rt, ot_value p, size_t first, size_t count,
-                                  bool write, bool line) {
+static ot_value port_print_values(ot_state* rt, ot_value p, size_t first, size_t count, bool write,
+                                  bool line) {
   if (rt->threads) oti_thread_io_retry(rt);
   if (!p || !check(rt, p, false)) return 0;
   char* bytes = NULL;

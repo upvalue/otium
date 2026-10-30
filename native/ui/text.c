@@ -64,9 +64,9 @@ static bool init_text(void) {
 }
 
 const char* otui_font_builtin(int face) {
-  return face == 1 ? OTUI_FONT_DIR "/JetBrainsMono.ttf"
-       : face == 0 ? OTUI_FONT_DIR "/NotoSans.ttf"
-                   : NULL;
+  return face == 1   ? OTUI_FONT_DIR "/JetBrainsMono.ttf"
+         : face == 0 ? OTUI_FONT_DIR "/NotoSans.ttf"
+                     : NULL;
 }
 
 static TTF_Font* open_file(const char* path, int index, float size) {
@@ -167,7 +167,8 @@ static TTF_Font* face_font(int face, float size) {
     return NULL;
   }
   Face* f = face >= 2 ? &faces[face - 2] : NULL;
-  TTF_Font* font = f ? open_file(f->path, f->index, size) : TTF_OpenFont(otui_font_builtin(face), size);
+  TTF_Font* font =
+      f ? open_file(f->path, f->index, size) : TTF_OpenFont(otui_font_builtin(face), size);
   if (!font) return NULL;
   if (f) {
     if (f->style) TTF_SetFontStyle(font, f->style);
@@ -296,7 +297,8 @@ int otui_text_cell(const char* bytes, int len, int face, float size, float scale
   for (Uint32 probe = 0;; ++probe) {
     CellEntry* e = &cells[(hash + probe) % CELL_SLOTS];
     if (!e->len) break;
-    if (e->face == face && e->size == size && e->len == len && memcmp(e->bytes, bytes, (size_t)len) == 0) {
+    if (e->face == face && e->size == size && e->len == len &&
+        memcmp(e->bytes, bytes, (size_t)len) == 0) {
       *ops = &cell_ops[e->first];
       return e->count;
     }

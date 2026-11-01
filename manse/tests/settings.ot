@@ -7,10 +7,12 @@
 (settings/configure! {:font-size 18 :padding 0 :terminals 1})
 (check "custom font" 18 (settings/options :font-size))
 (check "zero padding" 0 (settings/options :padding))
+(settings/configure! {:terminals 0})
+(check "zero terminals accepted" 0 (settings/options :terminals))
 (check "validation rejects before mutation"
        #t
        (try
-         (settings/configure! {:font-size 20 :terminals 0})
+         (settings/configure! {:font-size 20 :terminals -1})
          #f
          (catch (error? _) #t)))
 (check "invalid batch leaves prior values" 18 (settings/options :font-size))

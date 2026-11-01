@@ -6,8 +6,9 @@
 (require manse.session :as sessions)
 (require manse.strip :as strip)
 (require manse.sysinfo :as sysinfo)
-(require manse.terminal :as terminal)
-(require manse.echo :as echo)
+(require manse.apps.terminal :as terminal)
+(require manse.apps.echo :as echo)
+(require manse.apps.development :as development)
 (require manse.pty :as pty)
 (require manse.settings :as settings)
 (require manse.theme :as theme)
@@ -45,6 +46,11 @@
     (add-app! (str "Terminal " id)
               (terminal/open-shell! id (or (workspace :shell) (process/getenv "SHELL") "/bin/sh")))))
 
+(def (new-development!)
+  (let ((id (add-app! "Development" (development/open! ((workspace :apps) :next-id)))))
+    (strip/width-step! (workspace :strip) 1)
+    id))
+
 (def (new-echo!)
   (add-app! "Echo" (terminal/open! ((workspace :apps) :next-id) (echo/start))))
 
@@ -56,7 +62,8 @@
 
 (def bindings
   "Key, label for the help panel, action and description."
-  [["Meta+T" "Cmd+T" :new "New terminal to the right"]
+  [["Meta+D" "Cmd+D" :development "Open a live development workspace"]
+   ["Meta+T" "Cmd+T" :new "New terminal to the right"]
    ["Meta+E" "Cmd+E" :echo "New echo program to the right"]
    ["Meta+W" "Cmd+W" :close "Close the focused column"]
    ["Meta+Left" "Cmd+Left" :left "Focus the column to the left"]
@@ -88,6 +95,7 @@
           ((:cancel) (strip/hints-cancel! s))
           ((:new) (new-terminal!))
           ((:echo) (new-echo!))
+          ((:development) (new-development!))
           ((:close) (put! workspace :closed-column? #t) (when (strip/focused s) (close-app! (strip/focused s))))
           ((:left) (strip/focus-move! s -1))
           ((:right) (strip/focus-move! s 1))

@@ -1,6 +1,6 @@
 ;; Programs on a Tty: cooked-mode editing, echo, end of input, interrupts and failures.
 (require manse.tty :as tty)
-(require manse.echo :as echo)
+(require manse.apps.echo :as echo)
 (require manse.backend :as backend)
 (require otium.thread :as thread)
 (require otium.test :refer (check report))

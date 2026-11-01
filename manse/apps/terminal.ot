@@ -1,4 +1,4 @@
-(ns manse.terminal)
+(ns manse.apps.terminal)
 (require otium.time :as time)
 (require otium.ui :as ui)
 (require otium.gfx :as gfx)
@@ -264,8 +264,12 @@ advance, and its line height times :line-height."
              (session :cell-w-px)
              (session :cell-h-px)
              color
-             (bitwise-ior (if (> (bitwise-and flags g/UNDERLINE) 0) 1 0)
-                          (if (> (bitwise-and flags g/STRIKETHROUGH) 0) 2 0))))
+             (bitwise-ior (if (> (bitwise-and flags g/UNDERLINE) 0)
+                              1
+                              0)
+                          (if (> (bitwise-and flags g/STRIKETHROUGH) 0)
+                              2
+                              0))))
 
 (def (faint fg bg)
   "fg halfway to bg, for faint text."
@@ -295,11 +299,7 @@ advance, and its line height times :line-height."
     (unless (session :cell-w)
       (let ((scale (native/gpu-scale (g :renderer)))
             (m (cell-metrics (g :renderer) (native/gpu-scale (g :renderer)))))
-        (put! session
-              :cell-w-px (car m)
-              :cell-h-px (cadr m)
-              :cell-w (/ (car m) scale)
-              :cell-h (/ (cadr m) scale))))
+        (put! session :cell-w-px (car m) :cell-h-px (cadr m) :cell-w (/ (car m) scale) :cell-h (/ (cadr m) scale))))
     (when fit? (fit! session bounds))
     (let ((cw (session :cell-w))
           (ch (session :cell-h))

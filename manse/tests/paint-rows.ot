@@ -1,7 +1,7 @@
 ;; lint: allow-file(rest-arguments) instrumentation accepts the intercepted function arities
 ;; Headless row-cache regression checks. Run from the repository root: ./otium -L . manse/tests/paint-rows.ot
-(require manse.terminal)
-(ns manse.terminal)
+(require manse.apps.terminal)
+(ns manse.apps.terminal)
 (require otium.process :as process)
 (require otium.ui.gpu :as gpu)
 
@@ -94,7 +94,7 @@
 
 ;; lint: allow(unbound-name) Replace the loaded namespace binding for this test.
 (set! colors (fn (term) (put (saved-colors term) :background '(17 34 51))))
-(ns manse.terminal)
+(ns manse.apps.terminal)
 (draw! "")
 (check "default colour change paints every row" (s :rows) row-paints)
 (draw! "")
@@ -103,7 +103,7 @@
 
 ;; lint: allow(unbound-name) Restore the loaded namespace binding.
 (set! colors saved-colors)
-(ns manse.terminal)
+(ns manse.apps.terminal)
 (set! paint-row
       (fn args
         (set! row-paints (+ 1 row-paints))

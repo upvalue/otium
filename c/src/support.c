@@ -365,7 +365,43 @@ static ot_value support_substring(ot_state* rt, size_t first, size_t count) {
   return oti_text_from(rt, K_STRING, v, a, b - a);
 }
 
+/* Bounded UTF-8 chunks, with a byte cursor: (text next-byte total-bytes).
+ * Unlike substring this never rescans the prefix. No conversion of the source. */
+static ot_value support_text_chunk(ot_state* rt, size_t first, size_t count) {
+  if (!oti_check_arity(rt, "text-chunk", count, 3, 3)) return 0;
+  ot_value source = rt->stack[first];
+  if (!(oti_kind(source, K_STRING) || oti_kind(source, K_SYMBOL) || oti_kind(source, K_KEYWORD)) ||
+      !ot_is_int(rt->stack[first + 1]) || !ot_is_int(rt->stack[first + 2]))
+    return oti_fail(rt, "text-chunk expects text, byte offset and byte budget");
+  intptr_t offset = ot_to_int(rt->stack[first + 1]), budget = ot_to_int(rt->stack[first + 2]);
+  size_t n = oti_bytes_length(source);
+  if (offset < 0 || (size_t)offset > n || budget < 4 || budget > 4096)
+    return oti_fail(rt, "invalid text chunk bounds (budget 4..4096)");
+  const unsigned char* bytes = oti_bytes_data(source);
+  if ((size_t)offset < n && (bytes[offset] & 0xc0) == 0x80)
+    return oti_fail(rt, "text chunk offset splits a UTF-8 character");
+  size_t end = (size_t)offset, limit = n - end < (size_t)budget ? n : end + (size_t)budget;
+  uint32_t cp;
+  while (end < limit) {
+    size_t next = oti_utf8_next((const char*)bytes, n, end, &cp);
+    if (next > limit) break;
+    end = next;
+  }
+  ot_value live[] = {oti_text_from(rt, K_STRING, source, (size_t)offset, end - (size_t)offset),
+                     OT_NIL};
+  if (!live[0]) return 0;
+  oti_roots roots;
+  oti_roots_push(&rt->heap, &roots, live, 2);
+  live[1] = oti_cons(rt, ot_int((intptr_t)n), OT_EMPTY);
+  if (live[1]) live[1] = oti_cons(rt, ot_int((intptr_t)end), live[1]);
+  if (live[1]) live[1] = oti_cons(rt, live[0], live[1]);
+  ot_value result = live[1];
+  oti_roots_pop(&rt->heap, &roots);
+  return result;
+}
+
 const oti_builtin_def oti_support_builtins[] = {
+    {B_TEXT_CHUNK, "text-chunk", support_text_chunk},
     {B_SYMBOL_P, "symbol?", support_symbol_p},
     {B_KEYWORD_P, "keyword?", support_keyword_p},
     {B_STRING_P, "string?", support_string_p},

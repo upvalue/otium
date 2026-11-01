@@ -50,22 +50,6 @@
                       (f form start))
                     (loop)))))))
 
-(def- (run-form space form)
-  (cond
-    ((not %threaded) (%eval-in space form))
-    ((and (pair? form) (eq? (car form) 'begin))
-     (let ((result nil))
-       (for ((child :in (cdr form)))
-         (set! result (run-form space child))
-         (set! space (current-ns)))
-       result))
-    (else (let ((prepared (%prepare-in space form)))
-            (cond
-              ((= (get prepared 0) 1) ((get prepared 1)))
-              ((= (get prepared 0) 2) (run-form space (get prepared 1)))
-              ((= (get prepared 0) 3) ((get prepared 1)) nil)
-              (else (get prepared 1)))))))
-
 (def (%evaluate code space path)
   "Evaluate each form in code, in the namespace named space, capturing output and any condition."
   (let ((output (open-output-string))
@@ -82,7 +66,7 @@
           (each-form code
                      (fn (form start)
                        (set! line start)
-                       (set! results (cons (%repr (run-form space form)) results))
+                       (set! results (cons (%repr (evaluate-form space form)) results))
                        (when %threaded (set! space (current-ns)))
                        (when (and (pair? form) (eq? (car form) 'ns) (pair? (cdr form)) (symbol? (cadr form)))
                          (set! space (cadr form)))))

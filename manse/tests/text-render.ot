@@ -1,8 +1,8 @@
 ;; Headless checks on how terminal text lands in its cells: whole-pixel cells,
 ;; box drawing that joins across cells, one grapheme per column, styles and
 ;; fallback. Run from the repository root: ./otium -L . manse/tests/text-render.ot
-(require manse.terminal)
-(ns manse.terminal)
+(require manse.apps.terminal)
+(ns manse.apps.terminal)
 (require otium.process :as process)
 (require otium.ui.gpu :as gpu)
 (require otium.sdl :as sdl)

@@ -1,0 +1,74 @@
+(ns manse.apps.development.inspect)
+
+(def page-size 64)
+
+(def (text-preview text)
+  (let ((chunk (text-chunk text 0 128)))
+    (str (car chunk)
+         (if (< (cadr chunk) (caddr chunk))
+             "…"
+             ""))))
+
+(def (summary value)
+  "Shallow, bounded, built-in summaries only. Never calls a user printer."
+  (case (type value)
+    ((:nil) "nil")
+    ((:null) "()")
+    ((:boolean :int :float :char) (str value))
+    ((:string) (str "\"" (text-preview value) "\""))
+    ((:symbol :keyword) (text-preview value))
+    ((:array) (str "array · " (length value) " items"))
+    ((:table) (str "table · " (length value) " entries"))
+    ((:bytevector) (str "bytes · " (bytevector-length value)))
+    ((:pair) "pair/list · length unknown")
+    (else (str (type value)))))
+
+(def (row label value)
+  ;; Wrap values: putting nil in a table would delete the field.
+  {:label label :preview (summary value) :reference [value]})
+
+(def (page value cursor)
+  "A bounded live observation, not a deep snapshot. cursor is provider-specific."
+  (let ((rows []))
+    (case (type value)
+      ((:array :bytevector)
+       (let ((start (or cursor 0))
+             (end (min (+ start page-size) (length value))))
+         (for ((i :range start end))
+           (push! rows (row (str i) (get value i))))
+         {:rows rows :next end :done? (>= end (length value))}))
+      ((:table)
+       (let ((scan (table-scan value
+                               (if cursor
+                                   (car cursor)
+                                   -1)
+                               (if cursor
+                                   (cadr cursor)
+                                   0)))
+             (entries (reverse (nth scan 4))))
+         (for-each (fn (entry) (push! rows (row (summary (car entry)) (cdr entry)))) entries)
+         {:rows rows :next (list (car scan) (cadr scan)) :done? (nth scan 2) :scanned (nth scan 3)}))
+      ((:pair)
+       (let ((rest (if cursor
+                       (nth cursor 0)
+                       value))
+             (index (if cursor
+                        (nth cursor 1)
+                        0))
+             (seen [])
+             (done? #f))
+         (while (and (not done?) (< (length rows) page-size))
+           (cond
+             ((null? rest) (set! done? #t))
+             ((exists (fn (old) (eq? old rest)) seen) (push! rows (row "↩ cycle" rest)) (set! done? #t))
+             ((pair? rest)
+              (push! seen rest)
+              (push! rows (row (str index) (car rest)))
+              (set! rest (cdr rest))
+              (set! index (+ index 1)))
+             (else (push! rows (row "dotted tail" rest)) (set! done? #t))))
+         {:rows rows :next [rest index] :done? (or done? (null? rest))}))
+      ((:string :symbol :keyword)
+       (let ((chunk (text-chunk value (or cursor 0) 1024)))
+         {:rows [] :text (car chunk) :next (cadr chunk) :done? (= (cadr chunk) (caddr chunk)) :bytes (caddr chunk)}))
+      (else {:rows [] :done? #t :text "No automatic field access for this value."}))))

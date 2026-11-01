@@ -1,5 +1,5 @@
 ;; Wheel motion over a terminal: scrollback, mouse reports and the alternate screen.
-(require manse.terminal :as terminal)
+(require manse.apps.terminal :as terminal)
 (require manse.ghostty :as g)
 (require manse.pty :as pty)
 (require manse.session :as sessions)

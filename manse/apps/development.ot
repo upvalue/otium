@@ -1,0 +1,184 @@
+(ns manse.apps.development)
+(require manse.apps :as apps)
+(require manse.ghostty :as ghostty)
+(require manse.apps.terminal :as terminal)
+(require manse.apps.development.model :as model)
+(require manse.apps.development.inspect :as inspect)
+(require manse.apps.development.repl :as repl)
+(require manse.apps.development.paged-list :as paged)
+(require otium.dev :as dev)
+(require otium.ui :as ui)
+(require manse.theme :as theme)
+
+(defclass DevelopmentApp
+  :is apps/App
+  state
+  repl-state
+  terminal
+  (tab :init :namespaces)
+  (selected-row :init #f)
+  (jump :init ""))
+
+(def (open! id)
+  (let ((state (model/new))
+        (repl-state {:namespace "user" :result #f :busy? #f}))
+    (let ((term (terminal/open! id (repl/start repl-state))))
+      (try
+        (begin
+          (ghostty/limit-scrollback! ((term :session) :term) 4194304 2000)
+          (make DevelopmentApp :state state :repl-state repl-state :terminal term))
+        (catch problem
+          (apps/close! term)
+          (error problem))))))
+
+(defmethod (apps/info (app DevelopmentApp))
+  {:kind :development
+   :status (if ((app :state) :closed?)
+               :closed
+               :running)
+   :title (str "Development · " ((app :repl-state) :namespace))})
+
+(defmethod (apps/step! (app DevelopmentApp))
+  (let ((changed? (apps/step! (app :terminal)))) (or (model/step! (app :state)) changed?)))
+
+(defmethod (apps/close! (app DevelopmentApp))
+  (apps/close! (app :terminal))
+  (model/close! (app :state))
+  (put! (app :repl-state) :result #f))
+
+(def (button text action)
+  (ui/button {:padding 5 :on-press action} (ui/label {:size 12} text)))
+
+(def (open-value! app value label)
+  (model/select! (app :state) value label)
+  (set! (app :tab) :value)
+  (set! (app :selected-row) #f))
+
+(def (choose-binding! app entry)
+  (put! (app :state) :binding (car entry))
+  (try
+    (open-value! app (dev/%binding-value (car entry)) (cadr entry))
+    (catch _problem (put! (app :state) :error "Binding is no longer available."))))
+
+(def (catalog-view app)
+  (let ((names? (eq? (app :tab) :namespaces))
+        (catalog ((app :state)
+                  (if names?
+                      :namespaces
+                      :bindings)))
+        (rows (map (fn (entry)
+                     {:key (car entry)
+                      :entry entry
+                      :text (str (cadr entry)
+                                 (if (nth entry 4)
+                                     "… · "
+                                     " · ")
+                                 (nth entry 2)
+                                 (if (nth entry 3)
+                                     ""
+                                     " · private"))})
+                   (catalog :rows))))
+    (ui/column {:grow 1 :gap 4}
+               (ui/text-field {:key (if names?
+                                        :namespace-search
+                                        :binding-search)
+                               :height 30
+                               :size 13
+                               :value (catalog :query)
+                               :placeholder "Filter names"
+                               :on-change (fn (text) (model/search! catalog text))})
+               (paged/view (app :tab)
+                           rows
+                           (app :selected-row)
+                           (fn (row)
+                             (set! (app :selected-row) (row :key))
+                             (let ((entry (row :entry)))
+                               (if names?
+                                   (begin
+                                     (put! (app :state) :bindings (model/catalog (car entry)) :namespace (cadr entry))
+                                     (unless (nth entry 4) (put! (app :repl-state) :namespace (cadr entry)))
+                                     (set! (app :tab) :bindings))
+                                   (choose-binding! app entry)))))
+               (ui/row {:gap 4}
+                       (button "Refresh" (fn () (model/search! catalog (catalog :query))))
+                       (button "Next page" (fn () (model/next-catalog! catalog)))
+                       (button "Cancel" (fn () (put! catalog :pending? #f)))
+                       (ui/label {:size 12}
+                                 (cond
+                                   ((catalog :pending?) "Searching…")
+                                   ((catalog :done?) "End")
+                                   (else "More available")))))))
+
+(def (value-view app)
+  (let ((state (app :state))
+        (page (state :page))
+        (rows (map (fn (row) {:key (row :label) :row row :text (str (row :label) "  " (row :preview))}) (page :rows))))
+    (ui/column {:grow 1 :gap 4}
+               (ui/label {:size 13 :wrap #f} (str (state :label) " · live observation"))
+               (ui/row {:gap 4}
+                       (button "Back" (fn () (model/back! state)))
+                       (button "Refresh object" (fn () (model/refresh! state)))
+                       (button "Resolve binding"
+                               (fn ()
+                                 (when (state :binding)
+                                   (try
+                                     (open-value! app (dev/%binding-value (state :binding)) (state :label))
+                                     (catch _problem (put! state :error "Binding unavailable."))))))
+                       (button "Release"
+                               (fn ()
+                                 (put! state
+                                       :selected #f
+                                       :history []
+                                       :binding #f
+                                       :cursor #f
+                                       :pending? #f
+                                       :page {:rows [] :done? #t})
+                                 (put! (app :repl-state) :result #f))))
+               (if (page :text)
+                   (ui/scroll {:grow 1 :height 240} (ui/label {:size 13} (page :text)))
+                   (paged/view :values rows
+                               (app :selected-row)
+                               (fn (entry)
+                                 (let ((row (entry :row))) (open-value! app (get (row :reference) 0) (row :label))))))
+               (ui/row {:gap 4}
+                       (button "Next page" (fn () (model/next! state)))
+                       (button "Cancel" (fn () (model/cancel! state)))
+                       (ui/text-field {:key :jump
+                                       :width 120
+                                       :height 28
+                                       :size 12
+                                       :placeholder "Array index"
+                                       :value (app :jump)
+                                       :on-change (fn (text) (set! (app :jump) text))
+                                       :on-submit (fn (_)
+                                                    (let ((n (string->number (app :jump)))
+                                                          (selected (state :selected)))
+                                                      (when (and selected
+                                                                 (array? (nth selected 0))
+                                                                 (integer? n)
+                                                                 (>= n 0))
+                                                        (put! state :cursor n :pending? #t))))})
+                       (ui/label {:size 12}
+                                 (cond
+                                   ((state :pending?) "Loading…")
+                                   ((page :done?) "End")
+                                   (else "More available"))))
+               (ui/label {:size 12 :color theme/red} (state :error)))))
+
+(defmethod (apps/view (app DevelopmentApp))
+  (ui/column {:grow 1 :gap 4}
+             (ui/row {:gap 4}
+                     (button "Namespaces" (fn () (set! (app :tab) :namespaces)))
+                     (button "Bindings" (fn () (set! (app :tab) :bindings)))
+                     (button "Value" (fn () (set! (app :tab) :value)))
+                     (button "Inspect result"
+                             (fn ()
+                               (when ((app :repl-state) :result)
+                                 (open-value! app (get ((app :repl-state) :result) 0) "REPL result")))))
+             (ui/column {:height 360 :gap 4}
+                        (if (eq? (app :tab) :value)
+                            (value-view app)
+                            (catalog-view app)))
+             (ui/label {:size 12 :color theme/muted}
+                       "REPL · Manse's live runtime · results retained until replaced/released")
+             (apps/view (app :terminal))))

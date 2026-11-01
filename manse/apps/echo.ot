@@ -1,4 +1,4 @@
-(ns manse.echo)
+(ns manse.apps.echo)
 (require manse.tty :as tty)
 
 ;; Repeats each line typed into it. Ctrl+D ends it.

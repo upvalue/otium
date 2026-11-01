@@ -102,6 +102,7 @@ ot_value oti_table_new(ot_state* rt) {
   if (table) {
     oti_table_obj* t = oti_as_table(table);
     t->count = t->used = t->capacity = 0;
+    t->revision = 0;
   }
   return table;
 }
@@ -147,6 +148,7 @@ ot_value oti_table_set(ot_state* rt, ot_value table, ot_value key, ot_value valu
       entries(table)[2 * entry] = OT_NIL;
       buckets(table)[slot] = UINT32_MAX;
       oti_as_table(table)->count--;
+      oti_as_table(table)->revision++;
     }
     return table;
   }
@@ -166,6 +168,7 @@ ot_value oti_table_set(ot_state* rt, ot_value table, ot_value key, ot_value valu
   }
   entry = oti_as_table(table)->used++;
   oti_as_table(table)->count++;
+  oti_as_table(table)->revision++;
   entries(table)[2 * entry] = key;
   entries(table)[2 * entry + 1] = value;
   buckets(table)[slot] = (uint32_t)entry + 1;
@@ -295,7 +298,47 @@ ot_value oti_table_pop_builtin(ot_state* rt, size_t first, size_t count) {
   return table_unsupported(rt, first, count);
 }
 
+/* General bounded table scan. Result: (revision next done? scanned entries).
+ * Each entry is (key . value). Replacements are live; membership changes fail.
+ * At most 64 entries and 512 physical slots per call, including tombstones. */
+static ot_value table_scan(ot_state* rt, size_t first, size_t count) {
+  if (!oti_check_arity(rt, "table-scan", count, 3, 3)) return 0;
+  if (!oti_kind(rt->stack[first], K_TABLE) || !ot_is_int(rt->stack[first + 1]) ||
+      !ot_is_int(rt->stack[first + 2]))
+    return oti_fail(rt, "table-scan expects table, revision and offset");
+  intptr_t expected = ot_to_int(rt->stack[first + 1]), start = ot_to_int(rt->stack[first + 2]);
+  uint64_t revision = oti_as_table(rt->stack[first])->revision;
+  if (start < 0 || (size_t)start > oti_as_table(rt->stack[first])->used)
+    return oti_fail(rt, "invalid table scan offset");
+  if (expected != -1 && (uint64_t)expected != revision)
+    return oti_fail(rt, "table changed; restart scan");
+  ot_value live[] = {rt->stack[first], OT_EMPTY, OT_NIL};
+  oti_roots roots;
+  oti_roots_push(&rt->heap, &roots, live, 3);
+  size_t at = (size_t)start, scanned = 0, found = 0;
+  bool ok = true;
+  while (ok && at < oti_as_table(live[0])->used && scanned < 512 && found < 64) {
+    size_t slot = at++;
+    scanned++;
+    if (entries(live[0])[2 * slot + 1] == OT_NIL) continue;
+    live[2] = oti_cons(rt, entries(live[0])[2 * slot], entries(live[0])[2 * slot + 1]);
+    ok = live[2] && (live[1] = oti_cons(rt, live[2], live[1]));
+    found++;
+  }
+  if (ok) {
+    live[1] = oti_cons(rt, live[1], OT_EMPTY);
+    if (live[1]) live[1] = oti_cons(rt, ot_int((intptr_t)scanned), live[1]);
+    if (live[1]) live[1] = oti_cons(rt, ot_bool(at == oti_as_table(live[0])->used), live[1]);
+    if (live[1]) live[1] = oti_cons(rt, ot_int((intptr_t)at), live[1]);
+    if (live[1]) live[1] = oti_cons(rt, ot_int((intptr_t)revision), live[1]);
+  }
+  ot_value result = ok ? live[1] : 0;
+  oti_roots_pop(&rt->heap, &roots);
+  return result;
+}
+
 const oti_builtin_def oti_table_builtins[] = {
+    {B_TABLE_SCAN, "table-scan", table_scan},
     {B_TABLE, "table", table_table},
     {B_TABLE_P, "table?", table_table_p},
     {B_KEYS, "keys", table_keys},

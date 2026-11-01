@@ -1,0 +1,100 @@
+(ns manse.apps.development.model)
+(require manse.apps.development.inspect :as inspect)
+(require otium.dev :as dev)
+
+(def (catalog space)
+  {:space space :offset 0 :end -1 :query "" :rows [] :done? #f :pending? #t})
+
+(def (search! catalog query)
+  (put! catalog :query (car (text-chunk query 0 128)) :offset 0 :end -1 :rows [] :done? #f :pending? #t))
+
+(def (next-catalog! catalog)
+  (unless (catalog :done?) (put! catalog :rows [] :pending? #t)))
+
+(def (step-catalog! catalog)
+  ;; One bounded scan per frame. At most 64 retained rows, even while filtering.
+  (when (catalog :pending?)
+    (let ((page (dev/%catalog (catalog :space) (catalog :offset) (catalog :end)))
+          (rows (catalog :rows)))
+      (for-each (fn (entry)
+                  (when (and (< (length rows) 64) (string-contains? (cadr entry) (catalog :query))) (push! rows entry)))
+                (reverse (nth page 2)))
+      (put! catalog :offset (car page) :end (cadr page) :done? (= (car page) (cadr page)))
+      (when (or (catalog :done?) (> (length rows) 0)) (put! catalog :pending? #f))
+      #t)))
+
+(def (new)
+  {:namespaces (catalog -1)
+   :bindings (catalog 0)
+   :namespace "user"
+   :binding #f
+   :selected #f
+   :history []
+   :cursor #f
+   :page {:rows [] :done? #t}
+   :pending? #f
+   :closed? #f
+   :generation 0
+   :error ""
+   :label "Select a binding"})
+
+(def (select! state value label)
+  (unless (state :closed?)
+    (when (state :selected)
+      (push! (state :history) [(state :selected) (state :label)])
+      (when (> (length (state :history)) 32) (put! state :history (drop 1 (state :history)))))
+    (put! state
+          :selected [value]
+          :label label
+          :cursor #f
+          :page {:rows [] :done? #t}
+          :pending? #t
+          :error ""
+          :generation (+ 1 (state :generation)))))
+
+(def (back! state)
+  (when (> (length (state :history)) 0)
+    (let ((previous (pop! (state :history))))
+      (put! state
+            :selected (nth previous 0)
+            :label (nth previous 1)
+            :cursor #f
+            :pending? #t
+            :error ""
+            :generation (+ 1 (state :generation))))))
+
+(def (refresh! state)
+  (put! state :cursor #f :pending? #t :error "" :generation (+ 1 (state :generation))))
+
+(def (next! state)
+  (unless ((state :page) :done?)
+    (put! state :cursor ((state :page) :next) :pending? #t :generation (+ 1 (state :generation)))))
+
+(def (cancel! state)
+  (put! state :pending? #f :generation (+ 1 (state :generation)))
+  (put! (state :namespaces) :pending? #f)
+  (put! (state :bindings) :pending? #f))
+
+(def (step! state)
+  (unless (state :closed?)
+    (let ((changed? (step-catalog! (state :namespaces))))
+      (when (step-catalog! (state :bindings)) (set! changed? #t))
+      (when (and (state :pending?) (state :selected))
+        (let ((generation (state :generation))
+              (selected (state :selected))
+              (cursor (state :cursor)))
+          (try
+            (let ((page (inspect/page (nth selected 0) cursor)))
+              (when (and (not (state :closed?)) (= generation (state :generation)))
+                (put! state :page page :pending? #f :error "")))
+            (catch _problem
+              (when (= generation (state :generation))
+                (put! state :pending? #f :error "Value changed or cannot be inspected; refresh to retry.")))))
+        (set! changed? #t))
+      changed?)))
+
+(def (close! state)
+  (cancel! state)
+  (put! state :closed? #t :selected #f :history [] :binding #f :cursor #f :page {:rows [] :done? #t})
+  (put! (state :namespaces) :rows [])
+  (put! (state :bindings) :rows []))

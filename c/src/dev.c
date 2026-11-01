@@ -238,6 +238,101 @@ static ot_value dev_namespace_bindings(ot_state* rt, size_t first, size_t count)
   return ok ? v[0] : 0;
 }
 
+/* Catalog pages in stable runtime index order, not sorted. space=-1 lists
+ * namespaces; otherwise it is a namespace ID. end=-1 captures a high watermark.
+ * Result (next end rows); row (id bounded-name kind public? truncated?). */
+static ot_value dev_catalog(ot_state* rt, size_t first, size_t count) {
+  if (!oti_check_arity(rt, "otium.dev/%catalog", count, 3, 3)) return 0;
+  for (size_t i = 0; i < 3; i++)
+    if (!ot_is_int(rt->stack[first + i])) return oti_fail(rt, "catalog expects integer cursors");
+  intptr_t space = ot_to_int(rt->stack[first]), start = ot_to_int(rt->stack[first + 1]);
+  intptr_t stop = ot_to_int(rt->stack[first + 2]);
+  if (space < -1 || (space >= 0 && (size_t)space >= rt->namespace_count))
+    return oti_fail(rt, "unknown namespace ID");
+  size_t total = space == -1 ? rt->namespace_count : rt->global_count;
+  if (stop == -1) stop = (intptr_t)total;
+  if (start < 0 || stop < start || (size_t)stop > total)
+    return oti_fail(rt, "invalid catalog cursor");
+  ot_value live[] = {OT_EMPTY, OT_NIL, OT_NIL};
+  oti_roots roots;
+  oti_roots_push(&rt->heap, &roots, live, 3);
+  size_t at = (size_t)start, scanned = 0, found = 0;
+  bool ok = true;
+  while (ok && at < (size_t)stop && scanned++ < 512 && found < 64) {
+    size_t id = at++;
+    const char* name;
+    size_t length;
+    bool is_public = true, truncated = false;
+    const char* kind = "namespace";
+    if (space == -1) {
+      name = rt->namespaces[id];
+      length = strnlen(name, 257);
+      truncated = length > 256;
+      if (truncated) length = 256;
+    } else {
+      const oti_global_info* info = &rt->global_info[id];
+      if (info->space != (uint32_t)space || !info->defined ||
+          oti_unbound(oti_global_value(rt, (uint32_t)id)))
+        continue;
+      name = info->name;
+      length = info->length < 256 ? info->length : 256;
+      truncated = info->length > 256;
+      is_public = !info->is_private;
+      kind = info->macro                                         ? "macro"
+             : oti_procedure(oti_global_value(rt, (uint32_t)id)) ? "function"
+                                                                 : "value";
+    }
+    /* Names are previews, never used to resolve the selected binding. */
+    while (length && ((unsigned char)name[length] & 0xc0) == 0x80) length--;
+    live[1] = oti_text(rt, K_STRING, name, length);
+    live[2] = live[1] ? dev_string(rt, kind) : 0;
+    if (live[2]) {
+      ot_value tail = oti_cons(rt, ot_bool(truncated), OT_EMPTY);
+      if (tail) tail = oti_cons(rt, ot_bool(is_public), tail);
+      live[2] = tail ? oti_cons(rt, live[2], tail) : 0;
+    }
+    if (live[2]) live[2] = oti_cons(rt, live[1], live[2]);
+    if (live[2]) live[2] = oti_cons(rt, ot_int((intptr_t)id), live[2]);
+    ok = live[2] && dev_push(rt, &live[0], &live[2]);
+    found++;
+  }
+  if (ok) {
+    live[0] = oti_cons(rt, live[0], OT_EMPTY);
+    if (live[0]) live[0] = oti_cons(rt, ot_int(stop), live[0]);
+    if (live[0]) live[0] = oti_cons(rt, ot_int((intptr_t)at), live[0]);
+  }
+  ot_value result = ok ? live[0] : 0;
+  oti_roots_pop(&rt->heap, &roots);
+  return result;
+}
+
+static ot_value dev_binding_value(ot_state* rt, size_t first, size_t count) {
+  intptr_t id;
+  if (!dev_integer(rt, "otium.dev/%binding-value", first, count, &id)) return 0;
+  if (id < 0 || (size_t)id >= rt->global_count || !rt->global_info[id].defined ||
+      oti_unbound(oti_global_value(rt, (uint32_t)id)))
+    return oti_fail(rt, "binding no longer available");
+  return oti_global_value(rt, (uint32_t)id);
+}
+
+/* The same completeness scanner used by the CLI. Bounded input, no evaluation. */
+static ot_value dev_scan_source(ot_state* rt, size_t first, size_t count) {
+  if (!oti_check_arity(rt, "otium.dev/%scan-source", count, 1, 1)) return 0;
+  if (!oti_kind(rt->stack[first], K_STRING)) return oti_fail(rt, "expected source string");
+  size_t length = oti_bytes_length(rt->stack[first]);
+  if (length > 16384) return oti_fail(rt, "REPL input exceeds 16 KiB");
+  const char* source = (const char*)oti_bytes_data(rt->stack[first]);
+  size_t start = 0, end, error_offset;
+  const char* error;
+  for (;;) {
+    ot_form_status status = ot_scan_form(source, length, start, &end, &error, &error_offset);
+    if (status == OT_FORM_END) return OT_TRUE;
+    if (status == OT_FORM_INCOMPLETE) return OT_FALSE;
+    if (status == OT_FORM_ERROR) return oti_fail(rt, error);
+    start = end;
+  }
+}
+
 /* Evaluate a datum in the named namespace, creating it if needed. A ns form
  * inside it changes the namespace only for that evaluation. */
 static ot_value dev_eval_in(ot_state* rt, size_t first, size_t count) {
@@ -353,6 +448,9 @@ int64_t ot_dev_mtime(const char* path) {
 #endif
 
 const oti_builtin_def oti_dev_builtins[] = {
+    {B_DEV_CATALOG, "otium.dev/%catalog", dev_catalog},
+    {B_DEV_BINDING_VALUE, "otium.dev/%binding-value", dev_binding_value},
+    {B_DEV_SCAN_SOURCE, "otium.dev/%scan-source", dev_scan_source},
     {B_DEV_PREPARE_IN, "otium.dev/%prepare-in", dev_prepare_in},
     {B_DEV_EVAL_IN, "otium.dev/%eval-in", dev_eval_in},
     {B_DEV_SET_PARAM_DEFAULT, "otium.dev/%set-param-default!", dev_set_param_default},

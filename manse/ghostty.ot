@@ -214,7 +214,6 @@
                  ((private %state-get) "ghostty_render_state_get" (pointer int pointer) int #f)
                  ((private %state-set) "ghostty_render_state_set" (pointer int pointer) int #f)
                  ((private %row-set) "ghostty_render_state_row_set" (pointer int pointer) int #f)
-                 ((private %colors-get) "ghostty_render_state_colors_get" (pointer pointer) int #f)
                  ((private %rows-new) "ghostty_render_state_row_iterator_new" (pointer pointer) int #t)
                  ((private %rows-free) "ghostty_render_state_row_iterator_free" (pointer) void #t)
                  ((private %rows-next) "ghostty_render_state_row_iterator_next" (pointer) bool #f)
@@ -530,6 +529,11 @@
   (when (and (state-ref term STATE-CURSOR-VISIBLE 'bool) (state-ref term STATE-CURSOR-VIEWPORT-HAS-VALUE 'bool))
     (list (state-ref term STATE-CURSOR-VIEWPORT-X 'u16) (state-ref term STATE-CURSOR-VIEWPORT-Y 'u16))))
 
+;; Colors are available through the standard sized render-state query.
+;; The old colors_get convenience symbol is absent in current libghostty-vt.
+(def- (%colors-get state output)
+  (%state-get state 19 output))
+
 (def (colors term)
   (let ((c (ffi/alloc Colors 1)))
     (defer
@@ -751,3 +755,14 @@ neither, when manse-native was built without libghostty-vt."
                            (codepoints->string (c :codepoints))))
                      row)))
        (grid term)))
+
+(def (limit-scrollback! term bytes lines)
+  "Bound retained terminal history (Ghostty rounds to whole storage pages)."
+  (let ((value (ffi/alloc 'size-t 1)))
+    (defer
+      (begin
+        (ffi/set! value 'size-t 0 bytes)
+        (check! "scrollback bytes" (%terminal-set (term :handle) 27 value))
+        (ffi/set! value 'size-t 0 lines)
+        (check! "scrollback lines" (%terminal-set (term :handle) 28 value)))
+      (ffi/free! value))))

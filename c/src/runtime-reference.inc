@@ -288,6 +288,8 @@ static const char* oti_runtime_documentation(const char* name) {
     {"type-descriptor?", "(type-descriptor? value)\nTest whether value is a type descriptor, such as a class."},
     {"type-name", "(type-name descriptor)\nReturn the descriptor's name qualified by its namespace, such as user/Point."},
     {"syntax-quote", "(syntax-quote template)\nA quasiquote whose template names resolve where it is written. #`template reads as this form."},
+    {"table-scan", "(table-scan table revision offset)\nBounded live scan returning (revision next done? scanned entries); entries are reversed (key . value) pairs. Pass -1 and 0 to start. Each call examines at most 512 physical slots and returns at most 64 entries. Insert/delete invalidates the revision; replacing a value is allowed. Retain the table with the cursor. This is not a snapshot."},
+    {"text-chunk", "(text-chunk text byte-offset byte-budget)\nRead a bounded UTF-8 chunk from a string, symbol or keyword, returning (chunk next-byte total-bytes). Budget must be 4..4096; offset must be a codepoint boundary. Does not rescan preceding text or copy the whole source."},
   };
   for (size_t i = 0; i < sizeof(entries) / sizeof(*entries); ++i)
     if (!strcmp(name, entries[i].name)) return entries[i].text;

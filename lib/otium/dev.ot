@@ -622,3 +622,20 @@
   (if %threaded
       (thread/join %server)
       (legacy-run)))
+
+;; Shared local evaluation; returns the actual value without printing or a socket.
+(def (evaluate-form space form &optional (native? %threaded))
+  (cond
+    ((not native?) (%eval-in space form))
+    ((and (pair? form) (eq? (car form) 'begin))
+     (let ((result nil))
+       (for ((child :in (cdr form)))
+         (set! result (evaluate-form space child native?))
+         (set! space (current-ns)))
+       result))
+    (else (let ((prepared (%prepare-in space form)))
+            (cond
+              ((= (get prepared 0) 1) ((get prepared 1)))
+              ((= (get prepared 0) 2) (evaluate-form space (get prepared 1) native?))
+              ((= (get prepared 0) 3) ((get prepared 1)) nil)
+              (else (get prepared 1)))))))

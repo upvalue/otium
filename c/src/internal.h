@@ -415,6 +415,11 @@ enum {
   /* Compiler-only helpers have no name, so they aren't globals. */
   B_QQ_APPEND,
   B_EVAL_IN_NAMESPACE,
+  B_TABLE_SCAN,
+  B_TEXT_CHUNK,
+  B_DEV_CATALOG,
+  B_DEV_BINDING_VALUE,
+  B_DEV_SCAN_SOURCE,
   B_COUNT
 };
 
@@ -1372,6 +1377,7 @@ typedef struct {
   oti_object_header header;
   ot_value data;
   size_t count, used, capacity;
+  uint64_t revision;
 } oti_table_obj;
 
 OTI_LAYOUT(oti_table_obj, 1, count);

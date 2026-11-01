@@ -1,0 +1,65 @@
+(ns manse.apps.development.paged-list)
+(require otium.ui :as ui)
+(require manse.theme :as theme)
+
+(defclass PagedList
+  :is ui/Widget
+  rows
+  choose
+  (selected :init 0 :state #t))
+
+(defmethod (ui/default-focusable? (w PagedList))
+  #t)
+
+(defmethod (ui/repeat-key? (w PagedList) event)
+  (not (not (member (get event :key) '("Up" "Down")))))
+
+(defmethod (ui/layout-style (w PagedList))
+  {:grow 1 :height 240})
+
+(defmethod (ui/handle-event (w PagedList) event)
+  (when (eq? (get event :kind) :key-down)
+    (let ((key (get event :key))
+          (last (- (length (w :rows)) 1)))
+      (cond
+        ((member key '("Up" "Down" "Home" "End"))
+         (set! (w :selected)
+               (max 0
+                    (min last
+                         (cond
+                           ((equal? key "Home") 0)
+                           ((equal? key "End") last)
+                           (else (+ (w :selected)
+                                    (if (equal? key "Up")
+                                        -1
+                                        1)))))))
+         :handled)
+        ((and (equal? key "Return") (>= last 0)) ((w :choose) (get (w :rows) (min (w :selected) last))) :handled)))))
+
+(defmethod (ui/build (w PagedList))
+  (let ((rows (w :rows))
+        (selected (min (w :selected) (- (length rows) 1))))
+    (apply ui/scroll
+           {:axis :y :grow 1 :height 240 :gap 2 :reveal selected}
+           (for ((i :range (length rows))
+                 (out :collect (let ((entry (get rows i))
+                                     (index i))
+                                 (ui/row {:key index
+                                          :padding 5
+                                          :background (if (= index selected)
+                                                          theme/surface
+                                                          theme/background)
+                                          :on-press (fn ()
+                                                      (set! (w :selected) index)
+                                                      ((w :choose) entry))}
+                                         (ui/label {:size 13
+                                                    :wrap #f
+                                                    :color (if (= index selected)
+                                                               theme/accent
+                                                               theme/text)}
+                                                   (entry :text))))))
+             => out))))
+
+(def (view key rows _selected choose)
+  ;; No model objects in properties: bounded presentation rows and callback only.
+  (ui/new PagedList {:key key :rows rows :choose choose}))

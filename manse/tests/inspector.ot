@@ -1,0 +1,93 @@
+(require otium.test :refer (check report fails?))
+(require manse.apps.development.inspect :as inspect)
+(require manse.apps.development.model :as model)
+(require otium.dev :as dev)
+
+(def big (for ((i :range 100000) (out :collect-array 7)) => out))
+
+(check "constant-size array summary" "array · 100000 items" (inspect/summary big))
+(check "array page bounded" 64 (length ((inspect/page big #f) :rows)))
+(check "direct jump to end" 1 (length ((inspect/page big 99999) :rows)))
+(check "nil preserved" nil (get ((get ((inspect/page [nil] #f) :rows) 0) :reference) 0))
+
+(def sample-table {})
+
+(dotimes (i 2000)
+  (put! sample-table i i))
+(dotimes (i 1900)
+  (put! sample-table i nil))
+
+(def first (table-scan sample-table -1 0))
+
+(check "sparse scan bounded" 512 (nth first 3))
+(check "empty page can continue" #f (nth first 2))
+(check "sparse first page empty" '() (nth first 4))
+(put! sample-table 1999 23)
+(check "value replacements allowed" #f (fails? (fn () (table-scan sample-table (car first) (cadr first)))))
+(put! sample-table 3000 1)
+(check "insert invalidates" #t (fails? (fn () (table-scan sample-table (car first) (cadr first)))))
+
+(def scan (table-scan sample-table -1 0))
+
+(put! sample-table 1999 nil)
+(check "delete invalidates" #t (fails? (fn () (table-scan sample-table (car scan) (cadr scan)))))
+(check "invalid cursor" #t (fails? (fn () (table-scan sample-table -1 -1))))
+
+(def text (string-repeat "x" 1000000))
+
+(check "bounded text preview" 129 (string-length (inspect/text-preview text)))
+(check "text detail page bounded" 1024 (string-length ((inspect/page text #f) :text)))
+(check "utf8 chunks" '("éé" 4 6) (text-chunk "ééé" 0 4))
+(check "utf8 continuation" '("é" 6 6) (text-chunk "ééé" 4 4))
+(check "bad utf8 cursor" #t (fails? (fn () (text-chunk "é" 1 4))))
+
+(def cycle (cons 1 '()))
+
+(set-cdr! cycle cycle)
+(check "cyclic list bounded" 2 (length ((inspect/page cycle #f) :rows)))
+
+(def state (model/new))
+
+(model/select! state big "big")
+(model/select! state [42] "latest")
+(model/step! state)
+(check "latest selection wins" "42" ((get ((state :page) :rows) 0) :preview))
+(model/select! state big "cancelled")
+(model/cancel! state)
+(check "cancel stops work" #f (state :pending?))
+(model/close! state)
+(check "close releases selected" #f (state :selected))
+(check "close releases history" 0 (length (state :history)))
+(check "close releases pages" 0 (length ((state :page) :rows)))
+(model/select! state big "closed")
+(check "closed model refuses selection" #f (state :selected))
+
+(def catalog (dev/%catalog -1 0 -1))
+
+(check "namespace page bounded" #t (<= (length (nth catalog 2)) 64))
+(check "catalog invalid cursor" #t (fails? (fn () (dev/%catalog -1 -1 -1))))
+(check "scanner incomplete" #f (dev/%scan-source "(+ 1"))
+(check "scanner multiple forms" #t (dev/%scan-source "(+ 1 2) (+ 3 4)"))
+(check "scanner error" #t (fails? (fn () (dev/%scan-source ")"))))
+
+(defclass Unprinted payload)
+
+(def guarded (make Unprinted :payload big))
+
+(check "objects remain opaque" ":instance" (inspect/summary guarded))
+
+(def cyclic-table {})
+
+(put! cyclic-table :self cyclic-table)
+(check "cyclic tables do not print recursively" 1 (length ((inspect/page cyclic-table #f) :rows)))
+
+(def fresh (model/new))
+
+(model/select! fresh big "array")
+(model/step! fresh)
+(model/next! fresh)
+(pop! big)
+(model/step! fresh)
+(check "array mutation remains bounded" 64 (length ((fresh :page) :rows)))
+(model/close! fresh)
+(report "inspector")

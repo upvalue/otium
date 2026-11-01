@@ -1,5 +1,5 @@
 (require manse.ghostty :as g)
-(require manse.terminal :as terminal)
+(require manse.apps.terminal :as terminal)
 (require otium.ffi :as ffi)
 (require otium.test :refer (check report))
 

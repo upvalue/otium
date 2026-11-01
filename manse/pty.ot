@@ -44,7 +44,8 @@
         (build (process/getenv "OTIUM_BUILD")))
     (cond
       (override (list override))
-      (build (list (str build "/manse/native/libmanse-native.dylib")))
+      (build (list (str build "/manse/native/libmanse-native.so")
+                   (str build "/manse/native/libmanse-native.dylib")))
       (else (error "OTIUM_BUILD is not set; run Manse through ./otium")))))
 
 (def (load!)

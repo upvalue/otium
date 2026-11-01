@@ -3,7 +3,7 @@
 //
 // Walking cells from Otium costs several FFI calls per cell: about 4.5 ms a
 // frame for a 200x60 grid that scrolls, most of the terminal's paint time.
-// This walks the row here and hands back what manse.terminal/paint-row draws:
+// This walks the row here and hands back what manse.apps.terminal/paint-row draws:
 // runs of cells sharing a foreground colour and style, their graphemes
 // separated by 0x1F so each can be placed in its own column, and spans of
 // cells sharing a background. The colour rules match paint-row-cells'.

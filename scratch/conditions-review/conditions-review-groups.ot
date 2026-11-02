@@ -1,0 +1,10 @@
+(require otium.thread :as thread)
+(for-each (fn (payload)
+  (println :group payload
+    (try
+      (let ((g (thread/group :independent)))
+        (thread/spawn-in g (fn () (error payload)))
+        (close g nil)
+        :returned)
+      (catch c (list :caught c)))))
+  (list nil #f 42 'oops {:type 'error :message "table"}))

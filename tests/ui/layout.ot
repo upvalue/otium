@@ -240,7 +240,7 @@
       (gpu/layout! tree 300 200)
       (check "custom font participates in layout" #t (> (((child tree 0) :bounds) :width) 0)))
     (let ((path "native/ui/fonts/JetBrainsMono.ttf"))
-      (dotimes (i 30)
+      (dotimes (i 62)
         (set! path (str "./" path))
         (check "font registry accepts entries up to its bound" #t (>= (native/font-register path) 2)))
       (let ((before (native/text-resources)))

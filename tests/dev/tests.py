@@ -450,8 +450,15 @@ def live_ui(t):
     script.write_text(UI_PROGRAM)
     server = Server(t, script, watchdog=500)
     client = server.client
-    client.send(1, 'eval', code='(length (ui/windows))')
-    t.check_in(':value "1"', client.response(1))
+    # The socket opens before the program has loaded, so wait for its window.
+    ids = iter(range(100, 1000))
+
+    def window_open():
+        ident = next(ids)
+        client.send(ident, 'eval', code='(length (otium.ui/windows))')
+        return ':value "1"' in client.response(ident)
+
+    t.wait(window_open, process=server.process, what='the window')
     client.send(2, 'eval', code='(def (view) (error "frame broke"))')
     client.response(2)
     while True:

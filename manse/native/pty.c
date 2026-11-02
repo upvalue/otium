@@ -60,6 +60,29 @@ int manse_pty_resize(int fd, int cols, int rows, int width, int height) {
   return ioctl(fd, TIOCSWINSZ, &size) < 0 ? -errno : 0;
 }
 
+// Switch the PTY between raw mode, where bytes pass both ways untouched, and
+// the kernel's cooked mode: line editing, echo, CR LF output and signal keys.
+// Returns 0 or -errno.
+int manse_pty_raw(int fd, int raw) {
+  struct termios t;
+  if (tcgetattr(fd, &t) < 0) return -errno;
+  if (raw) {
+    cfmakeraw(&t);
+  } else {
+    t.c_iflag |= BRKINT | ICRNL | IXON;
+    t.c_oflag |= OPOST | ONLCR;
+    t.c_lflag |= ECHO | ECHOE | ECHOK | ECHOKE | ECHOCTL | ICANON | ISIG | IEXTEN;
+  }
+  return tcsetattr(fd, TCSANOW, &t) < 0 ? -errno : 0;
+}
+
+// Whether the PTY turns its interrupt character into a signal: 1, 0, or -errno.
+int manse_pty_signals(int fd) {
+  struct termios t;
+  if (tcgetattr(fd, &t) < 0) return -errno;
+  return (t.c_lflag & ISIG) ? 1 : 0;
+}
+
 // Preserve errno before returning through the FFI.
 long manse_pty_write(int fd, const void* data, size_t size) {
   ssize_t n;

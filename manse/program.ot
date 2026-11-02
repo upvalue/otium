@@ -1,0 +1,84 @@
+(ns manse.program)
+(require otium.thread :as thread)
+(require manse.pty :as pty)
+(require manse.session :as sessions)
+
+;; Programs that run inside Manse on a green thread, on the far end of a real
+;; PTY. The kernel's terminal driver does what a terminal program expects. In
+;; cooked mode, the default, input arrives a line at a time with Backspace and
+;; Ctrl+U editing it, typed text is echoed, Ctrl+D at the start of a line ends
+;; the input, and newlines go out as CR LF. Raw mode passes bytes both ways
+;; untouched. The program uses the current input and output ports, which wait
+;; on the PTY without holding up Manse; flush output before reading.
+;;
+;; Ctrl+C has no process to signal, so Manse interrupts the program's thread
+;; itself. Returning ends the program with status 0, an interrupt with signal
+;; 2, and an error with status 1 after saying why.
+
+(defclass Program
+  name
+  pty
+  (in :init nil)
+  (out :init nil)
+  (thread :init nil))
+
+(def- (close-ports! program)
+  (for-each (fn (port)
+              (try
+                (close-port port)
+                (catch _ nil)))
+            (list (program :out) (program :in))))
+
+(def- (run program body)
+  (let ((status (try
+                  (with-params ((current-input-port (program :in)) (current-output-port (program :out)))
+                    (body program)
+                    {:exit 0})
+                  (catch c
+                    (if (eq? (condition-type c) 'interrupt)
+                        {:signal 2}
+                        (begin
+                          (try
+                            (write-string (str "\n" (program :name) ": " (condition-message c) "\n") (program :out))
+                            (catch _ nil))
+                          {:exit 1}))))))
+    ;; Flushing can wait on the terminal, so the program isn't done until it has.
+    ;; Closing the far end lets the terminal reach the end of the output.
+    (close-ports! program)
+    (put! (program :pty) :status status)))
+
+(def- (interrupt! program)
+  (when (memq (thread/status (program :thread)) '(:runnable :waiting))
+    (thread/interrupt! (program :thread) (fn () (error {:type 'interrupt :message "interrupted"})))))
+
+(def- (stop! program)
+  (when (memq (thread/status (program :thread)) '(:runnable :waiting)) (thread/kill! (program :thread)))
+  (close-ports! program))
+
+(def (start body &optional (name "program"))
+  "Run (body program) on a new thread, on the far end of a new PTY. Returns a manse.session backend."
+  (let ((p (pty/open 80 24))
+        (program (make Program :name name :pty p)))
+    (try
+      (begin
+        (set! (program :in) (open-input-file (p :tty)))
+        (set! (program :out) (open-output-file (p :tty)))
+        (pty/release! p)
+        (put! p :program program :on-interrupt (fn () (interrupt! program)) :on-close (fn () (stop! program)))
+        (set! (program :thread) (thread/spawn-named name run program body))
+        (sessions/backend p))
+      (catch c
+        (close-ports! program)
+        (pty/close! p)
+        (error c)))))
+
+;; The program's side
+
+(def (raw! program on?)
+  "Switch the terminal to raw mode, or back to cooked mode."
+  (flush-output-port (program :out))
+  (pty/raw! (program :pty) on?))
+
+(def (size program)
+  "The terminal's (cols rows)."
+  (list ((program :pty) :cols) ((program :pty) :rows)))

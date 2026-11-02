@@ -9,12 +9,22 @@
   :is backend/Backend
   pty)
 
+(def (backend p)
+  "A backend for p, a manse.pty PTY, whatever runs on its far end."
+  (make PtyBackend :pty p))
+
 (def (pty-backend path args)
   "A child started from path (absolute) with args, argv[0] included."
-  (make PtyBackend :pty (pty/spawn path args 80 24)))
+  (backend (pty/spawn path args 80 24)))
+
+(def- (has-byte? bytes byte)
+  (let loop ((i 0)) (and (< i (bytevector-length bytes)) (or (= (bytevector-u8-ref bytes i) byte) (loop (+ i 1))))))
 
 (defmethod (backend/write! (b PtyBackend) bytes)
-  (pty/write-bytes! (b :pty) bytes))
+  (let ((p (b :pty)))
+    (pty/write-bytes! p bytes)
+    ;; A program on a thread has no process for the kernel's Ctrl+C signal.
+    (when (and (p :on-interrupt) (has-byte? bytes 3) (pty/signals? p)) ((p :on-interrupt)))))
 
 (defmethod (backend/resize! (b PtyBackend) cols rows)
   (pty/resize! (b :pty) cols rows))

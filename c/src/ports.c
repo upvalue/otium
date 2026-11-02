@@ -58,6 +58,8 @@ static int posix_open(void* userdata, const char* path, unsigned flags, intptr_t
   if (flags & OT_IO_TRUNCATE) mode |= O_TRUNC;
   if (flags & OT_IO_APPEND) mode |= O_APPEND;
   if (flags & OT_IO_EXCLUSIVE) mode |= O_EXCL;
+  /* Opening a terminal must not make it this process's controlling terminal. */
+  mode |= O_NOCTTY;
   int fd = open(path, mode, 0666);
   if (fd < 0) return errno;
   struct stat st;

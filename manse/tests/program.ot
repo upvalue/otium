@@ -1,0 +1,122 @@
+;; Programs on a thread at the far end of a PTY: cooked-mode editing, echo, end
+;; of input, interrupts, failures, raw mode, output that waits, and closing.
+(require manse.program :as program)
+(require manse.apps.echo :as echo)
+(require manse.backend :as backend)
+(require manse.pty :as pty)
+(require otium.ffi :as ffi)
+(require otium.thread :as thread)
+(require otium.test :refer (check report))
+
+(def (type! b text)
+  (backend/write! b (string->utf8 text))
+  ;; Let the program take the input, as the UI loop does after a frame.
+  (thread/sleep 0.02))
+
+(def (shown b)
+  "What the program and the kernel's echo wrote since the last call."
+  (let ((p (b :pty))
+        (out ""))
+    (let loop ()
+      (let ((n (pty/output p)))
+        (when (and n (> n 0))
+          (set! out (str out (utf8->string (ffi/read-bytes (pty/output-data p) n))))
+          (pty/consume! p)
+          (loop))))
+    out))
+
+(def (settle b)
+  "The program's status once it has one, waiting up to a second."
+  (let loop ((tries 0))
+    (or (backend/status b)
+        (when (< tries 100)
+          (thread/sleep 0.01)
+          (loop (+ tries 1))))))
+
+(def b (echo/start))
+
+(thread/sleep 0.02)
+(check "the program writes CR LF" "Echo. Each line you type comes back. Ctrl+D ends.\r\n> " (shown b))
+(type! b "hi")
+(check "the kernel echoes typing before Enter" "hi" (shown b))
+(type! b "\r")
+(check "Enter ends the line and the program answers" "\r\nhi\r\n> " (shown b))
+(type! b "ab\x7f;c\r")
+(check "Backspace edits the line" #t (string-contains? (shown b) "\r\nac\r\n> "))
+(type! b "abc\x15;x\r")
+(check "Ctrl+U erases the line" #t (string-contains? (shown b) "\r\nx\r\n> "))
+(check "running" nil (backend/status b))
+(type! b "\x04;")
+(check "Ctrl+D on an empty line ends input" 0 ((settle b) :exit))
+
+(def b (echo/start))
+
+(thread/sleep 0.02)
+(shown b)
+(type! b "\x03;")
+(check "Ctrl+C interrupts" 2 ((settle b) :signal))
+(check "Ctrl+C echoes" #t (string-contains? (shown b) "^C"))
+
+(def b (program/start (fn (_) (car 1)) "broken"))
+
+(check "a failure exits 1" 1 ((settle b) :exit))
+(check "and says why" #t (string-contains? (shown b) "broken: "))
+
+(def b
+  (program/start (fn (p)
+                   (program/raw! p #t)
+                   (display (str "<" (utf8->string (read-bytevector 3)) ">\n")))
+                 "raw"))
+
+(thread/sleep 0.02)
+(type! b "\x1b;[A")
+(check "raw mode passes bytes both ways" "<\x1b;[A>\n" (shown b))
+
+(def sizes [])
+
+(def b
+  (program/start (fn (p)
+                   (push! sizes (program/size p))
+                   (read-line)
+                   (push! sizes (program/size p)))
+                 "size"))
+
+(thread/sleep 0.02)
+(backend/resize! b 132 50)
+(type! b "\r")
+(settle b)
+(check "programs see the terminal's size" '((80 24) (132 50)) (array-to-list sizes))
+
+(def flood
+  (program/start (fn (_)
+                   (dotimes (_ 20000)
+                     (println (string-repeat "x" 99))))
+                 "flood"))
+
+(thread/sleep 0.05)
+
+(def (thread-of b)
+  (((b :pty) :program) :thread))
+
+(check "a writer waits while nothing reads" :waiting (thread/status (thread-of flood)))
+
+(def flooded 0)
+
+(let loop ((tries 0))
+  (set! flooded (+ flooded (string-length (shown flood))))
+  (unless (or (backend/status flood) (> tries 500))
+    (thread/sleep 0.002)
+    (loop (+ tries 1))))
+(shown flood)
+(check "and finishes once its output is read" 0 ((settle flood) :exit))
+(check "every byte arrives, with CR LF" (* 20000 101) (+ flooded (string-length (shown flood))))
+(check "the end of the output follows" nil (pty/output (flood :pty)))
+
+(def b (echo/start))
+
+(thread/sleep 0.02)
+(backend/close! b)
+(thread/sleep 0.01)
+(check "closing kills the program" :killed (thread/status (thread-of b)))
+(check "and closes its ports" #f (output-port-open? (((b :pty) :program) :out)))
+(report "program")

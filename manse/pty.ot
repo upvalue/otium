@@ -1,8 +1,9 @@
 (ns manse.pty)
 
-;; Prototype pseudo-terminals: open a PTY, start a child on it, read and
-;; write the controlling side, resize, and reap. Spawning and resizing go
-;; through manse/native/pty.c. Output is read on a thread in
+;; Pseudo-terminals: open a PTY, start a child on it, read and write the
+;; controlling side, resize, and reap. The far end can instead be Otium code
+;; on a green thread; see manse.program. Spawning, resizing and terminal modes
+;; go through manse/native/pty.c. Output is read on a thread in
 ;; manse/native/reader.c and taken here in batches. macOS constants only.
 
 (require otium.ffi :as ffi)
@@ -31,6 +32,8 @@
                  ((private %write) "manse_pty_write" (int pointer size-t) long #t)
                  ((private %spawn) "manse_pty_spawn" (utf8 pointer pointer utf8) int #t)
                  ((private %resize) "manse_pty_resize" (int int int int int) int #t)
+                 ((private %raw) "manse_pty_raw" (int int) int #t)
+                 ((private %signals) "manse_pty_signals" (int) int #t)
                  ((private %reader-start) "manse_reader_start" (int) pointer #t)
                  ((private %reader-stop) "manse_reader_stop" (pointer) void #t)
                  ((private %reader-peek) "manse_reader_peek" (pointer pointer) long #f)
@@ -44,8 +47,7 @@
         (build (process/getenv "OTIUM_BUILD")))
     (cond
       (override (list override))
-      (build (list (str build "/manse/native/libmanse-native.so")
-                   (str build "/manse/native/libmanse-native.dylib")))
+      (build (list (str build "/manse/native/libmanse-native.so") (str build "/manse/native/libmanse-native.dylib")))
       (else (error "OTIUM_BUILD is not set; run Manse through ./otium")))))
 
 (def (load!)
@@ -57,8 +59,21 @@
   result)
 
 (def (resize! pty cols rows)
-  "Set the terminal size the child sees; the kernel sends it SIGWINCH."
-  (check! "resize" (%resize (pty :fd) cols rows 0 0)))
+  "Set the terminal size the far end sees; the kernel sends a child SIGWINCH."
+  (check! "resize" (%resize (pty :fd) cols rows 0 0))
+  (put! pty :cols cols :rows rows))
+
+(def (raw! pty on?)
+  "Switch between raw mode and the kernel's cooked mode, the default."
+  (check! "raw"
+          (%raw (pty :fd)
+                (if on?
+                    1
+                    0))))
+
+(def (signals? pty)
+  "Whether Ctrl+C is the kernel's interrupt key, as in cooked mode."
+  (= 1 (check! "signals" (%signals (pty :fd)))))
 
 (def- (with-strings strings f)
   "Call (f argv) with a NULL-terminated array of C strings, freed afterwards."
@@ -74,8 +89,10 @@
       (for-each ffi/free! owned)
       (ffi/free! argv))))
 
-(def (spawn path args cols rows)
-  "Start path (absolute) with args, argv[0] included, on a new PTY of the given size."
+(def (open cols rows)
+  "A new PTY of the given size with nothing on its far end yet. :tty is the far
+end's path. :slave holds the far end open until release!, since macOS can't
+resize a PTY whose far end was never opened."
   (load!)
   (let ((pty {:fd (check! "posix_openpt" (%openpt (+ O_RDWR O_NOCTTY)))})
         (success? #f))
@@ -84,27 +101,32 @@
         (check! "grantpt" (%grantpt (pty :fd)))
         (check! "unlockpt" (%unlockpt (pty :fd)))
         (put! pty :tty (%ptsname (pty :fd)))
-        ;; Allocate before spawning so allocation failure cannot orphan a child.
         (put! pty :output (ffi/alloc 'pointer 1))
         (let ((reader (%reader-start (pty :fd))))
           (when (ffi/null-pointer? reader) (error "pty: reader failed to start"))
           (put! pty :reader reader))
-        (let ((slave (check! "open" (%open (pty :tty) (+ O_RDWR O_NOCTTY)))))
-          (defer
-            (begin
-              (resize! pty cols rows)
-              (with-strings args
-                            (fn (argv)
-                              (put! pty
-                                    :pid (check! "spawn"
-                                                 (%spawn path argv (ffi/ref (%environ) 'pointer 0) (pty :tty)))))))
-            (%close slave)))
+        (put! pty :slave (check! "open" (%open (pty :tty) (+ O_RDWR O_NOCTTY))))
+        (resize! pty cols rows)
         (set! success? #t)
         pty)
-      (unless success?
-        (when (pty :reader) (%reader-stop (pty :reader)))
-        (%close (pty :fd))
-        (when (pty :output) (ffi/free! (pty :output)))))))
+      (unless success? (close! pty)))))
+
+(def (release! pty)
+  "Close the far end :slave held, once whatever runs there has it open."
+  (when (pty :slave)
+    (%close (pty :slave))
+    (put! pty :slave nil)))
+
+(def (spawn path args cols rows)
+  "Start path (absolute) with args, argv[0] included, on a new PTY of the given size."
+  (let ((pty (open cols rows)))
+    (unwind-protect
+      (with-strings args
+                    (fn (argv)
+                      (put! pty :pid (check! "spawn" (%spawn path argv (ffi/ref (%environ) 'pointer 0) (pty :tty))))))
+      (release! pty)
+      (unless (pty :pid) (close! pty)))
+    pty))
 
 (def (output pty)
   "Length of the oldest batch of output not yet consumed, 0 when none is ready, nil at the end of the stream.
@@ -168,20 +190,26 @@ output-data is its address until consume!."
   (set! pending-pids (filter (fn (pid) (not (wait-status pid))) pending-pids)))
 
 (def (status pty)
-  "nil while the child runs, then {:exit code} or {:signal number}."
+  "nil while the far end runs, then {:exit code} or {:signal number}. A program
+on a thread records its own."
   (or (pty :status)
-      (let ((result (wait-status (pty :pid))))
-        (when result (put! pty :reaped? #t))
-        (unless (eq? result :unavailable)
-          (when result (put! pty :status result))
-          result))))
+      (when (pty :pid)
+        (let ((result (wait-status (pty :pid))))
+          (when result (put! pty :reaped? #t))
+          (unless (eq? result :unavailable)
+            (when result (put! pty :status result))
+            result)))))
 
 (def (close! pty)
+  "Close the controlling side, which hangs up the far end. :on-close, when set,
+stops a program there."
   (unless (pty :closed?)
     (put! pty :closed? #t)
     ;; The reader thread polls the fd, so stop it first.
     (when (pty :reader) (%reader-stop (pty :reader)))
+    (release! pty)
     (%close (pty :fd))
-    (ffi/free! (pty :output))
-    (unless (pty :reaped?) (push! pending-pids (pty :pid)))
+    (when (pty :output) (ffi/free! (pty :output)))
+    (when (pty :on-close) ((pty :on-close)))
+    (when (and (pty :pid) (not (pty :reaped?))) (push! pending-pids (pty :pid)))
     (reap!)))

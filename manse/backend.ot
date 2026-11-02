@@ -1,7 +1,8 @@
 (ns manse.backend)
 
-;; The program at the other end of a terminal: a child on a PTY, or Otium code
-;; on a green thread inside Manse.
+;; The program at the other end of a terminal. manse.session/PtyBackend is the
+;; only one: a child process or, through manse.program, Otium code on a green
+;; thread, both on the far end of a PTY.
 
 (defabstract Backend)
 

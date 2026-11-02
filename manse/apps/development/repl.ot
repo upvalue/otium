@@ -1,63 +1,52 @@
 (ns manse.apps.development.repl)
-(require manse.tty :as tty)
+(require manse.program :as program)
 (require otium.dev :as dev)
-(require otium.thread :as thread)
 (require manse.apps.development.inspect :as inspect)
 
-(def (output-port terminal)
-  (make-output-port "Manse REPL"
-                    {:write (fn (bytes start end)
-                              (let ((limit (min end (+ start 1024))))
-                                ;; Keep UTF-8 characters together when shortening a write.
-                                (while (and (< limit end)
-                                            (> limit start)
-                                            (= (bitwise-and (bytevector-u8-ref bytes limit) 192) 128))
-                                  (set! limit (- limit 1)))
-                                (tty/write! terminal (utf8->string (bytevector-copy bytes start limit)))
-                                (- limit start)))}))
+(def (evaluate! state code)
+  (let ((value (dev/evaluate-form (string->symbol (state :namespace)) (read-string (str "(begin\n" code "\n)")) #t)))
+    (put! state :result [value] :namespace (str (current-ns)))
+    (inspect/summary value)))
 
-(def (evaluate! state code port)
-  (with-params ((current-output-port port))
-    (let ((value (dev/evaluate-form (string->symbol (state :namespace)) (read-string (str "(begin\n" code "\n)")) #t)))
-      (flush-output-port port)
-      (put! state :result [value] :namespace (str (current-ns)))
-      (inspect/summary value))))
+(def (interrupt? problem)
+  (and (table? problem) (eq? (condition-type problem) 'interrupt)))
 
-(def (run terminal state)
-  (tty/write! terminal
-              "Manse live runtime. Ctrl+C interrupts; Ctrl+D closes this REPL.\n:ns NAME changes namespace; inspect the last result with the browser button.\n")
-  (with ((port (output-port terminal)))
-        (let ((pending "")
-              (done? #f))
-          (while (not done?)
-            (try
-              (begin
-                (tty/write! terminal
-                            (if (equal? pending "")
-                                (str (state :namespace) "> ")
-                                "… "))
-                (let ((line (tty/read-line terminal)))
-                  (cond
-                    ((not line) (set! done? #t))
-                    ((and (equal? pending "") (string-starts-with? line ":ns "))
-                     (put! state :namespace (substring line 4)))
-                    (else (set! pending (str pending line "\n"))
-                          (when (dev/%scan-source pending)
-                            (put! state :busy? #t)
-                            (defer
-                              (tty/write! terminal (str (evaluate! state pending port) "\n"))
-                              (put! state :busy? #f))
-                            (set! pending ""))))))
-              (catch problem
-                (set! pending "")
-                (put! state :busy? #f :result [problem])
-                ;; Do not recursively print an arbitrary condition or its irritants.
-                (tty/write! terminal
-                            (str "Evaluation failed: "
-                                 (if (and (table? problem) (string? (get problem :message)))
-                                     (inspect/text-preview (get problem :message))
-                                     (inspect/summary problem))
-                                 "\n"))))))))
+(def (failure problem)
+  ;; Do not recursively print an arbitrary condition or its irritants.
+  (cond
+    ((interrupt? problem) "Interrupted.")
+    ((and (table? problem) (string? (get problem :message)))
+     (str "Evaluation failed: " (inspect/text-preview (get problem :message))))
+    (else (str "Evaluation failed: " (inspect/summary problem)))))
+
+(def (run state)
+  (println "Manse live runtime. Ctrl+C interrupts; Ctrl+D closes this REPL.")
+  (println ":ns NAME changes namespace; inspect the last result with the browser button.")
+  (let ((pending "")
+        (done? #f))
+    (while (not done?)
+      (try
+        (begin
+          (display (if (equal? pending "")
+                       (str (state :namespace) "> ")
+                       "… "))
+          (flush-output-port)
+          (let ((line (read-line)))
+            (cond
+              ((eof-object? line) (set! done? #t))
+              ((and (equal? pending "") (string-starts-with? line ":ns ")) (put! state :namespace (substring line 4)))
+              (else (set! pending (str pending line "\n"))
+                    (when (dev/%scan-source pending)
+                      (put! state :busy? #t)
+                      (defer
+                        (println (evaluate! state pending))
+                        (put! state :busy? #f))
+                      (set! pending ""))))))
+        (catch problem
+          (set! pending "")
+          (put! state :busy? #f)
+          (unless (interrupt? problem) (put! state :result [problem]))
+          (println (failure problem)))))))
 
 (def (start state)
-  (tty/start (fn (terminal) (run terminal state)) "Manse REPL"))
+  (program/start (fn (_) (run state)) "Manse REPL"))

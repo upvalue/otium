@@ -405,7 +405,7 @@ one the last view asked for, e.g. by a click. Record the focus this view asks fo
                                             (invalidate!))})
                (ui/column {:height 6})
                (if (null? matches)
-                   (ui/label {:size 13 :color theme/faint :padding 10} "No matching commands")
+                   (ui/row {:padding 10} (ui/label {:size 13 :color theme/faint} "No matching commands"))
                    (for ((c :in matches)
                          (i :range (length matches))
                          (out :collect (ui/row {:key i

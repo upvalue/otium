@@ -26,7 +26,6 @@
   (output-lock :init (thread/mutex))
   (output-space :init (thread/condvar))
   (closed? :init #f)
-  (on-interrupt :init nil)
   (cols :init 80)
   (rows :init 24)
   (status :init nil))
@@ -118,7 +117,6 @@
   (when (memq (thread/status (tty :thread)) '(:runnable :waiting)) (thread/send (tty :thread) {:tty tty :input input})))
 
 (def- (interrupt! tty)
-  (when (tty :on-interrupt) ((tty :on-interrupt)))
   (when (memq (thread/status (tty :thread)) '(:runnable :waiting))
     (thread/interrupt! (tty :thread) (fn () (error {:type 'interrupt :message "interrupted"})))))
 

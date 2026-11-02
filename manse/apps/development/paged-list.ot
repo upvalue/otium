@@ -60,6 +60,6 @@
                                                    (entry :text))))))
              => out))))
 
-(def (view key rows _selected choose)
+(def (view key rows choose)
   ;; No model objects in properties: bounded presentation rows and callback only.
   (ui/new PagedList {:key key :rows rows :choose choose}))

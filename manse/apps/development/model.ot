@@ -93,8 +93,12 @@
         (set! changed? #t))
       changed?)))
 
+(def (release! state)
+  (put! state :selected #f :history [] :binding #f :cursor #f :pending? #f :page {:rows [] :done? #t}))
+
 (def (close! state)
   (cancel! state)
-  (put! state :closed? #t :selected #f :history [] :binding #f :cursor #f :page {:rows [] :done? #t})
+  (release! state)
+  (put! state :closed? #t)
   (put! (state :namespaces) :rows [])
   (put! (state :bindings) :rows []))

@@ -17,15 +17,15 @@
 (dotimes (i 1900)
   (put! sample-table i nil))
 
-(def first (table-scan sample-table -1 0))
+(def first-page (table-scan sample-table -1 0))
 
-(check "sparse scan bounded" 512 (nth first 3))
-(check "empty page can continue" #f (nth first 2))
-(check "sparse first page empty" '() (nth first 4))
+(check "sparse scan bounded" 512 (nth first-page 3))
+(check "empty page can continue" #f (nth first-page 2))
+(check "sparse first page empty" '() (nth first-page 4))
 (put! sample-table 1999 23)
-(check "value replacements allowed" #f (fails? (fn () (table-scan sample-table (car first) (cadr first)))))
+(check "value replacements allowed" #f (fails? (fn () (table-scan sample-table (car first-page) (cadr first-page)))))
 (put! sample-table 3000 1)
-(check "insert invalidates" #t (fails? (fn () (table-scan sample-table (car first) (cadr first)))))
+(check "insert invalidates" #t (fails? (fn () (table-scan sample-table (car first-page) (cadr first-page)))))
 
 (def scan (table-scan sample-table -1 0))
 

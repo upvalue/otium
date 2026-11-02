@@ -1,20 +1,10 @@
 ;; Native integration: real Ghostty terminal + SDL browser, isolated window.
-(require manse.workspace :as workspace)
-(require manse.apps.development.model :as model)
+(require manse.workspace)
 (require manse.apps.development.paged-list :as paged)
-(require manse.apps :as apps)
 (require otium.ui :as ui)
-(require otium.time :as time)
-(require otium.process :as process)
-(require otium.test :refer (check report))
-
-(def large-value (for ((i :range 100000) (out :collect-array i)) => out))
-
-(def old-state #f)
+(require otium.test :refer (check))
 
 (def inspected #f)
-
-(def measured [])
 
 (def list-widget
   (make paged/PagedList :rows [{:text "one"} {:text "two"}] :choose (fn (row) (set! inspected (row :text)))))
@@ -25,7 +15,15 @@
 (ns manse.workspace)
 (require manse.apps.development.model :as model)
 (require otium.time :as time)
+(require otium.process :as process)
 (require otium.test :refer (check report))
+
+(def large-value (for ((i :range 100000) (out :collect-array i)) => out))
+
+(def old-state #f)
+
+(def measured [])
+
 (set! icon-path (fn () (str (current-directory) "/manse/assets/manse-mark.png")))
 
 (def (scripted! window)
@@ -34,26 +32,26 @@
     (when (= tick 2) (new-development!))
     (when (= tick 4)
       (let ((app (find-app 1)))
-        (set! user/old-state (app :state))
-        (development/open-value! app user/large-value "100,000-item array")))
+        (set! old-state (app :state))
+        (development/open-value! app large-value "100,000-item array")))
     (when (and (> tick 5) (< tick 25))
       (let ((app (find-app 1))
             (start (time/seconds)))
         (model/refresh! (app :state))
         (model/step! (app :state))
-        (push! user/measured (* 1000 (- (time/seconds) start)))))
+        (push! measured (* 1000 (- (time/seconds) start)))))
     (when (= tick 25) (put! ((find-app 1) :state) :cursor 99936 :pending? #t))
     (when (= tick 40)
       (check "last array page" 64 (length ((((find-app 1) :state) :page) :rows)))
       (ui/capture! window (str (process/getenv "OTIUM_BUILD") "/inspector-native-smoke.png")))
     (when (= tick 45) (close-app! 1))
     (when (= tick 50)
-      (check "closed app releases references" #f (user/old-state :selected))
-      (check "closed app releases page" 0 (length ((user/old-state :page) :rows)))
+      (check "closed app releases references" #f (old-state :selected))
+      (check "closed app releases page" 0 (length ((old-state :page) :rows)))
       (new-development!))
     (when (= tick 60)
       (check "reopen gets fresh state" #f (((find-app 2) :state) :selected))
-      (println "bounded page max ms: " (apply max (array-to-list user/measured)))
+      (println "bounded page max ms: " (apply max (array-to-list measured)))
       (report "development UI")
       (put! workspace :quit? #t))))
 

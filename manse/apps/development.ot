@@ -16,7 +16,6 @@
   repl-state
   terminal
   (tab :init :namespaces)
-  (selected-row :init #f)
   (jump :init ""))
 
 (def (open! id)
@@ -51,8 +50,7 @@
 
 (def (open-value! app value label)
   (model/select! (app :state) value label)
-  (set! (app :tab) :value)
-  (set! (app :selected-row) #f))
+  (set! (app :tab) :value))
 
 (def (choose-binding! app entry)
   (put! (app :state) :binding (car entry))
@@ -89,9 +87,7 @@
                                :on-change (fn (text) (model/search! catalog text))})
                (paged/view (app :tab)
                            rows
-                           (app :selected-row)
                            (fn (row)
-                             (set! (app :selected-row) (row :key))
                              (let ((entry (row :entry)))
                                (if names?
                                    (begin
@@ -126,18 +122,11 @@
                                      (catch _problem (put! state :error "Binding unavailable."))))))
                        (button "Release"
                                (fn ()
-                                 (put! state
-                                       :selected #f
-                                       :history []
-                                       :binding #f
-                                       :cursor #f
-                                       :pending? #f
-                                       :page {:rows [] :done? #t})
+                                 (model/release! state)
                                  (put! (app :repl-state) :result #f))))
                (if (page :text)
                    (ui/scroll {:grow 1 :height 240} (ui/label {:size 13} (page :text)))
                    (paged/view :values rows
-                               (app :selected-row)
                                (fn (entry)
                                  (let ((row (entry :row))) (open-value! app (get (row :reference) 0) (row :label))))))
                (ui/row {:gap 4}

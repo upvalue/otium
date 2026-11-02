@@ -1,32 +1,44 @@
 (ns manse.keyboard)
 (require manse.ghostty :as g)
 
-;; GhosttyKey values from ghostty/vt/key/event.h, indexed by SDL key names.
+;; SDL key names and the GhosttyKey each one sends.
 (def special-keys
-  {"Backspace" 53
-   "Return" 58
-   "Tab" 64
-   "Delete" 68
-   "End" 69
-   "Home" 71
-   "Insert" 72
-   "PageDown" 73
-   "PageUp" 74
-   "Down" 75
-   "Left" 76
-   "Right" 77
-   "Up" 78
-   "Escape" 120})
+  {"Backspace" (g/key "BACKSPACE")
+   "Return" (g/key "ENTER")
+   "Tab" (g/key "TAB")
+   "Delete" (g/key "DELETE")
+   "End" (g/key "END")
+   "Home" (g/key "HOME")
+   "Insert" (g/key "INSERT")
+   "PageDown" (g/key "PAGE_DOWN")
+   "PageUp" (g/key "PAGE_UP")
+   "Down" (g/key "ARROW_DOWN")
+   "Left" (g/key "ARROW_LEFT")
+   "Right" (g/key "ARROW_RIGHT")
+   "Up" (g/key "ARROW_UP")
+   "Escape" (g/key "ESCAPE")})
 
 (dotimes (i 24)
-  (put! special-keys (str "F" (+ i 1)) (+ 121 i)))
+  (put! special-keys (str "F" (+ i 1)) (g/key (str "F" (+ i 1)))))
 
-(def control-keys {"`" 1 "\\" 2 "[" 3 "]" 4 "," 5 "=" 16 "-" 46 "." 47 "'" 48 ";" 49 "/" 50 "Space" 63})
+(def control-keys
+  {"`" (g/key "BACKQUOTE")
+   "\\" (g/key "BACKSLASH")
+   "[" (g/key "BRACKET_LEFT")
+   "]" (g/key "BRACKET_RIGHT")
+   "," (g/key "COMMA")
+   "=" (g/key "EQUAL")
+   "-" (g/key "MINUS")
+   "." (g/key "PERIOD")
+   "'" (g/key "QUOTE")
+   ";" (g/key "SEMICOLON")
+   "/" (g/key "SLASH")
+   "Space" (g/key "SPACE")})
 
 (dotimes (i 26)
-  (put! control-keys (substring "ABCDEFGHIJKLMNOPQRSTUVWXYZ" i (+ i 1)) (+ 20 i)))
+  (let ((letter (substring "ABCDEFGHIJKLMNOPQRSTUVWXYZ" i (+ i 1)))) (put! control-keys letter (g/key letter))))
 (dotimes (i 10)
-  (put! control-keys (str i) (+ 6 i)))
+  (put! control-keys (str i) (g/key (str "DIGIT_" i))))
 
 ;; These are application shortcuts, independent of the terminal's keyboard mode.
 (def shortcuts {"Alt+Left" #u8(27 98) "Alt+Right" #u8(27 102) "Alt+Backspace" #u8(27 127)})
@@ -42,10 +54,13 @@
               (control? #f))
           (for-each (fn (modifier)
                       (when (string-starts-with? key (car modifier))
-                        (when (= (cadr modifier) 2) (set! control? #t))
+                        (when (= (cadr modifier) g/MOD-CTRL) (set! control? #t))
                         (set! mods (bitwise-ior mods (cadr modifier)))
                         (set! key (substring key (string-length (car modifier))))))
-                    '(("Ctrl+" 2) ("Alt+" 4) ("Meta+" 8) ("Shift+" 1)))
+                    (list (list "Ctrl+" g/MOD-CTRL)
+                          (list "Alt+" g/MOD-ALT)
+                          (list "Meta+" g/MOD-SUPER)
+                          (list "Shift+" g/MOD-SHIFT)))
           (let ((code (or (get special-keys key) (and control? (get control-keys key)))))
             (when code
               (let ((ascii (cond
@@ -55,13 +70,13 @@
                     (unshifted (if (and (>= ascii 65) (<= ascii 90))
                                    (+ ascii 32)
                                    ascii))
-                    (shift? (not (= 0 (bitwise-and mods 1)))))
+                    (shift? (not (= 0 (bitwise-and mods g/MOD-SHIFT)))))
                 (g/encode-key term
                               code
                               mods
                               (if (get event :repeat #f)
-                                  2
-                                  1)
+                                  g/KEY-REPEAT
+                                  g/KEY-PRESS)
                               (if shift?
                                   ascii
                                   unshifted)

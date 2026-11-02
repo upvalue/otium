@@ -5,8 +5,11 @@ from harness import Skip, case, test
 
 for name in ('inspector', 'development-repl', 'apps', 'strip', 'settings', 'fit', 'theme', 'pty-write',
              'pty-reap', 'construct-cleanup', 'pty-construct-cleanup',
-             'ghostty-cleanup', 'grapheme-capacity'):
+             'ghostty-cleanup', 'grapheme-capacity', 'ghostty', 'keyboard',
+             'paint-cells', 'pty', 'wheel', 'workspace'):
     case('manse ' + name, 'manse/tests/' + name + '.ot', paths=['.'], needs=['ffi'])
+for name in ('paint-rows', 'text-render'):
+    case('manse ' + name, 'manse/tests/' + name + '.ot', paths=['.'], needs=['ffi', 'ui'])
 
 
 @test('manse tty', needs=['ffi'])

@@ -9,76 +9,146 @@
 (require otium.json :as json)
 (require manse.pty :as pty)
 
-;; GhosttyResult
-(def SUCCESS 0)
+;; Constants from libghostty-vt's enums. enum records each under its C names
+;; and returns it; check-enums! compares them with the library's own description.
+(defonce enums {})
 
-;; GhosttyTerminalOption
-(def- OPT-WRITE-PTY 1)
+(def (enum c-name member value)
+  (unless (get enums c-name) (put! enums c-name {}))
+  (put! (get enums c-name) member value)
+  value)
 
-;; GhosttyTerminalData
-(def- DATA-ACTIVE-SCREEN 6)
+(def SUCCESS (enum "GhosttyResult" "SUCCESS" 0))
 
-(def- DATA-MOUSE-TRACKING 11)
+(def- OUT-OF-SPACE (enum "GhosttyResult" "OUT_OF_SPACE" -3))
 
-(def- DATA-VIEWPORT-ACTIVE 32)
+(def- OPT-WRITE-PTY (enum "GhosttyTerminalOption" "WRITE_PTY" 1))
 
-;; GhosttyTerminalScrollViewportTag
-(def- SCROLL-BOTTOM 1)
+(def- OPT-SCROLLBACK-MAX-BYTES (enum "GhosttyTerminalOption" "SCROLLBACK_MAX_BYTES" 27))
 
-(def- SCROLL-DELTA 2)
+(def- OPT-SCROLLBACK-MAX-LINES (enum "GhosttyTerminalOption" "SCROLLBACK_MAX_LINES" 28))
 
-;; GhosttyMouseEncoderOption, GhosttyMouseAction and GhosttyMouseButton
-(def- MOUSE-OPT-SIZE 2)
+(def- DATA-ACTIVE-SCREEN (enum "GhosttyTerminalData" "ACTIVE_SCREEN" 6))
 
-(def- MOUSE-PRESS 0)
+(def- DATA-MOUSE-TRACKING (enum "GhosttyTerminalData" "MOUSE_TRACKING" 11))
 
-(def- MOUSE-WHEEL-UP 4)
+(def- DATA-VIEWPORT-ACTIVE (enum "GhosttyTerminalData" "VIEWPORT_ACTIVE" 32))
 
-(def- MOUSE-WHEEL-DOWN 5)
+(def- SCROLL-BOTTOM (enum "GhosttyTerminalScrollViewportTag" "BOTTOM" 1))
 
-;; GhosttyBuildInfo and GhosttyOptimizeMode
-(def- BUILD-INFO-OPTIMIZE 4)
+(def- SCROLL-DELTA (enum "GhosttyTerminalScrollViewportTag" "DELTA" 2))
 
-(def- BUILD-INFO-VERSION-STRING 5)
+(def- MOUSE-OPT-SIZE (enum "GhosttyMouseEncoderOption" "SIZE" 2))
 
+(def- MOUSE-PRESS (enum "GhosttyMouseAction" "PRESS" 0))
+
+(def- MOUSE-WHEEL-UP (enum "GhosttyMouseButton" "FOUR" 4))
+
+(def- MOUSE-WHEEL-DOWN (enum "GhosttyMouseButton" "FIVE" 5))
+
+(def- KEY-OPT-MACOS-OPTION-AS-ALT (enum "GhosttyKeyEncoderOption" "MACOS_OPTION_AS_ALT" 6))
+
+(def KEY-PRESS (enum "GhosttyKeyAction" "PRESS" 1))
+
+(def KEY-REPEAT (enum "GhosttyKeyAction" "REPEAT" 2))
+
+;; GhosttyMods bits are #defines in key/event.h, so the library doesn't describe them.
+(def MOD-SHIFT 1)
+
+(def MOD-CTRL 2)
+
+(def MOD-ALT 4)
+
+(def MOD-SUPER 8)
+
+(def- BUILD-INFO-OPTIMIZE (enum "GhosttyBuildInfo" "OPTIMIZE" 4))
+
+(def- BUILD-INFO-VERSION-STRING (enum "GhosttyBuildInfo" "VERSION_STRING" 5))
+
+;; Indexed by GhosttyOptimizeMode.
 (def- optimize-modes [:debug :release-safe :release-small :release-fast])
 
-;; GhosttyRenderStateData
-(def- STATE-COLS 1)
+(for ((name :in '("DEBUG" "RELEASE_SAFE" "RELEASE_SMALL" "RELEASE_FAST")) (i :range 4))
+  (enum "GhosttyOptimizeMode" name i))
 
-(def- STATE-ROWS 2)
+(def- STATE-COLS (enum "GhosttyRenderStateData" "COLS" 1))
 
-(def- STATE-DIRTY 3)
+(def- STATE-ROWS (enum "GhosttyRenderStateData" "ROWS" 2))
 
-(def- STATE-ROW-ITERATOR 4)
+(def- STATE-DIRTY (enum "GhosttyRenderStateData" "DIRTY" 3))
 
-(def- STATE-CURSOR-VISIBLE 11)
+(def- STATE-ROW-ITERATOR (enum "GhosttyRenderStateData" "ROW_ITERATOR" 4))
 
-(def- STATE-CURSOR-VIEWPORT-HAS-VALUE 14)
+(def- STATE-CURSOR-VISIBLE (enum "GhosttyRenderStateData" "CURSOR_VISIBLE" 11))
 
-(def- STATE-CURSOR-VIEWPORT-X 15)
+(def- STATE-CURSOR-VIEWPORT-HAS-VALUE (enum "GhosttyRenderStateData" "CURSOR_VIEWPORT_HAS_VALUE" 14))
 
-(def- STATE-CURSOR-VIEWPORT-Y 16)
+(def- STATE-CURSOR-VIEWPORT-X (enum "GhosttyRenderStateData" "CURSOR_VIEWPORT_X" 15))
 
-;; GhosttyRenderStateRowData
-(def- ROW-DIRTY 1)
+(def- STATE-CURSOR-VIEWPORT-Y (enum "GhosttyRenderStateData" "CURSOR_VIEWPORT_Y" 16))
 
-(def- ROW-CELLS 3)
+(def- STATE-COLORS (enum "GhosttyRenderStateData" "COLORS" 19))
 
-;; GhosttyRenderStateRowCellsData
-(def- CELL-STYLE 2)
+(def- ROW-DIRTY (enum "GhosttyRenderStateRowData" "DIRTY" 1))
 
-(def- CELL-GRAPHEMES-LEN 3)
+(def- ROW-CELLS (enum "GhosttyRenderStateRowData" "CELLS" 3))
 
-(def- CELL-GRAPHEMES-BUF 4)
+(def- CELL-STYLE (enum "GhosttyRenderStateRowCellsData" "STYLE" 2))
 
-(def- CELL-BG-COLOR 5)
+(def- CELL-GRAPHEMES-LEN (enum "GhosttyRenderStateRowCellsData" "GRAPHEMES_LEN" 3))
 
-(def- CELL-FG-COLOR 6)
+(def- CELL-GRAPHEMES-BUF (enum "GhosttyRenderStateRowCellsData" "GRAPHEMES_BUF" 4))
 
-(def- CELL-HAS-STYLING 8)
+(def- CELL-BG-COLOR (enum "GhosttyRenderStateRowCellsData" "BG_COLOR" 5))
 
-(def- CELL-UTF8 9)
+(def- CELL-FG-COLOR (enum "GhosttyRenderStateRowCellsData" "FG_COLOR" 6))
+
+(def- CELL-HAS-STYLING (enum "GhosttyRenderStateRowCellsData" "HAS_STYLING" 8))
+
+(def- CELL-GRAPHEMES-UTF8 (enum "GhosttyRenderStateRowCellsData" "GRAPHEMES_UTF8" 9))
+
+;; GhosttyKey codes by C name, for the keys manse.keyboard sends.
+(def- key-codes {})
+
+(for ((entry :in '(("BACKQUOTE" 1)
+                   ("BACKSLASH" 2)
+                   ("BRACKET_LEFT" 3)
+                   ("BRACKET_RIGHT" 4)
+                   ("COMMA" 5)
+                   ("EQUAL" 16)
+                   ("MINUS" 46)
+                   ("PERIOD" 47)
+                   ("QUOTE" 48)
+                   ("SEMICOLON" 49)
+                   ("SLASH" 50)
+                   ("BACKSPACE" 53)
+                   ("ENTER" 58)
+                   ("SPACE" 63)
+                   ("TAB" 64)
+                   ("DELETE" 68)
+                   ("END" 69)
+                   ("HOME" 71)
+                   ("INSERT" 72)
+                   ("PAGE_DOWN" 73)
+                   ("PAGE_UP" 74)
+                   ("ARROW_DOWN" 75)
+                   ("ARROW_LEFT" 76)
+                   ("ARROW_RIGHT" 77)
+                   ("ARROW_UP" 78)
+                   ("ESCAPE" 120))))
+  (put! key-codes (car entry) (cadr entry)))
+(dotimes (i 10)
+  (put! key-codes (str "DIGIT_" i) (+ 6 i)))
+(dotimes (i 26)
+  (put! key-codes (substring "ABCDEFGHIJKLMNOPQRSTUVWXYZ" i (+ i 1)) (+ 20 i)))
+(dotimes (i 24)
+  (put! key-codes (str "F" (+ i 1)) (+ 121 i)))
+(for ((name code :in key-codes))
+  (enum "GhosttyKey" name code))
+
+(def (key name)
+  "The GhosttyKey code for its C name without the GHOSTTY_KEY_ prefix, such as \"ARROW_UP\"."
+  (or (get key-codes name) (error "ghostty: unknown key" name)))
 
 ;; Layouts. check-layouts! compares them with the library's own description.
 (defonce layouts {})
@@ -141,7 +211,6 @@
 
 (def- buffer-len-index (/ (ffi/offset-of GBuffer '(len)) (ffi/sizeof 'size-t)))
 
-
 ;; Style's bool flags, bold to overline, sit in eight consecutive bytes: read
 ;; them as one u64.
 (def- flags-index (/ (ffi/offset-of Style '(bold)) 8))
@@ -165,13 +234,27 @@
 (def- (style-flags style)
   (let ((bytes (ffi/ref style 'u64 flags-index))
         (byte (fn (i) (> (bitwise-and (bitwise-arithmetic-shift bytes (* -8 i)) 255) 0))))
-    (bitwise-ior (if (byte 0) BOLD 0)
-                 (if (byte 1) ITALIC 0)
-                 (if (byte 2) FAINT 0)
-                 (if (byte 4) INVERSE 0)
-                 (if (byte 5) INVISIBLE 0)
-                 (if (byte 6) STRIKETHROUGH 0)
-                 (if (= 0 (ffi/ref style 'i32 underline-index)) 0 UNDERLINE))))
+    (bitwise-ior (if (byte 0)
+                     BOLD
+                     0)
+                 (if (byte 1)
+                     ITALIC
+                     0)
+                 (if (byte 2)
+                     FAINT
+                     0)
+                 (if (byte 4)
+                     INVERSE
+                     0)
+                 (if (byte 5)
+                     INVISIBLE
+                     0)
+                 (if (byte 6)
+                     STRIKETHROUGH
+                     0)
+                 (if (= 0 (ffi/ref style 'i32 underline-index))
+                     0
+                     UNDERLINE))))
 
 (ffi/defbindings library
                  %load!
@@ -289,9 +372,28 @@
 (def- (snake name)
   (string-replace (str name) "-" "_"))
 
+(def- described-types nil)
+
+(def- (type-descriptions)
+  "ghostty_type_json's \"types\", parsed once: parsing takes over a second."
+  (unless described-types (set! described-types ((json/parse (%type-json)) "types")))
+  described-types)
+
+(def (check-enums!)
+  "Compare every value declared with enum against ghostty_type_json."
+  (let ((described (type-descriptions))
+        (count 0))
+    (for ((c-name members :in enums))
+      (let ((d (get described c-name)))
+        (unless (and d (equal? (d "kind") "enum")) (error "ghostty: library does not describe enum" c-name))
+        (for ((member value :in members))
+          (unless (equal? (get (d "values") member) value) (error "ghostty: enum value differs" c-name member value))
+          (set! count (+ count 1)))))
+    count))
+
 (def (check-layouts!)
   "Compare every declared layout's size, alignment and field offsets with ghostty_type_json."
-  (let ((described (json/parse (%type-json))))
+  (let ((described (type-descriptions)))
     (for-each (fn (c-name)
                 (let ((d (get described c-name))
                       (t (get (get layouts c-name) :layout))
@@ -383,7 +485,7 @@
     (%key-options encoder (term :handle))
     ;; Text composition stays on SDL's text-input path. Here Option is a modifier.
     (ffi/set! scratch 'i32 0 1)
-    (%key-option encoder 6 scratch)
+    (%key-option encoder KEY-OPT-MACOS-OPTION-AS-ALT scratch)
     (%key-code event key)
     (%key-mods event mods)
     (%key-action event action)
@@ -395,7 +497,7 @@
                    1))
     (%key-unshifted event unshifted)
     (let ((result (%key-encode encoder event (term :key-buffer) (term :key-capacity) scratch)))
-      (when (= result -3)
+      (when (= result OUT-OF-SPACE)
         (let ((capacity (ffi/ref scratch 'size-t 0))
               (buffer (ffi/alloc 'u8 capacity)))
           (ffi/free! (term :key-buffer))
@@ -529,10 +631,9 @@
   (when (and (state-ref term STATE-CURSOR-VISIBLE 'bool) (state-ref term STATE-CURSOR-VIEWPORT-HAS-VALUE 'bool))
     (list (state-ref term STATE-CURSOR-VIEWPORT-X 'u16) (state-ref term STATE-CURSOR-VIEWPORT-Y 'u16))))
 
-;; Colors are available through the standard sized render-state query.
-;; The old colors_get convenience symbol is absent in current libghostty-vt.
+;; A separate function so tests can make it fail.
 (def- (%colors-get state output)
-  (%state-get state 19 output))
+  (%state-get state STATE-COLORS output))
 
 (def (colors term)
   (let ((c (ffi/alloc Colors 1)))
@@ -657,12 +758,12 @@ UNDERLINE. Text strings may be shared between calls and must not be mutated."
       (when (%cells-next (term :cells))
         (check! "row_cells_get" (%cell-get (term :cells) CELL-HAS-STYLING scratch))
         (let ((styled? (ffi/ref scratch 'bool 0))
-              (first (%cell-get (term :cells) CELL-UTF8 buf))
+              (first (%cell-get (term :cells) CELL-GRAPHEMES-UTF8 buf))
               (n (ffi/ref buf 'size-t buffer-len-index))
               (result (if (= first -3)
                           (begin
                             (utf8-buffer! term n)
-                            (%cell-get (term :cells) CELL-UTF8 buf))
+                            (%cell-get (term :cells) CELL-GRAPHEMES-UTF8 buf))
                           first)))
           (check! "graphemes_utf8" result)
           (when styled? (check! "cell_style" (%cell-get (term :cells) CELL-STYLE (term :style))))
@@ -762,7 +863,7 @@ neither, when manse-native was built without libghostty-vt."
     (defer
       (begin
         (ffi/set! value 'size-t 0 bytes)
-        (check! "scrollback bytes" (%terminal-set (term :handle) 27 value))
+        (check! "scrollback bytes" (%terminal-set (term :handle) OPT-SCROLLBACK-MAX-BYTES value))
         (ffi/set! value 'size-t 0 lines)
-        (check! "scrollback lines" (%terminal-set (term :handle) 28 value)))
+        (check! "scrollback lines" (%terminal-set (term :handle) OPT-SCROLLBACK-MAX-LINES value)))
       (ffi/free! value))))

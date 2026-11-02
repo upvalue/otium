@@ -4,6 +4,7 @@
 
 (g/load!)
 (check 9 (g/check-layouts!))
+(check #t (> (g/check-enums!) 0))
 (check #t (string? (get (g/build-info) :version)))
 
 (def t (g/new 10 3))

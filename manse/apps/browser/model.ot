@@ -1,5 +1,5 @@
-(ns manse.apps.development.model)
-(require manse.apps.development.inspect :as inspect)
+(ns manse.apps.browser.model)
+(require manse.apps.browser.inspect :as inspect)
 (require otium.dev :as dev)
 
 (def (catalog space)

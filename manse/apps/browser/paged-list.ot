@@ -1,4 +1,4 @@
-(ns manse.apps.development.paged-list)
+(ns manse.apps.browser.paged-list)
 (require otium.ui :as ui)
 (require manse.theme :as theme)
 
@@ -15,7 +15,7 @@
   (not (not (member (get event :key) '("Up" "Down")))))
 
 (defmethod (ui/layout-style (w PagedList))
-  {:grow 1 :height 240})
+  {:grow 1 :height 0})
 
 (defmethod (ui/handle-event (w PagedList) event)
   (when (eq? (get event :kind) :key-down)
@@ -40,26 +40,34 @@
   (let ((rows (w :rows))
         (selected (min (w :selected) (- (length rows) 1))))
     (apply ui/scroll
-           {:axis :y :grow 1 :height 240 :gap 2 :reveal selected}
+           {:axis :y :grow 1 :height 0 :gap 1 :reveal selected}
            (for ((i :range (length rows))
                  (out :collect (let ((entry (get rows i))
-                                     (index i))
+                                     (index i)
+                                     (selected? (= i selected)))
                                  (ui/row {:key index
-                                          :padding 5
-                                          :background (if (= index selected)
-                                                          theme/surface
-                                                          theme/background)
+                                          :padding-x 10
+                                          :padding-y 6
+                                          :gap 12
+                                          :radius 4
+                                          :align-items :center
+                                          :background (when selected? theme/selected)
                                           :on-press (fn ()
                                                       (set! (w :selected) index)
                                                       ((w :choose) entry))}
                                          (ui/label {:size 13
                                                     :wrap #f
-                                                    :color (if (= index selected)
-                                                               theme/accent
-                                                               theme/text)}
-                                                   (entry :text))))))
+                                                    :width 0
+                                                    :grow 1
+                                                    :color (if selected?
+                                                               theme/text
+                                                               theme/muted)}
+                                                   (entry :text))
+                                         (when (entry :detail)
+                                           (ui/label {:size 12 :wrap #f :color theme/faint} (entry :detail)))))))
              => out))))
 
 (def (view key rows choose)
-  ;; No model objects in properties: bounded presentation rows and callback only.
+  "A keyboard-navigable list of rows, each {:text :detail}; choose gets the row picked.
+No model objects in properties: bounded presentation rows and callback only."
   (ui/new PagedList {:key key :rows rows :choose choose}))

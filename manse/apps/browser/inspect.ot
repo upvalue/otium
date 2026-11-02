@@ -1,4 +1,4 @@
-(ns manse.apps.development.inspect)
+(ns manse.apps.browser.inspect)
 
 (def page-size 64)
 

@@ -1,11 +1,31 @@
-(ns manse.apps.development.repl)
+(ns manse.apps.repl)
+(require manse.apps :as apps)
+(require manse.apps.terminal :as terminal)
+(require manse.ghostty :as ghostty)
 (require manse.program :as program)
 (require otium.dev :as dev)
-(require manse.apps.development.inspect :as inspect)
+(require manse.apps.browser.inspect :as inspect)
+
+;; A REPL on Manse's own runtime, in a terminal column.
+
+(defonce latest {:result #f})
+
+(def (last-result)
+  "The most recent result from any REPL as [value], or #f. Wrapped so nil survives."
+  (latest :result))
+
+(def (forget!)
+  "Drop the last result, so the REPL no longer keeps it alive."
+  (put! latest :result #f))
+
+(def (remember! state value)
+  (put! state :result [value])
+  (put! latest :result [value]))
 
 (def (evaluate! state code)
   (let ((value (dev/evaluate-form (string->symbol (state :namespace)) (read-string (str "(begin\n" code "\n)")) #t)))
-    (put! state :result [value] :namespace (str (current-ns)))
+    (remember! state value)
+    (put! state :namespace (str (current-ns)))
     (inspect/summary value)))
 
 (def (interrupt? problem)
@@ -21,7 +41,7 @@
 
 (def (run state)
   (println "Manse live runtime. Ctrl+C interrupts; Ctrl+D closes this REPL.")
-  (println ":ns NAME changes namespace; inspect the last result with the browser button.")
+  (println ":ns NAME changes namespace. Cmd+P, \"Inspect the last REPL result\", browses a result.")
   (let ((pending "")
         (done? #f))
     (while (not done?)
@@ -45,8 +65,20 @@
         (catch problem
           (set! pending "")
           (put! state :busy? #f)
-          (unless (interrupt? problem) (put! state :result [problem]))
+          (unless (interrupt? problem) (remember! state problem))
           (println (failure problem)))))))
 
 (def (start state)
+  "The REPL as a program for manse.session, keeping its namespace and last result in state."
   (program/start (fn (_) (run state)) "Manse REPL"))
+
+(def (open! id)
+  "A terminal app running a new REPL."
+  (let ((app (terminal/open! id (start {:namespace "user" :result #f :busy? #f}))))
+    (try
+      (begin
+        (ghostty/limit-scrollback! ((app :session) :term) 4194304 2000)
+        app)
+      (catch problem
+        (apps/close! app)
+        (error problem)))))

@@ -20,10 +20,10 @@ def threaded(name):
         t.expect(t.otium('-L', '.', 'manse/tests/' + name + '.ot'), contains=['checks passed'])
 
 
-for name in ('program', 'development-repl'):
+for name in ('program', 'repl'):
     threaded(name)
 
 
-@test('manse development ui', suite='gpu', needs=['ui'], timeout=60, parallel=False)
-def development_ui(t):
-    t.expect(t.otium('-L', '.', 'manse/tests/development-ui.ot'), contains=['development UI:'])
+@test('manse browser ui', suite='gpu', needs=['ui'], timeout=60, parallel=False)
+def browser_ui(t):
+    t.expect(t.otium('-L', '.', 'manse/tests/browser-ui.ot'), contains=['browser UI:'])

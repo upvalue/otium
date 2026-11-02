@@ -1,6 +1,6 @@
 (require otium.test :refer (check report fails?))
-(require manse.apps.development.inspect :as inspect)
-(require manse.apps.development.model :as model)
+(require manse.apps.browser.inspect :as inspect)
+(require manse.apps.browser.model :as model)
 (require otium.dev :as dev)
 
 (def big (for ((i :range 100000) (out :collect-array 7)) => out))

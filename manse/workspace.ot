@@ -8,7 +8,8 @@
 (require manse.sysinfo :as sysinfo)
 (require manse.apps.terminal :as terminal)
 (require manse.apps.echo :as echo)
-(require manse.apps.development :as development)
+(require manse.apps.repl :as repl)
+(require manse.apps.browser :as browser)
 (require manse.pty :as pty)
 (require manse.settings :as settings)
 (require manse.theme :as theme)
@@ -46,10 +47,17 @@
     (add-app! (str "Terminal " id)
               (terminal/open-shell! id (or (workspace :shell) (process/getenv "SHELL") "/bin/sh")))))
 
-(def (new-development!)
-  (let ((id (add-app! "Development" (development/open! ((workspace :apps) :next-id)))))
-    (strip/width-step! (workspace :strip) 1)
-    id))
+(def (new-repl!)
+  (add-app! "REPL" (repl/open! ((workspace :apps) :next-id))))
+
+(def (new-browser!)
+  (add-app! "Object browser" (browser/open!)))
+
+(def (inspect-last-result!)
+  "Open a browser on the last REPL result."
+  (let ((app (browser/open!)))
+    (browser/inspect-last-result! app)
+    (add-app! "Object browser" app)))
 
 (def (new-echo!)
   (add-app! "Echo" (terminal/open! ((workspace :apps) :next-id) (echo/start))))
@@ -62,7 +70,7 @@
 
 (def bindings
   "Key, label for the help panel, action and description."
-  [["Meta+D" "Cmd+D" :development "Open a live development workspace"]
+  [["Meta+P" "Cmd+P" :palette "Run a command by name"]
    ["Meta+T" "Cmd+T" :new "New terminal to the right"]
    ["Meta+E" "Cmd+E" :echo "New echo program to the right"]
    ["Meta+W" "Cmd+W" :close "Close the focused column"]
@@ -87,6 +95,40 @@
       (for-each (fn (letter) (put! map letter (list :hint letter))) strip/alphabet))
     map))
 
+;; The command palette
+
+(def commands
+  "Name and action for commands with no key of their own."
+  [["New REPL on Manse's runtime" :repl]
+   ["New object browser" :browser]
+   ["Inspect the last REPL result" :inspect-result]])
+
+(def (palette-commands)
+  "Every command as {:name :action :key}: the ones above, then each binding."
+  (append (map (fn (c) {:name (get c 0) :action (get c 1)}) (array-to-list commands))
+          (for ((b :in bindings)
+                (out :collect {:name (get b 3) :action (get b 2) :key (get b 1)} :when (not (eq? (get b 2) :palette))))
+            => out)))
+
+(def (palette-matches)
+  "Commands whose name contains every word typed, ignoring case."
+  (let ((words (string-split (string-downcase ((workspace :palette) :query)))))
+    (filter (fn (c)
+              (let ((name (string-downcase (c :name))))
+                (not (exists (fn (word) (not (string-contains? name word))) words))))
+            (palette-commands))))
+
+(def (palette-move! delta)
+  (let ((p (workspace :palette))
+        (count (length (palette-matches))))
+    (put! p :selected (max 0 (min (- count 1) (+ (p :selected) delta))))))
+
+(def (palette-run!)
+  (let ((matches (palette-matches))
+        (selected ((workspace :palette) :selected)))
+    (put! workspace :popup nil)
+    (when (< selected (length matches)) (action! ((nth matches selected) :action)))))
+
 (def (action! action)
   (let ((s (workspace :strip)))
     (if (pair? action)
@@ -95,7 +137,18 @@
           ((:cancel) (strip/hints-cancel! s))
           ((:new) (new-terminal!))
           ((:echo) (new-echo!))
-          ((:development) (new-development!))
+          ((:repl) (new-repl!))
+          ((:browser) (new-browser!))
+          ((:inspect-result) (inspect-last-result!))
+          ((:palette)
+           (if (eq? (workspace :popup) :palette)
+               (put! workspace :popup nil)
+               (put! workspace :popup :palette :palette {:query "" :selected 0})))
+          ((:palette-up :palette-down)
+           (palette-move! (if (eq? action :palette-up)
+                              -1
+                              1)))
+          ((:palette-run) (palette-run!))
           ((:close) (put! workspace :closed-column? #t) (when (strip/focused s) (close-app! (strip/focused s))))
           ((:left) (strip/focus-move! s -1))
           ((:right) (strip/focus-move! s 1))
@@ -106,11 +159,17 @@
           ((:font-larger :font-smaller)
            (let ((spec (settings/setting-specs :font-size)))
              (settings/configure! {:font-size (clamp (+ (settings/options :font-size)
-                                                        (if (eq? action :font-larger) 1 -1))
+                                                        (if (eq? action :font-larger)
+                                                            1
+                                                            -1))
                                                      (spec :min)
                                                      (spec :max))})))
           ((:jump) (strip/hints-start! s))
-          ((:help :sysinfo) (put! workspace :popup (if (eq? action (workspace :popup)) nil action)))
+          ((:help :sysinfo)
+           (put! workspace
+                 :popup (if (eq? action (workspace :popup))
+                            nil
+                            action)))
           ((:close-popup) (put! workspace :popup nil))
           (else nil)))
     (invalidate!)
@@ -285,7 +344,10 @@ one the last view asked for, e.g. by a click. Record the focus this view asks fo
   (let ((h (quotient seconds 3600))
         (m (quotient (modulo seconds 3600) 60))
         (s (modulo seconds 60))
-        (two (fn (n) (if (< n 10) (str "0" n) (str n)))))
+        (two (fn (n)
+               (if (< n 10)
+                   (str "0" n)
+                   (str n)))))
     (str h ":" (two m) ":" (two s))))
 
 (def- (megabytes bytes)
@@ -304,31 +366,93 @@ one the last view asked for, e.g. by a click. Record the focus this view asks fo
                        (ui/label {:color theme/text :size 12 :width 0 :grow 1} value)))))
     (card "System"
           (list (row "Uptime" (duration (info :uptime)))
-                (row "Process memory" (if fp (str (megabytes (fp :current)) " (peak " (megabytes (fp :peak)) ")") "unknown"))
+                (row "Process memory"
+                     (if fp
+                         (str (megabytes (fp :current)) " (peak " (megabytes (fp :peak)) ")")
+                         "unknown"))
                 (row "Otium heap" (str (megabytes (heap :live)) " live, " (megabytes (heap :held)) " held"))
                 (row "Peak heap in use" (megabytes (heap :peak)))
                 (row "Collections" (str (heap :collections)))
                 (row "Time collecting"
                      (str (milliseconds (* 1000000 (heap :gc-ms))) ", longest " (milliseconds (info :longest-gc-ns))))
                 (row "Allocated in total" (megabytes (info :allocated)))
-                (row "Native threads" (if (info :native-threads) (str (info :native-threads)) "unknown"))
+                (row "Native threads"
+                     (if (info :native-threads)
+                         (str (info :native-threads))
+                         "unknown"))
                 (row "Otium threads" (str (info :threads)))))))
+
+(def (palette)
+  (let ((p (workspace :palette))
+        (matches (palette-matches))
+        (selected (min (p :selected) (- (length matches) 1))))
+    (ui/column {:width 520
+                :padding 8
+                :gap 2
+                :radius 8
+                :background theme/panel
+                :border theme/border
+                :on-press (fn () nil)}
+               (ui/text-field {:key :palette-query
+                               :focus #t
+                               :height 36
+                               :size 14
+                               :font :ui
+                               :value (p :query)
+                               :placeholder "Run a command"
+                               :on-change (fn (text)
+                                            (put! p :query text :selected 0)
+                                            (invalidate!))})
+               (ui/column {:height 6})
+               (if (null? matches)
+                   (ui/label {:size 13 :color theme/faint :padding 10} "No matching commands")
+                   (for ((c :in matches)
+                         (i :range (length matches))
+                         (out :collect (ui/row {:key i
+                                                :padding-x 10
+                                                :padding-y 7
+                                                :gap 10
+                                                :radius 4
+                                                :align-items :center
+                                                :background (when (= i selected) theme/selected)
+                                                :on-press (fn ()
+                                                            (put! p :selected i)
+                                                            (palette-run!))}
+                                               (ui/label {:size 13
+                                                          :wrap #f
+                                                          :width 0
+                                                          :grow 1
+                                                          :color (if (= i selected)
+                                                                     theme/text
+                                                                     theme/muted)}
+                                                         (c :name))
+                                               (when (c :key) (w/key-cap (c :key))))))
+                     => out)))))
 
 (def (popup name)
   "A card over the whole window. Escape, its own key or a click outside closes it;
-the other popup's key switches to that one."
+the other popup's key switches to that one. The palette sits near the top."
   (ui/column {:key :popup
               :overlay #t
               :modal #t
               :align-items :center
               :background theme/scrim
-              :keymap {"Escape" :close-popup "Meta+I" :sysinfo "Meta+Shift+/" :help}
+              :keymap (if (eq? name :palette)
+                          {"Escape" :close-popup
+                           "Meta+P" :palette
+                           "Up" :palette-up
+                           "Down" :palette-down
+                           "Return" :palette-run}
+                          {"Escape" :close-popup "Meta+I" :sysinfo "Meta+Shift+/" :help})
               :on-action (fn (action) (action! action))
               :on-press (fn () (action! :close-popup))}
-             (w/spacer)
+             (if (eq? name :palette)
+                 (ui/column {:height 96})
+                 (w/spacer))
              (case name
                ((:help) (help))
-               ((:sysinfo) (sysinfo-panel)))
+               ((:sysinfo) (sysinfo-panel))
+               ((:palette) (palette)))
              (w/spacer)))
 
 (def (view tree)
@@ -340,12 +464,15 @@ the other popup's key switches to that one."
     (strip/sync! s (map :id entries))
     (restore-focus! tree)
     (adopt-focus! tree)
-    (list
-     (ui/row {:key :workspace :grow 1 :background theme/background :keymap (keymap) :on-action (fn (action) (action! action))}
-            (ui/scroll {:key :strip :axis :x :width 0 :grow 1 :padding padding :gap gap :reveal (strip/focused s)}
-                       (map (fn (id) (column s (find (fn (entry) (equal? (entry :id) id)) entries) viewport))
-                            (strip/ids s))))
-     (when (workspace :popup) (popup (workspace :popup))))))
+    (list (ui/row {:key :workspace
+                   :grow 1
+                   :background theme/background
+                   :keymap (keymap)
+                   :on-action (fn (action) (action! action))}
+                  (ui/scroll {:key :strip :axis :x :width 0 :grow 1 :padding padding :gap gap :reveal (strip/focused s)}
+                             (map (fn (id) (column s (find (fn (entry) (equal? (entry :id) id)) entries) viewport))
+                                  (strip/ids s))))
+          (when (workspace :popup) (popup (workspace :popup))))))
 
 (def- (script-path relative fallback)
   (let ((script (process/script-name)))

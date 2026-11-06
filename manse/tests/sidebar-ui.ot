@@ -1,0 +1,52 @@
+;; Isolated offscreen layout checks at wide and narrow sizes, with real browser views.
+(require manse.workspace)
+(ns manse.workspace)
+(require otium.test :refer (check report))
+
+(def layout-width 900)
+
+(def real-open ui/open)
+
+(set! ui/open (fn (options) (real-open (put options :headless #t :scale 1))))
+(set! settings/load! (fn () (settings/configure! {:width layout-width :height 640 :terminals 0})))
+(set! icon-path (fn () (str (current-directory) "/manse/assets/manse-mark.png")))
+
+(def (scripted! window)
+  (let ((tick (get window :tick 0)))
+    (put! window :tick (+ tick 1))
+    (when (= tick 2)
+      (new-browser!)
+      (new-workspace!)
+      (groups/rename! (workspace :groups) ((workspace :groups) :active) "Project")
+      (new-browser!)
+      (new-browser!))
+    (when (= tick 15)
+      (let ((tree (window :tree))
+            (content (ui/find-key tree :strip)))
+        (check "content width reserves sidebar only on wide windows"
+               (if (< layout-width 640)
+                   (* 1.0 layout-width)
+                   (- layout-width (* 1.0 sidebar/width)))
+               ((content :bounds) :width))
+        (check "content fits available height"
+               (if (< layout-width 640)
+                   608.0
+                   640.0)
+               ((content :bounds) :height))
+        (check "selected app has a real column"
+               #t
+               (if (column-node tree (strip/focused (workspace :strip)))
+                   #t
+                   #f)))
+      (when (< layout-width 640) (action! :sidebar)))
+    (when (= tick 25)
+      (check "no frame error" #f (window :last-error))
+      (when (< layout-width 640)
+        (check "narrow drawer is modal" #t (get ((ui/find-key (window :tree) :workspace-drawer) :options) :modal)))
+      (ui/capture! window (str (process/getenv "OTIUM_BUILD") "/sidebar-" layout-width ".png")))
+    (when (= tick 30) (put! workspace :quit? #t))))
+
+(main)
+(set! layout-width 480)
+(main)
+(report "sidebar layout")

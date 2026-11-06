@@ -26,6 +26,7 @@
 (defmethod (apps/info (app TerminalApp))
   (let ((session (app :session))
         (info {:kind :terminal
+               :title (get session :title "")
                :status (cond
                          ((session :closed?) :closed)
                          ((session :exit) :exited)

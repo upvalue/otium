@@ -5,6 +5,8 @@
 (require manse.apps :as apps)
 (require manse.session :as sessions)
 (require manse.strip :as strip)
+(require manse.workspaces :as groups)
+(require manse.sidebar :as sidebar)
 (require manse.sysinfo :as sysinfo)
 (require manse.apps.terminal :as terminal)
 (require manse.apps.echo :as echo)
@@ -16,6 +18,27 @@
 (require manse.widgets :as w)
 
 (defonce workspace {:apps (apps/registry) :strip (strip/strip)})
+
+;; Adopt the old strip once, retaining every live app through reload.
+(unless (workspace :groups) (put! workspace :groups (groups/new (workspace :strip))))
+
+(def (activate! id)
+  (groups/select! (workspace :groups) id)
+  (put! workspace
+        :strip ((groups/active (workspace :groups)) :strip)
+        :ui-focus nil
+        :requested-focus nil
+        :focus-content? #t
+        :drawer? #f
+        :sidebar-focus? #f))
+
+(def (new-workspace!)
+  (activate! (groups/create! (workspace :groups))))
+
+(def (move-app! id destination)
+  (groups/move! (workspace :groups) id destination)
+  (activate! destination)
+  (invalidate!))
 
 ;; lint: allow(rest-arguments) forwards any number of predicates
 (def (query-apps . predicates)
@@ -32,13 +55,15 @@
 (def (add-app! name app)
   "Register an app and open its column to the right of the focused one."
   (let ((id (apps/add! (workspace :apps) name app)))
-    (strip/add! (workspace :strip) id)
+    (groups/add! (workspace :groups) id)
+    (put! workspace :focus-content? #t :sidebar-focus? #f)
     (invalidate!)
     id))
 
 (def (close-app! id)
   (let ((app (apps/remove! (workspace :apps) id)))
-    (strip/remove! (workspace :strip) id)
+    (groups/remove! (workspace :groups) id)
+    (when (workspace :focus-keys) (put! (workspace :focus-keys) id nil))
     (invalidate!)
     app))
 
@@ -70,7 +95,8 @@
 
 (def bindings
   "Key, label for the help panel, action and description."
-  [["Meta+P" "Cmd+P" :palette "Run a command by name"]
+  [["Meta+B" "Cmd+B" :sidebar "Focus or hide workspace sidebar"]
+   ["Meta+P" "Cmd+P" :palette "Run a command by name"]
    ["Meta+T" "Cmd+T" :new "New terminal to the right"]
    ["Meta+E" "Cmd+E" :echo "New echo program to the right"]
    ["Meta+W" "Cmd+W" :close "Close the focused column"]
@@ -99,13 +125,21 @@
 
 (def commands
   "Name and action for commands with no key of their own."
-  [["New REPL on Manse's runtime" :repl]
+  [["New workspace" :workspace-new]
+   ["Rename workspace" :workspace-rename]
+   ["Delete empty workspace" :workspace-delete]
+   ["Next workspace" :workspace-next]
+   ["Previous workspace" :workspace-previous]
+   ["New REPL on Manse's runtime" :repl]
    ["New object browser" :browser]
    ["Inspect the last REPL result" :inspect-result]])
 
 (def (palette-commands)
   "Every command as {:name :action :key}: the ones above, then each binding."
-  (append (map (fn (c) {:name (get c 0) :action (get c 1)}) (array-to-list commands))
+  (append (for ((item :in ((workspace :groups) :items))
+                (out :collect {:name (str "Move selected app to " (item :name)) :action (list :app-move (item :id))}))
+            => out)
+          (map (fn (c) {:name (get c 0) :action (get c 1)}) (array-to-list commands))
           (for ((b :in bindings)
                 (out :collect {:name (get b 3) :action (get b 2) :key (get b 1)} :when (not (eq? (get b 2) :palette))))
             => out)))
@@ -132,8 +166,45 @@
 (def (action! action)
   (let ((s (workspace :strip)))
     (if (pair? action)
-        (strip/hint-type! s (cadr action))
+        (case (car action)
+          ((:workspace-select) (activate! (cadr action)))
+          ((:app-select) (activate! (cadr action)) (strip/focus! (workspace :strip) (caddr action)))
+          ((:workspace-expand)
+           (let ((item (groups/lookup (workspace :groups) (cadr action))))
+             (put! item :expanded? (not (item :expanded?)))))
+          ((:app-move) (when (strip/focused s) (move-app! (strip/focused s) (cadr action))))
+          ((:hint) (strip/hint-type! s (cadr action)))
+          (else nil))
         (case action
+          ((:workspace-new) (new-workspace!))
+          ((:workspace-delete)
+           (groups/delete! (workspace :groups) ((workspace :groups) :active))
+           (activate! ((workspace :groups) :active)))
+          ((:workspace-next :workspace-previous)
+           (let ((items ((workspace :groups) :items))
+                 (index (find-index (fn (item) (equal? (item :id) ((workspace :groups) :active))) items))
+                 (next (modulo (+ index
+                                  (if (eq? action :workspace-next)
+                                      1
+                                      -1)
+                                  (length items))
+                               (length items))))
+             (activate! ((get items next) :id))))
+          ((:workspace-rename) (put! workspace :popup :rename :rename ((groups/active (workspace :groups)) :name)))
+          ((:rename-save)
+           (unless (equal? (workspace :rename) "")
+             (groups/rename! (workspace :groups) ((workspace :groups) :active) (workspace :rename))
+             (put! workspace :popup nil :focus-content? #t)))
+          ((:sidebar)
+           (put! workspace
+                 :drawer? (not (workspace :drawer?))
+                 :sidebar-focus? (not (workspace :sidebar-focus?))
+                 :focus-content? (not (workspace :sidebar-focus?))))
+          ((:sidebar-up :sidebar-down)
+           (sidebar-move! (if (eq? action :sidebar-up)
+                              -1
+                              1)))
+          ((:sidebar-dismiss) (put! workspace :drawer? #f :sidebar-focus? #f :focus-content? #t))
           ((:cancel) (strip/hints-cancel! s))
           ((:new) (new-terminal!))
           ((:echo) (new-echo!))
@@ -170,8 +241,9 @@
                  :popup (if (eq? action (workspace :popup))
                             nil
                             action)))
-          ((:close-popup) (put! workspace :popup nil))
+          ((:close-popup) (put! workspace :popup nil :focus-content? #t))
           (else nil)))
+    (when (memq action '(:left :right :jump :cancel :close)) (put! workspace :focus-content? #t :sidebar-focus? #f))
     (invalidate!)
     :handled))
 
@@ -220,6 +292,7 @@ MANSE_KEYS runs actions by key name, separated by spaces, at iteration 40."
 
 ;; Closing from :step! would leave the frame painting with a freed renderer.
 (def (after-frame! window)
+  (when (window :tree) (apply-pending-focus! (window :tree)))
   (put! workspace :closed-column? #f)
   (when (workspace :quit?) (ui/close! window)))
 
@@ -234,12 +307,56 @@ MANSE_KEYS runs actions by key name, separated by spaces, at iteration 40."
   (max 160 (- (* fraction (+ (- viewport (* 2 padding)) gap)) gap)))
 
 (def (focused-column tree)
-  "The ID of the column holding the focused widget, or nil."
-  (let loop ((node (ui/focused tree)))
-    (cond
-      ((not (ui/mounted? node)) nil)
-      ((and (ui/mounted? (node :parent)) (eq? (dispatch-type (ui/instance (node :parent))) ui/Scroll)) (node :key))
-      (else (loop (node :parent))))))
+  "Only a direct child of the content strip is an app column."
+  (let ((content (ui/find-key tree :strip)))
+    (let loop ((node (ui/focused tree)))
+      (cond
+        ((not (ui/mounted? node)) nil)
+        ((eq? (node :parent) content) (node :key))
+        (else (loop (node :parent)))))))
+
+(def (column-node tree id)
+  (let ((content (ui/find-key tree :strip)))
+    (when content (find (fn (node) (equal? (node :key) id)) (ui/children content)))))
+
+(def (focusables node)
+  (if (not node)
+      '()
+      (append (if (ui/focusable? node)
+                  (list node)
+                  '())
+              (apply append (map focusables (array-to-list (ui/children node)))))))
+
+(def (sidebar-move! delta)
+  (let ((window (workspace :window))
+        (tree (and window (window :tree)))
+        (nodes (and tree (focusables (ui/find-key tree :sidebar)))))
+    (when (and nodes (not (null? nodes)))
+      (let ((index (or (find-index (fn (node) (eq? node (ui/focused tree))) nodes) 0)))
+        (let ((node (nth nodes (clamp (+ index delta) 0 (- (length nodes) 1)))))
+          (ui/focus! tree node)
+          (put! (workspace :groups) :sidebar-key (node :key)))))))
+
+(def (apply-pending-focus! tree)
+  (let ((before (ui/focused tree)))
+    (unless (workspace :popup)
+      (cond
+        ((workspace :sidebar-focus?)
+         (let ((nodes (focusables (ui/find-key tree :sidebar))))
+           (unless (or (null? nodes) (member (ui/focused tree) nodes)) (ui/focus! tree (car nodes)))))
+        ((workspace :focus-content?)
+         (let ((content (ui/find-key tree :strip))
+               (id (strip/focused (workspace :strip)))
+               (column (and content id (column-node tree id)))
+               (key (get (get workspace :focus-keys {}) id))
+               (saved (and column key (ui/find-key column key)))
+               (nodes (focusables column)))
+           (when column
+             (cond
+               ((and saved (ui/focusable? saved)) (ui/focus! tree saved))
+               ((not (null? nodes)) (ui/focus! tree (car nodes)))))
+           (put! workspace :focus-content? #f)))))
+    (unless (eq? before (ui/focused tree)) (invalidate!))))
 
 (def (window-focused?)
   (let ((window (workspace :window)))
@@ -250,11 +367,17 @@ MANSE_KEYS runs actions by key name, separated by spaces, at iteration 40."
 (def (restore-focus! tree)
   "Give UI focus back to the focused column when the window becomes active again;
 losing window focus clears it."
-  (when (and (not (ui/focused tree)) (strip/focused (workspace :strip)) (window-focused?))
+  (when (and (not (workspace :popup))
+             (not (workspace :sidebar-focus?))
+             (not (ui/focused tree))
+             (strip/focused (workspace :strip))
+             (window-focused?))
     (let ((strip-node (ui/find-key tree :strip))
-          (column (and strip-node (ui/find-key strip-node (strip/focused (workspace :strip)))))
+          (column (and strip-node (column-node tree (strip/focused (workspace :strip)))))
           (body (and column (ui/find-key column :body))))
-      (when (and body (ui/focusable? body)) (ui/focus! tree body)))))
+      (if (and body (ui/focusable? body))
+          (ui/focus! tree body)
+          (put! workspace :focus-content? #t)))))
 
 (def (adopt-focus! tree)
   "Follow UI focus that moved since the last view to a column other than the
@@ -263,6 +386,9 @@ one the last view asked for, e.g. by a click. Record the focus this view asks fo
         (s (workspace :strip)))
     (when (and id (not (equal? id (workspace :ui-focus))) (not (equal? id (workspace :requested-focus))))
       (strip/focus! s id))
+    (when (and id (ui/focused tree) ((ui/focused tree) :key))
+      (unless (workspace :focus-keys) (put! workspace :focus-keys {}))
+      (put! (workspace :focus-keys) id ((ui/focused tree) :key)))
     (put! workspace :ui-focus id)
     (put! workspace :requested-focus (strip/focused s))))
 
@@ -282,10 +408,7 @@ one the last view asked for, e.g. by a click. Record the focus this view asks fo
                         theme/text
                         theme/muted)
                     theme/ui-size
-                    (str (entry :name)
-                         (if (eq? (get info :status) :exited)
-                             " · exited"
-                             "")))
+                    (apps/label entry))
             (w/spacer)
             (if label
                 (w/hint-badge label (strip/typed s))
@@ -300,7 +423,8 @@ one the last view asked for, e.g. by a click. Record the focus this view asks fo
                     :key
                     :body
                     :children (source :children)
-                    :options (put (or (source :options) {}) :focus focused?))))
+                    :options (put (or (source :options) {})
+                                  :focus (and focused? (not (workspace :popup)) (not (workspace :sidebar-focus?)))))))
     (ui/column {:key id
                 :cache #t
                 :animate-size #t
@@ -315,6 +439,7 @@ one the last view asked for, e.g. by a click. Record the focus this view asks fo
                             theme/border-variant)
                 :on-press (fn ()
                             (strip/focus! s id)
+                            (put! workspace :sidebar-focus? #f)
                             (invalidate!))}
                (header s entry focused?)
                (ui/column {:height 1 :background theme/border-variant})
@@ -437,13 +562,15 @@ the other popup's key switches to that one. The palette sits near the top."
               :modal #t
               :align-items :center
               :background theme/scrim
-              :keymap (if (eq? name :palette)
-                          {"Escape" :close-popup
-                           "Meta+P" :palette
-                           "Up" :palette-up
-                           "Down" :palette-down
-                           "Return" :palette-run}
-                          {"Escape" :close-popup "Meta+I" :sysinfo "Meta+Shift+/" :help})
+              :keymap (case name
+                        ((:palette)
+                         {"Escape" :close-popup
+                          "Meta+P" :palette
+                          "Up" :palette-up
+                          "Down" :palette-down
+                          "Return" :palette-run})
+                        ((:rename) {"Escape" :close-popup "Return" :rename-save})
+                        (else {"Escape" :close-popup "Meta+I" :sysinfo "Meta+Shift+/" :help}))
               :on-action (fn (action) (action! action))
               :on-press (fn () (action! :close-popup))}
              (if (eq? name :palette)
@@ -452,16 +579,32 @@ the other popup's key switches to that one. The palette sits near the top."
              (case name
                ((:help) (help))
                ((:sysinfo) (sysinfo-panel))
-               ((:palette) (palette)))
+               ((:palette) (palette))
+               ((:rename)
+                (card "Rename workspace"
+                      (list (ui/text-field {:key :rename
+                                            :focus #t
+                                            :height 36
+                                            :value (workspace :rename)
+                                            :on-change (fn (value) (put! workspace :rename value))})
+                            (ui/button {:on-press (fn () (action! :rename-save))} "Save")))))
              (w/spacer)))
 
 (def (view tree)
   (let ((s (workspace :strip))
         (entries ((workspace :apps) :entries))
-        (viewport (if (workspace :window)
-                      ((workspace :window) :width)
-                      900)))
-    (strip/sync! s (map :id entries))
+        (window-width (if (workspace :window)
+                          ((workspace :window) :width)
+                          900))
+        (narrow? (< window-width 640))
+        (viewport (if narrow?
+                      window-width
+                      (- window-width sidebar/width))))
+    ;; Membership is explicit; never append every registered app to this strip.
+    (for-each (fn (item)
+                (for-each (fn (id) (unless (apps/find (workspace :apps) id) (strip/remove! (item :strip) id)))
+                          (strip/ids (item :strip))))
+              ((workspace :groups) :items))
     (restore-focus! tree)
     (adopt-focus! tree)
     (list (ui/row {:key :workspace
@@ -469,9 +612,26 @@ the other popup's key switches to that one. The palette sits near the top."
                    :background theme/background
                    :keymap (keymap)
                    :on-action (fn (action) (action! action))}
-                  (ui/scroll {:key :strip :axis :x :width 0 :grow 1 :padding padding :gap gap :reveal (strip/focused s)}
-                             (map (fn (id) (column s (find (fn (entry) (equal? (entry :id) id)) entries) viewport))
-                                  (strip/ids s))))
+                  (unless narrow? (sidebar/view (workspace :groups) (workspace :apps) (fn (action) (action! action))))
+                  (ui/column {:width 0 :grow 1}
+                             (when narrow?
+                               (ui/button {:on-press (fn () (action! :sidebar)) :height 32}
+                                          ((groups/active (workspace :groups)) :name)))
+                             (when (empty? (strip/ids s))
+                               (ui/button {:on-press (fn () (action! :palette)) :height 48} "Open an app · Cmd+P"))
+                             (ui/scroll {:key :strip
+                                         :axis :x
+                                         :grow 1
+                                         :padding padding
+                                         :gap gap
+                                         :reveal (strip/focused s)}
+                                        (map (fn (id)
+                                               (column s (find (fn (entry) (equal? (entry :id) id)) entries) viewport))
+                                             (strip/ids s)))))
+          (when (and narrow? (workspace :drawer?))
+            (ui/row {:key :workspace-drawer :overlay #t :modal #t :background theme/scrim}
+                    (sidebar/view (workspace :groups) (workspace :apps) (fn (action) (action! action)))
+                    (ui/column {:grow 1 :on-press (fn () (action! :sidebar-dismiss))})))
           (when (workspace :popup) (popup (workspace :popup))))))
 
 (def- (script-path relative fallback)
@@ -494,9 +654,10 @@ the other popup's key switches to that one. The palette sits near the top."
     (settings/load!)
     (let ((shell (or (settings/options :shell) (process/getenv "SHELL") "/bin/sh")))
       (process/setenv! "TERM" "xterm-256color")
-      (put! workspace :quit? #f)
+      (put! workspace :quit? #f :focus-keys {} :popup nil)
       (put! workspace :apps (apps/registry))
-      (put! workspace :strip (strip/strip))
+      (put! workspace :groups (groups/new))
+      (activate! ((workspace :groups) :active))
       (put! workspace :shell shell)
       (unwind-protect
         (begin

@@ -28,6 +28,8 @@
 
 (def- OPT-SCROLLBACK-MAX-LINES (enum "GhosttyTerminalOption" "SCROLLBACK_MAX_LINES" 28))
 
+(def- DATA-TITLE (enum "GhosttyTerminalData" "TITLE" 12))
+
 (def- DATA-ACTIVE-SCREEN (enum "GhosttyTerminalData" "ACTIVE_SCREEN" 6))
 
 (def- DATA-MOUSE-TRACKING (enum "GhosttyTerminalData" "MOUSE_TRACKING" 11))
@@ -866,4 +868,13 @@ neither, when manse-native was built without libghostty-vt."
         (check! "scrollback bytes" (%terminal-set (term :handle) OPT-SCROLLBACK-MAX-BYTES value))
         (ffi/set! value 'size-t 0 lines)
         (check! "scrollback lines" (%terminal-set (term :handle) OPT-SCROLLBACK-MAX-LINES value)))
+      (ffi/free! value))))
+
+(def (title term)
+  "Copy the terminal's borrowed title before another terminal mutation."
+  (let ((value (ffi/alloc GString 1)))
+    (defer
+      (begin
+        (check! "terminal title" (%terminal-get (term :handle) DATA-TITLE value))
+        (read-gstring value))
       (ffi/free! value))))

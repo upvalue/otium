@@ -1,0 +1,85 @@
+;; Real external and in-process PTYs survive workspace switching and moving.
+(require manse.workspace :as workspace)
+(require manse.apps :as apps)
+(require manse.apps.terminal :as terminal)
+(require manse.apps.repl :as repl)
+(require manse.session :as sessions)
+(require manse.ghostty :as g)
+(require otium.thread :as thread)
+(require otium.test :refer (check report))
+
+(def shell
+  (terminal/open! 1
+                  (sessions/pty-backend "/bin/sh"
+                                        '("sh"
+                                          "-c"
+                                          "while IFS= read -r line; do printf '\\033]2;%s\\007reply:%s\\n' \"$line\" \"$line\"; done"))))
+
+(def shell-id (workspace/add-app! "Shell" shell))
+
+(def shell-session (shell :session))
+
+(def pid (((shell-session :backend) :pty) :pid))
+
+(workspace/new-echo!)
+
+(def echo-id 2)
+
+(def echo-session ((workspace/find-app echo-id) :session))
+
+(def echo-thread (((echo-session :backend) :pty) :program))
+
+(set! echo-thread (echo-thread :thread))
+(workspace/new-repl!)
+
+(def repl-id 3)
+
+(def repl-session ((workspace/find-app repl-id) :session))
+
+(def repl-thread ((((repl-session :backend) :pty) :program) :thread))
+
+(def window {:tick 100})
+
+(def (wait-for predicate)
+  (let loop ((tries 0))
+    (workspace/step! window)
+    (cond
+      ((predicate) #t)
+      ((>= tries 200) #f)
+      (else (thread/sleep 0.01) (loop (+ tries 1))))))
+
+(def (has? session text)
+  (if (exists (fn (row) (string-contains? row text)) (g/text (session :term)))
+      #t
+      #f))
+
+(unwind-protect
+  (begin
+    (workspace/new-workspace!)
+    (sessions/send! shell-session (string->utf8 "background-title\n"))
+    (sessions/send! echo-session (string->utf8 "alive\n"))
+    (repl/forget!)
+    (sessions/send! repl-session (string->utf8 "(+ 20 22)\n"))
+    (check "background shell output pumped" #t (wait-for (fn () (has? shell-session "reply:background-title"))))
+    (check "background title updates metadata" "background-title" ((apps/info shell) :title))
+    (check "hidden echo responds" #t (wait-for (fn () (has? echo-session "alive"))))
+    (check "hidden REPL evaluates and retains global last result"
+           #t
+           (wait-for (fn () (equal? (repl/last-result) [42]))))
+    (workspace/move-app! shell-id 2)
+    (workspace/move-app! echo-id 2)
+    (workspace/move-app! repl-id 2)
+    (check "external PID unchanged" pid (((shell-session :backend) :pty) :pid))
+    (check "external session unchanged" #t (eq? shell-session ((workspace/find-app shell-id) :session)))
+    (check "Echo thread unchanged" #t (eq? echo-thread ((((echo-session :backend) :pty) :program) :thread)))
+    (check "REPL thread unchanged" #t (eq? repl-thread ((((repl-session :backend) :pty) :program) :thread)))
+    (sessions/send! shell-session (string->utf8 "after-move\n"))
+    (check "moved shell responds" #t (wait-for (fn () (has? shell-session "reply:after-move"))))
+    (check "old terminal history preserved" #t (has? shell-session "reply:background-title")))
+  (workspace/close-app! shell-id)
+  (workspace/close-app! echo-id)
+  (workspace/close-app! repl-id))
+(thread/sleep 0.02)
+(check "closing Echo stops thread" :killed (thread/status echo-thread))
+(check "closing REPL stops thread" :killed (thread/status repl-thread))
+(report "workspace lifecycle")

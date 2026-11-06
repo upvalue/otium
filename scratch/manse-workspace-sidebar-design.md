@@ -1,6 +1,18 @@
 # Manse workspace sidebar design
 
-Status: design only; implementation is not authorized by this document.
+Status: implemented on Atlas's workspace-sidebar branch after subsequent user authorization.
+Implementation base: 397247cc5036e0f80e761c7763a7674c66999f4f.
+The sections below retain the original design rationale. The implementation uses
+separate browser and REPL apps already on main, command-palette workspace actions,
+checked Ghostty title constants, and descendant-aware focus restoration.
+
+Verification includes pure membership tests, headless interaction/reload tests,
+real external and in-process PTY lifecycle tests, title-only output tests, and
+native 900x640 / 480x640 layout checks with captures. Linux PTY integration needs
+a temporary adapter for the existing macOS-only libc loader; it is not shipped.
+The full pre-existing program/REPL suites are not clean on this host: the program
+backpressure assertion also fails on unchanged main, and the REPL interrupt-message
+assertion is intermittent on Atlas. No runtime or PTY portability changes are made.
 Base inspected: 02114b8c3562b4292ca7c69bd77eb0c6abb5fb5e.
 
 ## Confirmed interaction
@@ -90,7 +102,7 @@ These are recommendations, not additional user decisions:
 
 ## Implementation sequence and verification
 
-After implementation authorization: collection model/invariants and live-state
+Implemented sequence: collection model/invariants and live-state
 migration; coordinator integration; sidebar/focus routing; terminal titles and
 shared label helper; UI validation. No general runtime changes are planned.
 
@@ -111,4 +123,4 @@ Inspector state must survive view retirement through its app/controller. Do not
 cherry-pick or integrate sibling work as part of this design task.
 
 No further product decision blocks the plan. Exact shortcuts and sizing are
-routine implementation choices. Implementation remains separately gated.
+routine implementation choices. Implementation was subsequently authorized and completed; integration remains separate.

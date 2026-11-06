@@ -1,0 +1,46 @@
+(require manse.apps :as apps)
+(require manse.apps.terminal :as terminal)
+(require manse.backend :as backend)
+(require manse.ghostty :as g)
+(require otium.test :refer (check report))
+
+(defclass TitleBackend
+  :is backend/Backend
+  (pending :init "")
+  (closed? :init #f))
+
+(defmethod (backend/pump! (b TitleBackend) term _deadline)
+  (unless (equal? (b :pending) "")
+    (g/write! term (b :pending))
+    (set! (b :pending) "")
+    #t))
+
+(defmethod (backend/status (_b TitleBackend))
+  nil)
+
+(defmethod (backend/info (_b TitleBackend))
+  {})
+
+(defmethod (backend/close! (b TitleBackend))
+  (set! (b :closed?) #t))
+
+(def b (make TitleBackend))
+
+(def app (terminal/open! 1 b))
+
+(def entry {:id 1 :name "Fallback" :app app})
+
+(unwind-protect
+  (begin
+    (check "initial fallback" "Fallback" (apps/label entry))
+    (set! (b :pending) "\x1b;]2;Only a title λ\x07;")
+    (check "title-only output invalidates" #t (apps/step! app))
+    (check "cached title in metadata" "Only a title λ" ((apps/info app) :title))
+    (check "shared label uses title" "Only a title λ" (apps/label entry))
+    (check "idle does not invalidate" nil (apps/step! app))
+    (set! (b :pending) "\x1b;]0;\x07;")
+    (apps/step! app)
+    (check "cleared title falls back" "Fallback" (apps/label entry)))
+  (apps/close! app))
+(check "closed exactly through app lifecycle" #t (b :closed?))
+(report "app titles")

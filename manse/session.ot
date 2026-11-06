@@ -82,7 +82,9 @@
         (let ((result (backend/pump! (session :backend) term (+ (time/seconds) parse-budget))))
           (when (eq? result :eof) (put! session :eof? #t))
           (when result (set! changed? #t))))
-      (when changed? (g/update! term))
+      (when changed?
+        (g/update! term)
+        (put! session :title (g/title term)))
       (unless (session :exit)
         (let ((status (backend/status (session :backend))))
           (when status

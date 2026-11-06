@@ -1,0 +1,40 @@
+(require manse.workspaces :as groups)
+(require manse.strip :as strip)
+(require otium.test :refer (check report))
+
+(def original (strip/strip))
+
+(strip/add! original 10)
+(strip/add! original 20)
+(strip/width-step! original 1)
+
+(def state (groups/new original))
+
+(check "migration adopts the live strip" #t (eq? original ((groups/active state) :strip)))
+
+(def second-group (groups/create! state))
+
+(check "new workspace is empty" [] (strip/ids ((groups/active state) :strip)))
+(groups/move! state 20 second-group)
+(check "source membership" [10] (strip/ids original))
+(check "source focus repaired" 10 (strip/focused original))
+(check "destination membership" [20] (strip/ids ((groups/active state) :strip)))
+(check "width preserved" "2/3" (strip/width-label ((groups/active state) :strip) 20))
+(groups/move! state 20 second-group)
+(check "same workspace move is harmless" [20] (strip/ids ((groups/active state) :strip)))
+(check "nonempty workspace cannot be deleted" nil (groups/delete! state second-group))
+(groups/rename! state second-group "Project")
+(check "rename keeps identity" "Project" ((groups/lookup state second-group) :name))
+(groups/select! state 1)
+(check "selection preserved" 10 (strip/focused ((groups/active state) :strip)))
+(groups/remove! state 20)
+(check "background removal stays on active workspace" 1 (state :active))
+(check "empty workspace deleted" #t (groups/delete! state second-group))
+(groups/remove! state 10)
+(check "last workspace retained" nil (groups/delete! state 1))
+(check "no stale owner"
+       #f
+       (if (groups/owner state 20)
+           #t
+           #f))
+(report "workspace groups")

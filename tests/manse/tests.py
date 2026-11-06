@@ -3,7 +3,8 @@ import os
 
 from harness import Skip, case, test
 
-for name in ('inspector', 'apps', 'strip', 'settings', 'fit', 'theme', 'pty-write',
+for name in ('titles', 'workspaces', 'workspace-sidebar', 'inspector', 'apps', 'strip',
+             'settings', 'fit', 'theme', 'pty-write',
              'pty-reap', 'construct-cleanup', 'pty-construct-cleanup',
              'ghostty-cleanup', 'grapheme-capacity', 'ghostty', 'keyboard',
              'paint-cells', 'pty', 'wheel', 'workspace'):
@@ -20,10 +21,15 @@ def threaded(name):
         t.expect(t.otium('-L', '.', 'manse/tests/' + name + '.ot'), contains=['checks passed'])
 
 
-for name in ('program', 'repl'):
+for name in ('program', 'repl', 'workspace-lifecycle'):
     threaded(name)
 
 
 @test('manse browser ui', suite='gpu', needs=['ui'], timeout=60, parallel=False)
 def browser_ui(t):
     t.expect(t.otium('-L', '.', 'manse/tests/browser-ui.ot'), contains=['browser UI:'])
+
+
+@test('manse sidebar ui', suite='gpu', needs=['ui'], timeout=60, parallel=False)
+def sidebar_ui(t):
+    t.expect(t.otium('-L', '.', 'manse/tests/sidebar-ui.ot'), contains=['sidebar layout:'])

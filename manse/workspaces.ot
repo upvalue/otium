@@ -1,0 +1,68 @@
+;; Workspace membership is independent of app lifetime. Only the registry closes apps.
+(ns manse.workspaces)
+(require manse.strip :as strip)
+
+(def (new &optional (initial (strip/strip)))
+  {:next-id 2 :active 1 :items [{:id 1 :name "Workspace 1" :expanded? #t :strip initial}]})
+
+(def (lookup state id)
+  (find (fn (item) (equal? (item :id) id)) (state :items)))
+
+(def (active state)
+  (lookup state (state :active)))
+
+(def (owner state app-id)
+  (find (fn (item) (member app-id (strip/ids (item :strip)))) (state :items)))
+
+(def (select! state id)
+  (when (lookup state id)
+    (strip/hints-cancel! ((active state) :strip))
+    (put! state :active id)
+    (put! (active state) :expanded? #t)))
+
+(def (create! state)
+  (let ((id (state :next-id)))
+    (push! (state :items) {:id id :name (str "Workspace " id) :expanded? #t :strip (strip/strip)})
+    (put! state :next-id (+ id 1))
+    (select! state id)
+    id))
+
+(def (rename! state id name)
+  (unless (and (string? name) (> (string-length name) 0)) (error "Workspace name must not be empty"))
+  (let ((item (lookup state id)))
+    (unless item (error "Unknown workspace" id))
+    (put! item :name name)))
+
+(def (delete! state id)
+  "Delete an empty workspace, retaining at least one. Return whether it was deleted."
+  (let ((item (lookup state id)))
+    (when (and item (empty? (strip/ids (item :strip))) (> (length (state :items)) 1))
+      (put! state :items (filter (fn (other) (not (equal? id (other :id)))) (state :items)))
+      (when (equal? id (state :active)) (select! state ((get (state :items) 0) :id)))
+      #t)))
+
+(def (add! state app-id)
+  (when (owner state app-id) (error "App already belongs to a workspace" app-id))
+  (strip/add! ((active state) :strip) app-id))
+
+(def (remove! state app-id)
+  (let ((item (owner state app-id))) (when item (strip/remove! (item :strip) app-id))))
+
+(def (move! state app-id destination)
+  "Transfer the existing column, retaining its width and app identity."
+  (let ((source (owner state app-id))
+        (target (lookup state destination)))
+    (unless (and source target) (error "Unknown app or destination workspace"))
+    (unless (eq? source target)
+      (let ((from (source :strip))
+            (to (target :strip))
+            (column (get (from :columns) (strip/index-of from app-id)))
+            (index (strip/focused-index to)))
+        (strip/remove! from app-id)
+        (put! to
+              :columns (insert-at (to :columns)
+                                  (if index
+                                      (+ index 1)
+                                      (length (to :columns)))
+                                  column))
+        (strip/focus! to app-id)))))

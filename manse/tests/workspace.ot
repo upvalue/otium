@@ -101,6 +101,7 @@
     ;; A click on a terminal moves the model's focus too.
     (let ((root (get (ui/children tree) 0)))
       (set! (root :bounds) (ui/bounds 0 0 800 600))
+      (set! (((strip-node) :parent) :bounds) (ui/bounds 0 0 800 600))
       (set! ((strip-node) :bounds) (ui/bounds 0 0 800 600))
       (set! ((column-node 1) :bounds) (ui/bounds 0 0 400 600))
       (set! ((column-node 2) :bounds) (ui/bounds 400 0 400 600))
@@ -189,7 +190,7 @@
 (ui/reconcile! mixed-tree (workspace/view mixed-tree))
 
 (def (mixed-strip)
-  (get (ui/children (get (ui/children mixed-tree) 0)) 0))
+  (ui/find-key mixed-tree :strip))
 
 (check "workspace accepts app-owned nonterminal view"
        "A nonterminal app"

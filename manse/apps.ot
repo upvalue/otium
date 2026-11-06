@@ -58,3 +58,14 @@
       (close! app)
       (put! registry :entries (filter (fn (entry) (not (equal? (entry :id) id))) (registry :entries))))
     app))
+
+(def (label entry)
+  "The current app title, falling back to its registration name."
+  (let ((info (info (entry :app)))
+        (title (get info :title)))
+    (str (if (and (string? title) (not (equal? title "")))
+             title
+             (entry :name))
+         (if (eq? (get info :status) :exited)
+             " · exited"
+             ""))))

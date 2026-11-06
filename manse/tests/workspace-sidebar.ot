@@ -1,0 +1,134 @@
+(require manse.workspace :as workspace)
+(require manse.workspaces :as groups)
+(require manse.strip :as strip)
+(require manse.apps :as apps)
+(require manse.apps.browser :as browser)
+(require otium.ui :as ui)
+(require otium.ui.input :as input)
+(require otium.test :refer (check report))
+
+(defclass Probe
+  :is apps/App
+  (ticks :init 0)
+  (closed? :init #f))
+
+(defmethod (apps/info (app Probe))
+  {:kind :probe :title (str "Tick " (app :ticks))})
+
+(defmethod (apps/step! (app Probe))
+  (set! (app :ticks) (+ 1 (app :ticks)))
+  #t)
+
+(defmethod (apps/close! (app Probe))
+  (set! (app :closed?) #t))
+
+(defmethod (apps/view (app Probe))
+  (ui/text-field {:key :edit :value "hello"}))
+
+(def app (make Probe))
+
+(def id (workspace/add-app! "Probe" app))
+
+(def tree (ui/root))
+
+(put! workspace/workspace :window {:tree tree :width 900 :tick 100})
+(set! workspace/window-focused? (fn () #t))
+
+(def (draw!)
+  (ui/reconcile! tree (workspace/view tree))
+  (workspace/apply-pending-focus! tree))
+
+(draw!)
+(check "sidebar mounted"
+       #t
+       (if (ui/find-key tree :sidebar)
+           #t
+           #f))
+(check "column visible"
+       #t
+       (if (ui/find-key (ui/find-key tree :strip) id)
+           #t
+           #f))
+
+(def first-group ((workspace/workspace :groups) :active))
+
+(workspace/action! :workspace-new)
+
+(def second-group ((workspace/workspace :groups) :active))
+
+(draw!)
+(check "new workspace does not adopt all apps" [] (strip/ids (workspace/workspace :strip)))
+(workspace/step! (workspace/workspace :window))
+(check "hidden app still stepped" 1 (app :ticks))
+(check "hidden app not closed" #f (app :closed?))
+(workspace/move-app! id second-group)
+(draw!)
+(check "same instance after move" #t (eq? app (workspace/find-app id)))
+(check "title used" "Tick 1" (apps/label (get ((workspace/workspace :apps) :entries) 0)))
+(workspace/action! :sidebar)
+(draw!)
+(check "sidebar focus isn't a column" nil (workspace/focused-column tree))
+(input/keyboard! tree {:kind :key-down :key "Down"})
+(check "arrow stays in sidebar" nil (workspace/focused-column tree))
+(workspace/action! :sidebar-dismiss)
+(draw!)
+(check "content focus restored" id (workspace/focused-column tree))
+(workspace/new-browser!)
+
+(def browser-id (strip/focused (workspace/workspace :strip)))
+
+(draw!)
+
+(def browser-app (workspace/find-app browser-id))
+
+(def content (ui/find-key tree :strip))
+
+(def field (ui/find-key (ui/find-key content browser-id) :namespace-search))
+
+(ui/focus! tree field)
+(draw!)
+(check "browser search belongs to browser column" browser-id (workspace/focused-column tree))
+(workspace/activate! first-group)
+(draw!)
+(workspace/activate! second-group)
+(draw!)
+(check "browser instance survives" #t (eq? browser-app (workspace/find-app browser-id)))
+(check "browser descendant focus restored" :namespace-search ((ui/focused tree) :key))
+(workspace/action! :palette)
+(draw!)
+(check "palette has keyboard focus" :palette-query ((ui/focused tree) :key))
+(put! (workspace/workspace :palette) :query "not a command")
+(draw!)
+(workspace/action! :palette-run)
+(draw!)
+(check "empty palette does not change membership" [id browser-id] (strip/ids (workspace/workspace :strip)))
+(put! (workspace/workspace :window) :width 480)
+(workspace/action! :sidebar)
+(draw!)
+(check "narrow drawer mounted"
+       #t
+       (if (ui/find-key tree :workspace-drawer)
+           #t
+           #f))
+(workspace/action! (list :app-select second-group id))
+(draw!)
+(check "select dismisses drawer" nil (ui/find-key tree :workspace-drawer))
+(require manse.workspace :reload)
+(check "reload preserves instance" #t (eq? app (workspace/find-app id)))
+(check "reload preserves membership" [id browser-id] (strip/ids (workspace/workspace :strip)))
+
+(def legacy-strip (workspace/workspace :strip))
+
+(put! workspace/workspace :groups nil)
+(require manse.workspace :reload)
+(check "legacy reload adopts existing strip" #t (eq? legacy-strip (workspace/workspace :strip)))
+(check "legacy reload retains registry apps" #t (eq? app (workspace/find-app id)))
+(check "legacy reload retains membership" [id browser-id] (strip/ids (workspace/workspace :strip)))
+(workspace/new-workspace!)
+(set! first-group ((workspace/workspace :groups) :active))
+(workspace/close-app! id)
+(check "background close stays on active workspace" first-group ((workspace/workspace :groups) :active))
+(check "explicit close closes app" #t (app :closed?))
+(workspace/close-app! browser-id)
+(ui/dispose! tree)
+(report "workspace sidebar")

@@ -22,6 +22,12 @@
 ;; Cursor position report: ESC [ 1 ; 9 R
 (g/write! t "\x1b;[6n")
 (check '(27 91 49 59 57 82) (apply list (t :replies)))
+(g/write! t "\x1b;]0;Project λ\x07;")
+(check "OSC 0 title" "Project λ" (g/title t))
+(g/write! t "\x1b;]2;Editor\x1b;\\")
+(check "OSC 2 title" "Editor" (g/title t))
+(g/write! t "\x1b;]2;\x07;")
+(check "cleared title" "" (g/title t))
 (g/free! t)
 
 ;; Scrollback and the viewport.

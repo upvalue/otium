@@ -7,9 +7,8 @@ before implementation. The existing `updot/aegis` delivery ref remains at
 `101e99a79dae253cd87df59eb529ac7e2cdbc2b9`.
 
 - Actor replies now carry `:failed? #t` separately from `:error`. Missing payload
-  means raised nil when the flag is present. The receiver still accepts older
-  non-nil error replies. Old already-queued nil errors cannot be distinguished
-  from successful nil; reload both modules before expecting the repaired protocol.
+  means raised nil when the flag is present. Error replies require this explicit
+  flag; there is no legacy error-reply fallback.
 - FFI state has a separate `pending_condition` boolean. The existing rooted payload
   slot still holds the condition. First failure wins even when it is nil; nested
   calls defer propagation until the outermost foreign call returns. No changes to

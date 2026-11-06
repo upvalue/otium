@@ -34,8 +34,6 @@
     (unless target (error "actor/call: no live thread" t))
     (send target {:call ref :from (self) :expiry (%thread-deadline timeout) :msg message})
     (receive ({:reply (== ref) :from (== target) :failed? #t :error (opt e nil)} (error e))
-             ;; Accept replies already queued before the failure flag was added.
-             ({:reply (== ref) :from (== target) :error e} (error e))
              ({:reply (== ref) :from (== target) :value (opt v nil)} v)
              (:after timeout
                      (restart-case (error (thread/timeout-condition "actor/call"))

@@ -198,12 +198,14 @@
 ;; lint: allow(rest-arguments) spawn passes any number of arguments to f
 (def (spawn-in g f . args)
   "(thread/spawn-in g f arg ...)\nspawn into group g."
-  ;; The cleanup sees the condition only when an error leaves the thread, so
-  ;; errors f catches itself don't count, and the original keeps its place
-  ;; for the report. A kill's outcome is a keyword.
+  ;; Catch escaping conditions explicitly: cleanup outcomes cannot distinguish
+  ;; a raised nil from normal completion, or a raised :quit from termination.
   (let ((t (spawn (fn ()
-                    (call-with-cleanup (fn () (apply f args))
-                                       (fn (outcome) (when (table? outcome) (group-failed g outcome))))))))
+                    (try
+                      (apply f args)
+                      (catch condition
+                        (group-failed g condition)
+                        (error condition)))))))
     (push! (g :threads) t)
     t))
 
@@ -215,8 +217,7 @@
     ;; interrupt that unwound the body. Anything else leaving the body, such
     ;; as an unrelated error or a kill, keeps going.
     (when (and (> (length failures) 0)
-               (or (nil? outcome)
-                   (and (table? outcome) (eq? (get outcome :type) 'thread-group-failed))))
+               (or (nil? outcome) (and (table? outcome) (eq? (get outcome :type) 'thread-group-failed))))
       (error {:type 'thread-failed
               :message "a thread in the group failed"
               :code "E0504"
@@ -264,7 +265,7 @@
     (try
       (put! reply :value (thunk))
       (catch e
-        (put! reply :error e)
+        (put! reply :failed? #t :error e)
         (set! failed #t)))
     (send (get request :from) reply)
     (if failed

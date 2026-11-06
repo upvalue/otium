@@ -1,0 +1,11 @@
+(require otium.thread :as thread)
+
+(defer
+  (with ((g (thread/group)))
+        (thread/spawn-in g
+                         (fn ()
+                           (defer
+                             (exit 7)
+                             (println "child cleanup"))))
+        (thread/sleep 10))
+  (println "owner cleanup"))

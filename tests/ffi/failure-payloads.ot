@@ -1,0 +1,61 @@
+(require otium.test :refer (check report))
+(require otium.ffi :as ffi)
+(require otium.process :as process)
+
+(def lib (ffi/open-library (list (car (process/arguments)))))
+
+(def call-n (ffi/bind lib "call_n" '(callback-pointer int) 'int #t))
+
+(defrecord FailurePayload (value))
+
+(def payloads (list nil #f 42 'oops {:type 'error :message "payload"} (record-new FailurePayload 7)))
+
+(for ((payload :in payloads))
+  (let ((calls 0)
+        (cleanups 0)
+        (cb (ffi/callback '(int)
+                          'int
+                          (fn (x)
+                            (set! calls (+ calls 1))
+                            (defer
+                              (if (= x 0)
+                                  (error payload)
+                                  (error 'later))
+                              (set! cleanups (+ cleanups 1)))))))
+    (check "first payload survives repeated callbacks"
+           (list :caught payload)
+           (try
+             (list :returned (call-n cb 2))
+             (catch c (list :caught c))))
+    (check "C completed both callbacks before propagation" 2 calls)
+    (check "callback cleanups ran" 2 cleanups)
+    (ffi/free-callback! cb))
+  (let ((cb (ffi/callback '(int) 'int (fn (x) (+ x 1)))))
+    (check "successful call after failure" 3 (call-n cb 2))
+    (ffi/free-callback! cb)))
+(let ((inner (ffi/callback '(int) 'int (fn (_) (error nil))))
+      (continued 0)
+      (outer (ffi/callback '(int)
+                           'int
+                           (fn (_)
+                             (call-n inner 1)
+                             (set! continued (+ continued 1))
+                             (error 'later)))))
+  (check "nested first nil survives"
+         '(:caught nil)
+         (try
+           (list :returned (call-n outer 2))
+           (catch c (list :caught c))))
+  (check "nested error waits for outermost C return" 2 continued)
+  (ffi/free-callback! outer)
+  (ffi/free-callback! inner))
+(let ((cb (ffi/callback '(int)
+                        'int
+                        (fn (_)
+                          (try
+                            (error nil)
+                            (catch _ 9))))))
+  (check "callback-local recovery" 18 (call-n cb 2))
+  (ffi/free-callback! cb))
+(check "callbacks released" 0 (ffi/callback-count))
+(report "ffi failure payloads")

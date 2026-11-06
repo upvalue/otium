@@ -127,7 +127,8 @@ struct oti_foreign_state {
   ot_value* values;
   oti_roots roots;
   size_t value_capacity, callback_count, call_depth;
-  bool pending_exit, pending_interrupt;
+  /* A raised nil is still a pending condition in values[0]. */
+  bool pending_condition, pending_exit, pending_interrupt;
   int pending_status;
   oti_foreign_error* error_context;
 };
@@ -619,12 +620,15 @@ static void callback_entry(ffi_cif* cif, void* result, void** arguments, void* c
       rt->signaled = true;
     }
     oti_foreign_state* state = rt->foreign;
-    if (state->values[0] == OT_NIL && !state->pending_exit && !state->pending_interrupt) {
+    if (!state->pending_condition && !state->pending_exit && !state->pending_interrupt) {
       if (rt->exit_pending) {
         state->pending_exit = true;
         state->pending_status = rt->exit_status;
       } else if (rt->interrupted) state->pending_interrupt = true;
-      else state->values[0] = oti_error_condition(rt);
+      else {
+        state->values[0] = oti_error_condition(rt);
+        state->pending_condition = true;
+      }
     }
     clear_callback_error(rt);
   }
@@ -847,7 +851,7 @@ static ot_value foreign_call(ot_state* rt, size_t callable, size_t first, size_t
   }
   oti_foreign_state* state = rt->foreign;
   if (!state->call_depth &&
-      (state->values[0] != OT_NIL || state->pending_exit || state->pending_interrupt)) {
+      (state->pending_condition || state->pending_exit || state->pending_interrupt)) {
     if (aggregate_result != OT_NIL && aggregate_result) {
       oti_pointer p = pointer_obj(aggregate_result)->pointer;
       free(p.owner->allocation);
@@ -870,7 +874,7 @@ static ot_value foreign_call(ot_state* rt, size_t callable, size_t first, size_t
       rt->raised = rt->signaled = true;
     }
     state->values[0] = OT_NIL;
-    state->pending_exit = state->pending_interrupt = false;
+    state->pending_condition = state->pending_exit = state->pending_interrupt = false;
     value = 0;
   }
   oti_roots_pop(&rt->heap, &result_roots);

@@ -1,0 +1,119 @@
+(require otium.test :refer (check report))
+(require otium.thread :as thread :refer (spawn receive))
+(require otium.actor :as actor)
+
+(defrecord FailurePayload (value))
+
+(def payloads (list nil #f 42 'oops :quit {:type 'error :message "payload"} (record-new FailurePayload 7)))
+
+;; One actor must keep serving after each failure, including nested calls.
+(def (serve)
+  (receive (:call {:raise (opt payload nil)} (error payload)) (:call 'ok 17))
+  (serve))
+
+(def worker (spawn serve))
+
+(for ((payload :in payloads))
+  (check "actor preserves raised value"
+         (list :caught payload)
+         (try
+           (list :returned (actor/call worker {:raise payload}))
+           (catch c (list :caught c))))
+  (check "actor continues" 17 (actor/call worker 'ok)))
+(thread/kill! worker)
+(thread/join worker)
+(check "successful nil stays successful"
+       (list :returned nil)
+       (try
+         (list :returned (actor/call (spawn (fn () (receive (:call _ nil)))) 'x))
+         (catch c (list :caught c))))
+(check "nested actor nil failure"
+       '(:caught nil)
+       (try
+         (list :returned (actor/call (spawn (fn ()
+                                              (receive (:call _
+                                                              (actor/call (spawn (fn ()
+                                                                                   (receive (:call _ (error nil)))))
+                                                                          'x)))))
+                                     'x))
+         (catch c (list :caught c))))
+
+(for ((payload :in payloads))
+  (let ((cleaned #f))
+    (check "independent group preserves failure"
+           (list :caught payload)
+           (try
+             (with ((g (thread/group :independent)))
+                   (thread/spawn-in g
+                                    (fn ()
+                                      (defer
+                                        (error payload)
+                                        (set! cleaned #t)))))
+             (list :returned)
+             (catch c (list :caught (get c :reason)))))
+    (check "child cleanup ran" #t cleaned))
+  (let ((sibling nil)
+        (ready #f)
+        (cleaned #f))
+    (check "linked group preserves failure"
+           (list :caught payload)
+           (try
+             (with ((g (thread/group)))
+                   (set! sibling
+                         (thread/spawn-in g
+                                          (fn ()
+                                            (defer
+                                              (begin
+                                                (set! ready #t)
+                                                (thread/sleep 10))
+                                              (set! cleaned #t)))))
+                   (while (not ready) (thread/yield))
+                   (thread/spawn-in g (fn () (error payload)))
+                   (thread/sleep 10))
+             (list :returned)
+             (catch c (list :caught (get c :reason)))))
+    (check "linked sibling killed" :killed (thread/status sibling))
+    (check "linked sibling cleanup ran" #t cleaned)))
+
+;; The outer catch sees cleanup's replacement error, but not a handled error.
+(check "cleanup replacement"
+       '(:caught nil)
+       (try
+         (with ((g (thread/group :independent)))
+               (thread/spawn-in g
+                                (fn ()
+                                  (defer
+                                    (error 'original)
+                                    (error nil)))))
+         :returned (catch c (list :caught (get c :reason)))))
+(with ((g (thread/group :independent)))
+      (thread/spawn-in g
+                       (fn ()
+                         (try
+                           (error nil)
+                           (catch _ :handled))))
+      (thread/spawn-in g (fn () nil))
+      (let ((t (thread/spawn-in g (fn () (thread/sleep 10)))))
+        (thread/kill! t)
+        (thread/join t)))
+(check "follow-up group succeeds"
+       19
+       (let ((answer 0))
+         (with ((g (thread/group))) (thread/spawn-in g (fn () (set! answer 19))))
+         answer))
+(check "independent group retains later failures"
+       '(:caught nil (#f))
+       (try
+         (with ((g (thread/group :independent)))
+               (for ((payload :in (list nil #f)))
+                 (let ((t (thread/spawn-in g (fn () (error payload)))))
+                   (try
+                     (thread/join t)
+                     (catch _ nil)))))
+         :returned (catch c (list :caught (get c :reason) (get c :others)))))
+(with ((g (thread/group)))
+      (thread/spawn-in g
+                       (fn ()
+                         (handler-bind (((fn (_) #t) (fn (_) (invoke-restart 'recover))))
+                           (restart-case (error nil) (recover () 23))))))
+(report "failure boundaries")

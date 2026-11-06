@@ -42,6 +42,9 @@ def real(program):
     return run
 
 
+threads_test('failure boundaries')(seeded('tests/threads/failure-boundaries.ot'))
+threads_test('failure boundaries real scheduler')(real('tests/threads/failure-boundaries.ot'))
+
 threads_test('threads')(seeded('tests/threads/checks.ot'))
 threads_test('threads real scheduler')(real('tests/threads/checks.ot'))
 threads_test('actors')(seeded('tests/threads/actors.ot'))
@@ -332,3 +335,9 @@ def socket_input(t):
     ours.close()
     stdout, stderr = process.communicate(timeout=10)
     t.check(process.returncode == 0 and stdout == '5000\n', 'socket input lost', stdout, stderr)
+
+
+@threads_test('thread group exit')
+def group_exit(t):
+    t.expect(t.otium('tests/threads/group-exit.ot'), status=7,
+             stdout='child cleanup\nowner cleanup\n')

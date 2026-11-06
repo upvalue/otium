@@ -45,3 +45,15 @@ def ownership(t):
 @test('ffi bulk')
 def bulk(t):
     t.expect(t.otium('tests/ffi/bulk.ot'))
+
+
+@test('ffi failure payloads')
+def failure_payloads(t):
+    t.expect(t.otium('tests/ffi/failure-payloads.ot', '--', library('ffi-fixture-17')),
+             contains=['checks passed'])
+
+
+@test('ffi failure payloads vm')
+def failure_payloads_vm(t):
+    t.expect(t.otium('--c.vm', 'tests/ffi/failure-payloads.ot', '--', library('ffi-fixture-17')),
+             contains=['checks passed'])

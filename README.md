@@ -24,9 +24,9 @@ Here's a couple of factoids about it:
 - Live development is a first class citizen with a dev server that allows
   querying and modifying running programs
 - Has a CLOS-lite style object system primarily to support rich user interfaces
-- Built-in green threads with non blocking I/O. This runs on a single native
-  thread, so more focused on making responsive interactive programs than
-  supporting high performance.
+- Built-in actor-style concurrency. This runs on a single native thread; the
+  goal is more about making it easy to express rich UIs and programs that don't
+  get blocked by IO vs. highly parallel performance.
 
 There are some examples in ./examples, including handwritten code, to show how
 it feels to use.

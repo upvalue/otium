@@ -1,6 +1,16 @@
 [
-  { "items": [{ "file": "index.md", "label": "Introduction" }, "how-to-run.md"] },
-  { "title": "Language", "items": ["in-15-minutes.md", "guide/loops.md"] },
-  { "title": "Reference", "generated": "reference" },
-  { "title": "Applications", "items": ["otos/guide.md"] }
+  { "items": [{ "file": "index.md", "label": "Introduction" }, "how-to-run.md", "in-15-minutes.md", "reading-these-docs.md"] },
+  {
+    "title": "Language guide",
+    "items": [
+      "guide/syntax.md", "guide/values.md", "guide/bindings.md", "guide/functions.md",
+      "guide/control-flow.md", "guide/loops.md", "guide/strings.md", "guide/data-structures.md",
+      "guide/matching.md", "guide/namespaces.md", "guide/macros.md", "guide/errors.md",
+      "guide/params.md", "guide/live-programming.md", "guide/concurrency.md", "guide/io.md",
+      "guide/testing.md", "guide/lint.md", "guide/ffi.md"
+    ]
+  },
+  { "title": "Records and classes", "items": ["classes.md"] },
+  { "title": "User interface", "items": ["ui.md"] },
+  { "title": "Reference", "generated": "reference" }
 ]

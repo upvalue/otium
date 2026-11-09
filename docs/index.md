@@ -81,6 +81,5 @@ And load it into the running application to make the rectangle clickable:
 
 - [How to run](./how-to-run.md): Get started running Otium locally
 - [In 15 minutes](./in-15-minutes.md): A 15 minute introduction to the language
-- [OtOS](./otos/guide.md), a unikernel for small devices
 
 <!-- LLMs should never edit this file! -->

@@ -1,26 +1,29 @@
 # ✨ Foreign functions
 
 Otium's foreign function interface (FFI) lets you call exported C functions in
-shared libraries without writing a C wrapper.
+shared libraries without writing a C wrapper. Load a library, describe each
+function's C signature, and call the resulting Otium procedure.
 
-With the `otium.ffi` namespace, you load a library and declare a function's C
-signature to get an ordinary callable Otium value. Supply the signature from the
-library's headers or documentation; Otium does not read C headers for you.
+[otium.ffi](/reference/otium.ffi/) also provides opaque pointers and native
+memory for calls where C expects a buffer, writes an output parameter, or
+returns a resource handle.
 
 ## Runtime and build support
 
-The desktop C runtime supports the FFI in both native-compiled code and the
-bytecode VM (`--c.vm`). The standard Meson build requires libffi and builds the
-native FFI helper, with no separate FFI enable flag. From a checkout,
-`just build` builds these together.
+The desktop C runtime supports the FFI in both native-code and bytecode VM
+execution. The normal Meson build requires libffi; there is no separate FFI
+enable option. Foreign calls work with the native compiler disabled and in the
+desktop amalgamated runtime.
 
-The supported FFI targets are macOS arm64 and Linux x86-64. WebAssembly builds,
-including browser and Node builds, do not support the FFI.
+The browser/WebAssembly build and the freestanding otos build do not support
+foreign calls.
+
+The FFI targets the native C ABI on macOS arm64 and Linux x86-64. Do not assume
+that another platform's calling convention or data layouts are compatible.
 
 ## Load a library and declare a function
 
-This example calls the system math library's `hypot`, whose C signature is
-`double hypot(double, double)`:
+These library names cover the system math library on macOS and Linux:
 
 ```otium
 (require otium.ffi :as ffi)
@@ -35,50 +38,54 @@ This example calls the system math library's `hypot`, whose C signature is
 (c-hypot 3.0 4.0) ; => 5.0
 ```
 
-`open-library` tries its candidate names in order. Paths name a library
-directly; bare names use the operating system's library search rules. Loaded
-libraries remain resident for the process lifetime.
+[`open-library`](/reference/otium.ffi/#open-library) tries the names in order.
+Paths with directory components are used directly; bare names follow the
+operating system's library search rules. Libraries stay loaded for the process
+lifetime.
 
-`bind` takes the library, exact exported symbol name, argument-type list, result
-type, and a required `collect-safe?` boolean. It resolves the symbol immediately
-and returns a callable.
+[`bind`](/reference/otium.ffi/#bind) takes:
 
-Use `#f` for short, known operations such as these math calls. Use `#t` for
-blocking or long-running calls, or when their threading behavior is uncertain.
-Neither setting makes the call asynchronous: native calls block the calling
-Otium thread.
+- The loaded library.
+- The exact exported C symbol name.
+- A list of argument types.
+- The result type.
+- A required `collect-safe?` boolean.
 
-A wrong declaration can crash the process. Match the C signature exactly,
-including whether an argument is a value or a pointer.
+This declaration matches C's `double hypot(double, double)`. Use `#f` for a
+short call whose behavior you know, and `#t` for blocking, long-running, or
+uncertain calls. With either setting, foreign calls run synchronously and can
+block Otium.
 
-## Types at the boundary
+Binding resolves the symbol immediately. Otium does not read C headers or check
+that your declaration matches them. A wrong signature can crash the process.
 
-Scalar types are quoted symbols:
+## Choose types from the C declaration
 
-- C integer types include `int`, `uint`, `long`, `ulong`, `size-t`, and
-  `ptrdiff-t`. Fixed-width types include `i8`, `u8`, through `i64`, `u64`.
+Scalar types are quoted symbols. Use the type corresponding to the library's
+declaration:
+
+- `int`, `uint`, `long`, `ulong`, `size-t`, and related names follow the
+  target's C types.
+- `i8`, `u8`, through `i64`, `u64` specify exact-width integers.
 - `float` and `double` accept Otium integers or floating-point numbers.
-- `bool` means C `_Bool` and accepts only `#t` or `#f`.
-- `void` is a result type; such calls return `#f`.
-- `pointer` means a native data address.
-- `utf8` converts a NUL-terminated C string.
+- `bool` accepts only `#t` and `#f`.
+- `void` is a result type and returns `#f`.
+- `pointer` passes an address; `utf8` converts a NUL-terminated string.
 
-Integer conversions check bounds rather than wrapping or truncating. Even `i64`
-and `u64` results must fit Otium's integer range, −2^62 through 2^62−1.
+Integer conversions check bounds rather than truncate or wrap. Native `i64` and
+`u64` results must still fit Otium's integer range, −2⁶² through 2⁶²−1.
 
-Calls have fixed arity. Variadic functions and the C++ ABI are not supported.
+Calls have fixed arity. C varargs and C++ ABI calls are not supported.
 
 ## Pointers and output parameters
 
-A foreign pointer is an opaque address, not an integer. Use `ffi/null` for a
-null pointer, not zero, `nil`, or `#f`. It is truthy, so test it with
-`ffi/null-pointer?`.
+A foreign pointer represents an address, not an Otium array or integer.
+`ffi/null` is the C null pointer. It is truthy, so test it with
+`null-pointer?`, not `if` alone. Neither
+`0`, `nil`, nor `#f` substitutes for it.
 
-C functions often write additional results through pointers. For example,
-`double modf(double, double *)` returns a fractional part and writes the
-integral part into caller-provided memory.
-
-Continuing with `math`:
+C's `modf` returns the fractional part of a number and writes the whole part
+through a `double *`. Continuing the example:
 
 ```otium
 (def c-modf
@@ -92,37 +99,42 @@ Continuing with `math`:
 ; => (0.75 12.0)
 ```
 
-`alloc` creates zeroed native storage for the requested number of elements.
-`ref` reads an element; `set!` writes one. Both take a type and a zero-based
-element index. Pointers themselves do not carry an element type.
+[`alloc`](/reference/otium.ffi/#alloc) creates zeroed, aligned storage for a
+count of elements. [`ref`](/reference/otium.ffi/#ref) reads an element;
+[`set!`](/reference/otium.ffi/#set!) writes one. Their indexes are zero-based
+element indexes, not byte offsets.
 
-Release allocations explicitly with `free!`; garbage collection does not release
-them. [`defer`](/reference/otium.core/#defer) runs the cleanup both on normal
-return and when an error unwinds the expression.
+You must release native allocations explicitly with
+`free!`; garbage collection does not release
+them. `defer` runs the cleanup on normal return or unwinding; see [Errors and
+recovery](errors.md).
 
-Pointers returned by C have no inferred owner or bounds. Follow the library's
-lifetime rules and use its destructor for resources it creates. Do not pass an
-arbitrary library-owned pointer to `free!`. If C retains an allocated pointer,
-keep its Otium owner reachable and wait until C has finished using it before
-freeing it.
+A pointer returned by a C library has the lifetime and ownership specified by
+that library. Call its documented destructor rather than passing an arbitrary
+external pointer to `ffi/free!`. Keep allocation owners reachable while C uses
+their addresses, including addresses stored in native memory.
+
+Otium checks bounds and released state for its own allocations. It cannot stop C
+from overrunning a buffer or prove that an external pointer is valid.
 
 ## Strings
 
-A `utf8` argument accepts an Otium string or `ffi/null`. Its bytes are read-only
-and valid only during the call; embedded NUL characters are rejected. A `utf8`
-result is copied into an Otium string, but its native source is not freed.
+Declare a read-only string argument as `utf8` when C uses it only during the
+call. Otium supplies NUL-terminated UTF-8 bytes; embedded NUL characters are
+rejected. A `utf8` result becomes an independent Otium string, or `ffi/null` for
+a null result.
 
-For a string that C retains, declare a `pointer` argument and allocate it with
-`ffi/alloc-utf8`. Free it only after native use ends.
+For strings C retains, use `pointer` with
+`alloc-utf8`, and keep the allocation alive
+until C is finished. For returned strings requiring a library destructor, use a
+`pointer` result, copy with `read-utf8`, then
+call that destructor. Automatic `utf8` conversion does not free the original
+string.
 
-For a returned string requiring a library destructor, declare a `pointer`
-result. Copy it with `ffi/read-utf8`, supplying a maximum byte count, then call
-the destructor under cleanup protection.
+## Structs and arrays
 
-## Structs and unions
-
-A layout describes native fields and alignment. `define-struct!` and
-`define-union!` return layout values; bind those values with `def`.
+A layout describes a C struct or union's fields. Pass the layout value itself to
+memory operations, not its quoted name.
 
 ```otium
 (def Point
@@ -132,30 +144,30 @@ A layout describes native fields and alignment. `define-struct!` and
   (defer
     (begin
       (ffi/field-set! p Point '(x) 3.0)
-      (ffi/field-ref p Point '(x)))
+      (ffi/field-set! p Point '(y) 4.0)
+      (c-hypot (ffi/field-ref p Point '(x))
+               (ffi/field-ref p Point '(y))))
     (ffi/free! p)))
-; => 3.0
+; => 5.0
 ```
 
-Pass the layout value, `Point`, rather than the symbol `'Point`. Verify layouts
-against the library's C declarations; packed structs and bitfields are
-unsupported.
+Layouts follow target C alignment and padding. Verify them against the library's
+headers. Fixed arrays use an `(array T count)` type description.
 
-In a call signature, a layout means an aggregate passed by value. Use `pointer`
-for a pointer-to-struct parameter. Build argument lists containing layouts with
-`list`, rather than quoting the layout names. Aggregate results return newly
-allocated storage that you must free.
+In a function signature, a struct or union layout means by value; `pointer`
+means an address. Build argument lists containing layouts with `list`, so the
+layout values are evaluated. Aggregate results return newly allocated storage
+that you must free.
 
 ## Handling failures
 
 Loading, binding, and conversion failures raise conditions recognized by
-`ffi/error?`. Use `ffi/error-reason` to distinguish causes and
-[`condition-message`](/reference/otium.core/#condition-message) for readable
-diagnostics.
+[`ffi/error?`](/reference/otium.ffi/#error?). Use
+[`error-reason`](/reference/otium.ffi/#error-reason) for a machine-readable
+reason and `condition-message` for text.
 
-The FFI does not interpret a library's return values as errors. Check null
-pointers, status codes, and other failure indicators according to that library's
-documentation. Memory checks cannot protect you from an incorrect signature or a
-C function writing past a buffer.
+C return values are not automatically treated as errors. Check each function's
+documented convention, such as a null pointer or negative integer, and perform
+any required cleanup yourself.
 
 <!-- generated from ffi.md.spec sha256:2fb7b4c89959182efc373e3a1ea51c101b3abc4045224438b30817f5507ff4de -->

@@ -14,7 +14,17 @@
 (require otium.syntax :as syntax)
 
 ;; Add a module here with its source path.
-(def- modules [{:name 'otium.core :file "lib/otium/core.ot"} {:name 'otium.ui :file "lib/otium/ui.ot"}])
+(def- modules
+  [{:name 'otium.core :file "lib/otium/core.ot"}
+   {:name 'otium.extra :file "lib/otium/extra.ot"}
+   {:name 'otium.format :file "lib/otium/format.ot"}
+   {:name 'otium.json :file "lib/otium/json.ot"}
+   {:name 'otium.resource :file "lib/otium/resource.ot"}
+   {:name 'otium.test :file "lib/otium/test.ot"}
+   {:name 'otium.thread :file "lib/otium/thread.ot"}
+   {:name 'otium.actor :file "lib/otium/actor.ot"}
+   {:name 'otium.ffi :file "lib/otium/ffi.ot"}
+   {:name 'otium.ui :file "lib/otium/ui.ot"}])
 
 (def- catalog-file "lib/catalog/runtime.json")
 
@@ -236,7 +246,12 @@
                    :text))
             (params (cond
                       ((eq? (target :kind) :list) (cdr (syntax/forms target)))
-                      ((and (equal? head "defmacro") (pair? (cddr parts))) (syntax/forms (caddr parts)))
+                      ((and (equal? head "defmacro") (pair? (cddr parts)))
+                       ;; (defmacro name body ...) takes every argument as body.
+                       (let ((args (caddr parts)))
+                         (if (eq? (args :kind) :list)
+                             (syntax/forms args)
+                             (list {:kind :atom :text "."} args))))
                       (else nil))))
         {:name name
          :line (+ (node :line) 1)

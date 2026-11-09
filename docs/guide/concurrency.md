@@ -1,91 +1,95 @@
 # ✨ Concurrency
 
-Concurrency lets one task make progress while another waits for input, a
-message, or a timer. Otium threads take turns on one native thread. They help
-with waiting, not with using more cores. Foreign calls and custom port callbacks
-can still block all threads.
+Concurrency lets other work continue while one task waits for input, a timer, or
+a reply. Otium threads take turns on one native thread. They help with waiting,
+not with using more cores.
 
-`otium.thread` provides threads: running function calls whose results you can
-wait for and collect. Each thread also has a mailbox, a queue of incoming
-messages. An actor is a thread that serves messages from its mailbox, often
-keeping state between requests. `otium.actor` adds request/reply calls and
-notifications when a thread ends.
+A thread runs a function and holds its eventual result. Each thread also has a
+mailbox: a queue of incoming messages. An actor is a thread that serves messages
+from its mailbox, usually keeping state between requests.
 
-Threads require native execution; they are not available under `--c.vm`.
+Use a thread for a task that finishes with a result, and an actor for an ongoing
+service that owns state and handles requests.
 
-## Start work and collect its result
+## Start work and wait for it
 
-Use `thread/spawn` to start a function with arguments. It returns a thread
-immediately. `thread/join` waits for that thread and returns the function's
-result.
+[otium.thread](/reference/otium.thread/) provides threads.
+[`spawn`](/reference/otium.thread/#spawn) starts a function with the supplied
+arguments and returns a thread handle. [`join`](/reference/otium.thread/#join)
+waits for that thread and returns its result.
 
 ```otium
 (require otium.thread :as thread)
 
-(def (work value)
+(def (later value)
   (thread/sleep 0.01)
   value)
 
-(let ((a (thread/spawn work 20))
-      (b (thread/spawn work 22)))
+(let ((a (thread/spawn later 20))
+      (b (thread/spawn later 22)))
   (+ (thread/join a) (thread/join b)))
-;; => 42
+; => 42
 ```
 
-Both jobs start before either is joined. Sleeping or joining pauses only the
-calling thread, allowing others to run. Sleep durations are in seconds.
+Both tasks start before either is joined. Sleeping or joining parks only the
+waiting thread. Waiting for mailbox messages, locks, or file-descriptor I/O also
+lets other threads run. Foreign calls and custom port callbacks can block all
+threads.
 
-Otium switches between runnable threads automatically; you do not need to insert
-`thread/yield` into every loop.
+Threads take turns automatically, so you do not need to insert `yield` calls
+into every loop. They require native execution and are unavailable under
+`--c.vm`.
 
-Threads share mutable values, and their operations can interleave even on one
-native thread. If several threads update the same state, protect the update with
-a `thread/mutex` and `thread/with-lock`, or give one actor responsibility for
-that state.
+Threads share mutable values. If several threads update the same state, protect
+the operation with [`with-lock`](/reference/otium.thread/#with-lock) and a
+shared [`mutex`](/reference/otium.thread/#mutex), or give one actor
+responsibility for that state.
 
-## When a thread fails
+## Thread failures and cancellation
 
-An uncaught error ends the thread with status `:failed` and prints a diagnostic
-to standard error. It does not automatically raise an error in the thread that
-spawned it.
-
-Joining a failed thread raises a `thread-failed` condition. Its `:reason` holds
-the original error:
+An uncaught error ends the thread with status `:failed`. An ordinary spawned
+thread does not automatically fail its parent. Joining it raises a
+`thread-failed` condition whose `:reason` contains the original condition.
 
 ```otium
-(let ((job (thread/spawn (fn () (error "work failed")))))
+(let ((worker (thread/spawn (fn () (error "work failed")))))
   (try
-    (thread/join job)
+    (thread/join worker)
     (catch (thread/failed? problem)
       (condition-message (get problem :reason)))))
-;; => "work failed"
+; => "work failed"
 ```
 
-Catching the join error does not suppress the diagnostic.
+The failed thread also prints an error diagnostic. See [Errors and
+recovery](errors.md) for handling conditions.
 
-You can give `thread/join` a timeout in seconds. A timeout raises a condition
-recognized by `thread/timeout?`; it does not stop the job.
+A timeout passed to `join` is in seconds. It raises a condition recognized by
+[`timeout?`](/reference/otium.thread/#timeout?) without cancelling the worker.
 
-To stop a thread, use `thread/kill!`. Its cleanups run, but `try` cannot catch
-the termination. Joining it returns the kill reason, which defaults to
-`:killed`.
+To cancel a thread, use [`kill!`](/reference/otium.thread/#kill!). Its cleanups
+run, but `try` cannot catch the cancellation. Joining it returns the kill
+reason, which defaults to `:killed`.
 
-For tasks that should succeed or fail together, use `thread/group` inside `with`
-and start children with `thread/spawn-in`. Leaving the group waits for its
-children. By default, a child failure stops its siblings and interrupts the
-owning body. The failure is reported when the group closes.
+For related tasks that should finish together, use
+[`group`](/reference/otium.thread/#group) with `with`, and start children with
+[`spawn-in`](/reference/otium.thread/#spawn-in). Leaving the group waits for its
+children. By default, a child failure kills its siblings and interrupts the
+enclosing body. The failure is reported when the group closes.
 
-## Serve messages with an actor
+## Actors: messages and replies
 
-Actors use the same `thread/spawn` as other threads. A typical actor loops
-around `thread/receive`, carrying its state into the next iteration.
+[otium.actor](/reference/otium.actor/) adds request/reply calls and exit
+monitoring to threads. Actors still start with `thread/spawn`.
 
-`thread/send` queues a message without waiting for it to be handled.
-`thread/receive` takes the first matching message and evaluates that clause.
-Unmatched messages stay in the mailbox. If no message matches, it waits.
+[`send`](/reference/otium.thread/#send) queues a message without waiting for it
+to be processed. [`receive`](/reference/otium.thread/#receive) takes the first
+matching message and runs its clause, leaving unmatched messages queued. Its
+patterns follow [Pattern matching](matching.md).
 
-For a reply, use `actor/call`. The actor handles the request with a `:call`
-clause, whose result is sent back automatically.
+For a reply, use [`actor/call`](/reference/otium.actor/#call). A `:call` clause
+receives the request and sends back its body's value.
+
+This counter keeps its state in a loop argument:
 
 ```otium
 (require otium.actor :as actor)
@@ -94,69 +98,75 @@ clause, whose result is sent back automatically.
   (serve
     (thread/receive
       ({:op :add :n n} (+ count n))
-      (:call {:op :get} count)
-      (:call {:op :fail} (error "request failed")))))
+      (:call 'get count)
+      (:call 'fail (error "request failed"))
+      ('crash (error "counter failed")))))
 
 (def counter (thread/spawn serve 0))
 
 (thread/send counter {:op :add :n 2})
-(actor/call counter {:op :get})
-;; => 2
+(actor/call counter 'get)
+; => 2
 ```
 
-Each successful clause returns the count for the next iteration. The actor
-handles updates one at a time, so callers need not lock the counter's state.
+Each successful clause returns the count for the next iteration. Other threads
+ask the counter to change its state rather than changing shared state
+themselves.
 
-A successful send means the message was queued; it does not tell you whether the
-work succeeded. Sending to a finished thread returns `#f`.
+`send` returns `#f` if the target has finished. A successful send does not
+acknowledge that the message was handled.
 
-## Request failures and actor exits
+## Request failures versus actor failures
 
-An error inside a `:call` clause is raised in the caller. The actor's `receive`
-continues waiting for another message:
+An error inside a `:call` clause is sent back and raised in the caller. The
+actor's `receive` waits for another message, so a failed request need not stop
+the service:
 
 ```otium
 (try
-  (actor/call counter {:op :fail})
+  (actor/call counter 'fail)
   (catch problem (condition-message problem)))
-;; => "request failed"
+; => "request failed"
 
-(actor/call counter {:op :get})
-;; => 2
+(actor/call counter 'get)
+; => 2
 ```
 
-Mutations made before the error are not rolled back.
+A call waits five seconds by default; an optional third argument sets the
+timeout in seconds. A timeout raises a `thread/timeout?` condition without
+cancelling work already being handled.
 
-By default, `actor/call` waits up to five seconds. Supply a third argument to
-change the timeout. A timeout raises a `thread/timeout?` condition; it does not
-cancel work already underway. If the actor dies without replying, the call can
-time out rather than immediately reporting its exit.
-
-An uncaught error outside a `:call` handler ends the actor like any other
-thread. Use `actor/monitor` when you need notification of its exit. A monitor
-returns a reference and sends your mailbox an exit message:
+An error escaping an ordinary message clause ends the actor just like any other
+thread. To hear when an actor ends, use
+[`monitor`](/reference/otium.actor/#monitor). It returns a reference identifying
+the exit notification:
 
 ```otium
-(let ((ref (actor/monitor counter)))
-  (thread/kill! counter :shutdown)
-  (thread/receive
-    ({:exit who :ref (== ref) :reason reason} reason)))
-;; => :shutdown
+(def watch (actor/monitor counter))
+(thread/send counter 'crash)
+
+(thread/receive
+  ({:exit _ :ref (== watch) :reason reason}
+    (condition-message reason)))
+; => "counter failed"
 ```
 
-The exit reason is `:normal` for normal completion, the supplied reason for a
-kill, or the original condition for a failure. Monitoring reports termination;
-it does not restart the actor.
+The actor also prints an error diagnostic. The exit message's reason is the
+original condition for failure, `:normal` for normal completion, or the kill
+reason for cancellation. Monitoring reports the exit; it does not restart the
+actor.
 
-## Which should you use?
+A pending `actor/call` does not automatically turn an actor's exit into a
+failure reply. Without a reply, it waits until its timeout. Use monitors when
+you need to track the service's lifetime.
 
-Actors are threads, so choosing between them is a matter of organizing work and
-state. Neither choice lets you use more cores.
+## Choosing threads or actors
 
-- Use a thread for a task with a beginning, an end, and a result you will join.
-- Use an actor for a service that handles repeated requests or owns changing
-  state.
-- Use a thread group when several tasks belong to one operation and should fail
-  together.
+Use threads for independent tasks whose results you will join, with a group when
+those tasks should succeed or fail together.
+
+Use actors for ongoing services with state and a message-based interface. Calls
+provide answers; monitors report exits. Neither choice makes CPU-heavy work run
+across more cores.
 
 <!-- generated from concurrency.md.spec sha256:1cfe3155072c00e0f54e30a9880102eeffd2b67aa0f29d28c9724408570d5d5c -->

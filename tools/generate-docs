@@ -22,6 +22,7 @@ import os
 import re
 import shlex
 import tempfile
+import urllib.parse
 import subprocess
 import sys
 from concurrent.futures import ThreadPoolExecutor
@@ -78,6 +79,11 @@ Rules:
   `/reference/<namespace>/#<name>`, for example
   ``[`read-line`](/reference/otium.core/#read-line)``. The reference covers only
   these namespaces: {{reference}}. Only link names that exist there.
+  When the page introduces one of these namespaces, link its reference page
+  once, as `[otium.json](/reference/otium.json/)`.
+- Link an error or lint code to its entry on the error code page, as
+  ``[`E0001`](/reference/diagnostics/#E0001)``. The codes are in
+  `lib/catalog/diagnostics.json`.
 - Link to other docs with relative links from {{target}}. The docs that exist:
 {{index}}
 - Do not edit any files. Your only output is the reply.
@@ -184,7 +190,20 @@ of changes, no code fence around the whole thing.
 </humanizer-skill>
 """
 SKILL = ROOT / '.agents/skills/humanizer/SKILL.md'
-REFERENCE = [ns['name'] for ns in json.loads((DOCS / 'reference.json').read_text())['namespaces']]
+REFERENCE_DATA = json.loads((DOCS / 'reference.json').read_text())['namespaces']
+REFERENCE = [ns['name'] for ns in REFERENCE_DATA]
+REFERENCE_NAMES = {(ns['name'], e['name']) for ns in REFERENCE_DATA for e in ns['entries']}
+REFERENCE_LINK = re.compile(r'\[([^\]]+)\]\(/reference/([^/)#\s]+)/(?:#([^)\s]+))?\)')
+
+
+def check_reference_links(markdown):
+    """Keep reference links that resolve; turn the rest back into their text."""
+    def fix(m):
+        ns, name = m.group(2), m.group(3) and urllib.parse.unquote(m.group(3))
+        if ns == 'diagnostics' or (name and (ns, name) in REFERENCE_NAMES) or (not name and ns in REFERENCE):
+            return m.group(0)
+        return m.group(1)
+    return REFERENCE_LINK.sub(fix, markdown)
 
 
 def pi_command(system, args):
@@ -347,7 +366,7 @@ def generate(spec, index, args):
         with tempfile.NamedTemporaryFile(mode='w', dir=target.parent,
                                          prefix=f'.{target.name}.', delete=False) as output:
             temporary = Path(output.name)
-            output.write(f'{wrap(text)}\n\n{stamp(spec)}\n')
+            output.write(f'{wrap(check_reference_links(text))}\n\n{stamp(spec)}\n')
         try:
             temporary.chmod(target.stat().st_mode & 0o777 if target.exists() else 0o644)
             temporary.replace(target)

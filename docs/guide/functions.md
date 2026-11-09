@@ -1,81 +1,82 @@
 # ✨ Functions
 
-Otium functions are values. You can bind reusable work to a name, pass it as an
-argument to other code, such as a sequence transformation, or return it from
-another function.
+Functions let you name reusable work and pass behavior to operations such as
+`map`. They are values, so you can bind them to names, pass them as arguments,
+and return them from other functions.
 
-## Defining and calling functions
+## Define and call functions
 
-Use `def`, rather than Scheme's `define`, to define a named function, and `fn`
-to create an anonymous function.
+Use `def`, rather than Scheme's `define`, to define a named function. Use `fn`
+to make an anonymous function.
 
 ```otium
 (def (square x)
   (* x x))
 
-(square 6)                    ; => 36
-((fn (x) (* x x)) 6)          ; => 36
-(map square [2 3 4])          ; => [4 9 16]
+(square 6) ; => 36
+
+(map (fn (x) (* x x)) [1 2 3]) ; => [1 4 9]
 ```
 
-The function form of `def` is shorthand for binding an `fn` to a name. A
-function body can contain several expressions. They run in order, and the last
-expression supplies the result; there is no explicit return statement.
-
-In an ordinary call, Otium evaluates the function expression, then its arguments
-from left to right.
+A call puts the function before its arguments. Arguments are evaluated before
+the function runs. The body evaluates its expressions in order and returns the
+last expression's value.
 
 ## Optional arguments
 
-Callers may leave out optional positional arguments. After `&optional`, write
-each parameter as a `(name default)` pair. This extends Scheme's usual
-parameter-list syntax.
+Put required parameters first, followed by `&optional` and the optional
+parameters. Each optional parameter must be a `(name default)` pair.
 
 ```otium
-(def (window start &optional (width 10) (end (+ start width)))
-  (list start width end))
+(def (span start &optional (width 10) (end (+ start width)))
+  (list start end))
 
-(window 5)        ; => (5 10 15)
-(window 5 3)      ; => (5 3 8)
-(window 5 3 20)   ; => (5 3 20)
+(span 5)      ; => (5 15)
+(span 5 3)    ; => (5 8)
+(span 5 3 20) ; => (5 20)
 ```
 
-Defaults run at call time, only for omitted arguments. They run left to right
-and can use preceding parameters and enclosing lexical bindings. Passing `nil`
-or `#f` supplies a value; it does not request the default.
+These arguments are positional. Defaults run from left to right, only for
+omitted arguments. They can use preceding parameters and enclosing bindings.
 
-Required parameters go before `&optional`. The same syntax works in `fn`.
-Calling with too few required arguments or too many arguments is an error.
+Passing `nil` or `#f` supplies a value; it does not request the default.
+
+```otium
+((fn (&optional (value 7)) value) nil) ; => nil
+```
+
+Passing too few required arguments or too many arguments is an error.
 
 ## Rest arguments
 
-A rest parameter collects any remaining arguments into a list. Scheme's dotted
+A rest parameter gathers any remaining arguments into a list. Scheme's dotted
 syntax works:
 
 ```otium
-(def (with-extras first . more)
-  (list first more))
+(def (gather first . more)
+  (cons first more))
 
-(with-extras 1)       ; => (1 ())
-(with-extras 1 2 3)   ; => (1 (2 3))
+(gather 1)     ; => (1)
+(gather 1 2 3) ; => (1 2 3)
 ```
 
-You can also write the parameter list as `(first & more)`. To collect all
-arguments, give `fn` a single parameter name instead of a parameter list:
+You can also write the parameter list as `(first & more)`. A bare symbol after
+`fn` gathers all arguments:
 
 ```otium
-((fn args args) 1 2 3)   ; => (1 2 3)
+((fn args args) 1 2 3) ; => (1 2 3)
 ```
 
-Optional and rest parameters cannot be combined in one function.
+Optional and rest parameters cannot be combined in one parameter list.
 
-Runtime rest parameters trigger a lint warning. For a genuinely variadic API,
-you can suppress the warning with a reason; see [Lint and diagnostics](lint.md).
+The linter warns about runtime rest parameters. For an intentionally variadic
+API, see [Lint and diagnostics](lint.md) for how to suppress the warning with a
+reason.
 
 ## Closures
 
-A closure retains access to the lexical bindings where it was created, even
-after the enclosing function returns.
+A function keeps access to the lexical bindings surrounding its definition. You
+can use this to return a function configured with values from an earlier call.
 
 ```otium
 (def (make-adder amount)
@@ -83,15 +84,16 @@ after the enclosing function returns.
 
 (def add-ten (make-adder 10))
 
-(add-ten 5)   ; => 15
+(add-ten 5) ; => 15
 ```
 
-Each call to `make-adder` creates a function with its own captured `amount`.
+Here `add-ten` retains access to `amount` after `make-adder` returns.
 
 ## Tail calls
 
-As in Scheme, tail calls do not grow the stack. A call is in tail position when
-its result becomes the enclosing function's result without further work.
+A call is in tail position when its result is returned directly, with no work
+left afterward. Otium guarantees that tail calls do not grow the stack,
+including calls between different functions.
 
 ```otium
 (def (sum-to n &optional (total 0))
@@ -99,87 +101,99 @@ its result becomes the enclosing function's result without further work.
       total
       (sum-to (- n 1) (+ total n))))
 
-(sum-to 100000)   ; => 5000050000
+(sum-to 100000) ; => 5000050000
 ```
 
-The recursive call is the final expression in an `if` branch, and the `if` is
-the function's final expression. Keeping a running total avoids addition after
-the recursive call returns.
+The recursive call supplies the result of the `if` branch, and that `if` is the
+function's last expression. The addition happens before the call. Wrapping the
+recursive call in an addition would leave work afterward, so it would no longer
+be tail-recursive.
 
-Tail calls between different functions have the same guarantee. Ordinary
-recursion with work remaining after the call still uses stack space.
-
-## Calling with collected arguments
+## Call with collected arguments
 
 Use [`apply`](/reference/otium.core/#apply) when arguments are already in a list
-or array. It spreads its final argument into individual arguments, passing any
-arguments before it first.
+or array. Its final argument supplies the collected arguments; any arguments
+before it are passed first.
 
 ```otium
-(apply + '(1 2 3))      ; => 6
-(apply + 10 [1 2 3])    ; => 16
+(apply + '(1 2 3))   ; => 6
+(apply + 10 [1 2 3]) ; => 16
 ```
 
-## Callable collections and keywords
+## Call collections and keywords
 
-You can also call tables, arrays, and keywords in Otium. These calls perform
-lookups, like [`get`](/reference/otium.core/#get).
+Tables, arrays, and keywords can also appear in the function position. A table
+call looks up a key, and an array call looks up a zero-based index. A keyword
+call looks up that keyword in the supplied collection.
 
-A table takes a key, and an array takes a zero-based index. A keyword takes the
-collection to look itself up in. A missing entry returns `nil` unless you supply
-a default.
+These calls follow [`get`](/reference/otium.core/#get): a missing entry returns
+`nil` unless you supply a default.
 
 ```otium
-(def settings {:size 12})
-(def sizes [12 18 24])
+(def person {:name "Ada"})
+(def names ["Ada" "Grace"])
 
-(settings :size)          ; => 12
-(sizes 1)                 ; => 18
-(:size settings)          ; => 12
-(settings :missing)       ; => nil
-(:missing settings 20)    ; => 20
-
-(map :size [{:size 12} {:size 18}])   ; => [12 18]
+(person :name)    ; => "Ada"
+(:name person)   ; => "Ada"
+(names 1)        ; => "Grace"
+(person :age)    ; => nil
+(:age person 0) ; => 0
 ```
 
-You can pass callable values to higher-order functions such as `map`, or call
-them through `apply`.
+Callable keywords are useful as lookup callbacks:
 
-## Combining functions with `otium.extra`
+```otium
+(map :name [{:name "Ada"} {:name "Grace"}])
+; => ["Ada" "Grace"]
+```
 
-Load `otium.extra` explicitly to use its helpers for arranging calls or building
-functions.
+## Build calls with helpers
 
-The threading macros `->` and
-`->>` make nested calls read in execution order.
-`->` inserts the preceding value as the first argument of each form; `->>`
-inserts it as the last.
+[otium.extra](/reference/otium.extra/) provides helpers for arranging calls and
+building functions. Load it explicitly.
 
-Using `square` from above:
+### Thread values through calls
+
+The [`->`](/reference/otium.extra/#->) macro inserts a value as the first
+argument of each successive call. [`->>`](/reference/otium.extra/#->>) inserts
+it as the last argument.
 
 ```otium
 (require otium.extra :as extra)
 
-(extra/-> 5
-  (+ 1)
-  (* 2))                       ; => 12
+(extra/-> {:score 4}
+  (get :score)
+  (+ 1))
+; => 5
 
 (extra/->> [1 2 3]
   (map square)
-  (reduce + 0))                ; => 14
+  (reduce + 0))
+; => 14
 ```
 
-`partial` creates a function with leading
-arguments already supplied. `comp` composes
-functions right to left: the rightmost function receives the call's arguments,
-and each remaining function receives the preceding result.
+Choose the direction based on where each operation expects the value being
+passed along.
+
+### Fix arguments and compose functions
+
+[`partial`](/reference/otium.extra/#partial) returns a function with leading
+arguments already supplied.
 
 ```otium
 (def add-five (extra/partial + 5))
-(add-five 7)                   ; => 12
 
+(add-five 3) ; => 8
+```
+
+[`comp`](/reference/otium.extra/#comp) combines functions from right to left.
+The rightmost function receives the call's arguments; each remaining function
+receives the preceding result.
+
+```otium
 (def square-after-add (extra/comp square +))
-(square-after-add 2 3)          ; => 25
+
+(square-after-add 2 3) ; => 25
 ```
 
 <!-- generated from functions.md.spec sha256:5077a4c1e6491cd5e700a2ac4207a6ecbbe30375e6b6b97f3e716dd27e4fd25e -->

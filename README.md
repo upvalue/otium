@@ -51,7 +51,8 @@ memory range. Its userspace is written in the Otium language.
 
 Otium (the name and domain) previously referred to a C++ + TCL operating system
 I wrote at Recurse Center in late 2025. That code is now archived but remains
-on commit `d8ab8cddd50575f3b061e3e30381a8942d1cde9f` for reference.
+on commit `d8ab8cddd50575f3b061e3e30381a8942d1cde9f` for reference. Its site is
+up at [otium.sh/legacy](https://otium.sh/legacy).
 
 ## Credits
 

@@ -10,6 +10,10 @@
 #if defined(__APPLE__) && !defined(_DARWIN_C_SOURCE)
 #define _DARWIN_C_SOURCE
 #endif
+/* Foreign calls need libffi and dlopen, which otos and the web build lack. */
+#if !defined(OTIUM_FREESTANDING) && !defined(__EMSCRIPTEN__)
+#define OTIUM_FFI 1
+#endif
 
 #include "heap.h"
 #include <assert.h>

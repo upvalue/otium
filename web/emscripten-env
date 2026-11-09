@@ -1,0 +1,24 @@
+#!/bin/sh
+# Run a command with Emscripten configured. Homebrew's emscripten carries its
+# own LLVM and binaryen but no config file, so when emcc can't run as it is,
+# write one into build/ that points at them. Set EM_CONFIG to use another.
+set -eu
+here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+if [ -z "${EM_CONFIG-}" ] && ! emcc --version >/dev/null 2>&1; then
+    libexec=$(dirname "$(readlink -f "$(command -v emcc)")")/../libexec
+    libexec=$(CDPATH= cd -- "$libexec" && pwd)
+    if [ ! -x "$libexec/llvm/bin/clang" ] || [ ! -x "$libexec/binaryen/bin/wasm-opt" ]; then
+        echo "emscripten-env: emcc isn't configured; set EM_CONFIG" >&2
+        exit 1
+    fi
+    mkdir -p "$here/build"
+    EM_CONFIG=$here/build/emscripten-config.py
+    cat > "$EM_CONFIG" <<EOF
+LLVM_ROOT = '$libexec/llvm/bin'
+BINARYEN_ROOT = '$libexec/binaryen'
+NODE_JS = '$(command -v node)'
+CACHE = '$here/build/emscripten-cache'
+EOF
+    export EM_CONFIG
+fi
+exec "$@"

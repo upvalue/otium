@@ -1,0 +1,20 @@
+# Otium for WebAssembly: the VM built with Emscripten, for Node and browsers.
+
+set positional-arguments
+
+# Configure and build
+build:
+    @test -d build/meson-info || ./emscripten-env meson setup build --cross-file=cross/emscripten.txt
+    ./emscripten-env meson compile -C build
+
+# Run a program under Node, as ./otium would
+run *args: build
+    build/otium "$@"
+
+# Run the shared tests (../tests/run) against the Node build; pass test names to pick
+test *args: build
+    cd .. && OTIUM_BUILD={{justfile_directory()}}/build PYTHONPATH=tools:. tests/run "$@"
+
+# Serve the browser page at http://localhost:8000
+serve port="8000": build
+    python3 -m http.server {{port}} --directory build

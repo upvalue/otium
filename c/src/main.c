@@ -33,10 +33,12 @@ static void request(int reason) {
   else interrupt_requested = reason;
 }
 
+#ifndef __EMSCRIPTEN__
 static void interrupt_handler(int signal_number) {
   (void)signal_number;
   request(1);
 }
+#endif
 
 /* Native code runs on small stacks with no room for a signal frame, so the
  * handlers here run on a stack of their own. */
@@ -627,6 +629,8 @@ int main(int argc, char** argv) {
     ot_destroy(rt);
     return 1;
   }
+  /* A WASM process gets no signals, so there is no ^C to catch. */
+#ifndef __EMSCRIPTEN__
   struct sigaction action = {0}, previous;
   action.sa_handler = interrupt_handler;
   sigemptyset(&action.sa_mask);
@@ -636,6 +640,7 @@ int main(int argc, char** argv) {
     ot_destroy(rt);
     return 1;
   }
+#endif
   ot_set_interrupt_flag(rt, &interrupt_requested);
   interrupt_runtime = rt;
   bool native = false;
@@ -692,7 +697,9 @@ int main(int argc, char** argv) {
     if (!ot_interrupted(rt) && !ot_exit_status(rt, &status))
       fprintf(stderr, "cannot flush output ports: %s\n", ot_error(rt));
   }
+#ifndef __EMSCRIPTEN__
   sigaction(SIGINT, &previous, NULL);
+#endif
   interrupt_runtime = NULL;
   ot_destroy(rt);
   return status;

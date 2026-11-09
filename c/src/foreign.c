@@ -1,5 +1,5 @@
 #include "internal.h"
-#ifndef OTIUM_FREESTANDING
+#ifdef OTIUM_FFI
 #include "foreign_types.h"
 #include <dlfcn.h>
 #include <float.h>

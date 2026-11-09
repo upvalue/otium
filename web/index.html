@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Otium</title>
+<style>
+  :root { color-scheme: light dark; --fg: #1d1f21; --bg: #fafafa; --muted: #6a6f75; --line: #d6d8db; --err: #b3261e; }
+  @media (prefers-color-scheme: dark) { :root { --fg: #e4e6e8; --bg: #17191b; --muted: #9aa0a6; --line: #34383c; --err: #f2867f; } }
+  body { margin: 0; padding: 16px; background: var(--bg); color: var(--fg); font: 14px/1.4 system-ui, sans-serif; }
+  main { max-width: 960px; margin: 0 auto; display: grid; gap: 12px; }
+  textarea, pre { box-sizing: border-box; width: 100%; margin: 0; padding: 10px; border: 1px solid var(--line);
+    border-radius: 6px; background: transparent; color: inherit; font: 13px/1.45 ui-monospace, Menlo, monospace; }
+  textarea { height: 45vh; resize: vertical; }
+  pre { min-height: 8em; white-space: pre-wrap; }
+  .stderr { color: var(--err); }
+  .bar { display: flex; gap: 8px; align-items: center; }
+  #status { color: var(--muted); }
+</style>
+</head>
+<body>
+<main>
+  <textarea id="source" spellcheck="false">(def (fib n)
+  (if (< n 2) n (+ (fib (- n 1)) (fib (- n 2)))))
+
+(println "fib 25 =" (fib 25))
+(println (map (fn (x) (* x x)) (range 10)))</textarea>
+  <div class="bar">
+    <button id="run">Run</button>
+    <button id="stop" disabled>Stop</button>
+    <span id="status"></span>
+  </div>
+  <pre id="output"></pre>
+</main>
+<script type="module">
+const $ = (id) => document.getElementById(id);
+let worker = null, started = 0;
+
+function finish(message) {
+  worker?.terminate();
+  worker = null;
+  $('run').disabled = false;
+  $('stop').disabled = true;
+  $('status').textContent = message;
+}
+
+$('run').onclick = () => {
+  $('output').textContent = '';
+  $('run').disabled = true;
+  $('stop').disabled = false;
+  $('status').textContent = 'Running…';
+  started = performance.now();
+  worker = new Worker('worker.js', { type: 'module' });
+  worker.onmessage = ({ data }) => {
+    if (data.text) {
+      const span = document.createElement('span');
+      span.className = data.stream;
+      span.textContent = data.text;
+      $('output').append(span);
+    }
+    if ('exit' in data) finish(`Exited with ${data.exit} after ${Math.round(performance.now() - started)} ms`);
+  };
+  worker.onerror = (event) => finish(`Worker failed: ${event.message}`);
+  worker.postMessage({ source: $('source').value });
+};
+$('stop').onclick = () => finish('Stopped');
+$('source').onkeydown = (event) => {
+  if (event.key === 'Enter' && (event.metaKey || event.ctrlKey) && !$('run').disabled) $('run').click();
+};
+</script>
+</body>
+</html>

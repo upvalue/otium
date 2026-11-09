@@ -1,0 +1,4 @@
+#!/bin/sh
+# Run the Node build as though it were a native otium binary, so OTIUM_BUILD
+# can point the test harness at this directory.
+exec node --stack-size=8192 "$(dirname "$0")/otium.js" "$@"

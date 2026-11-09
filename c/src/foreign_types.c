@@ -1,5 +1,5 @@
-#ifndef OTIUM_FREESTANDING
 #include "internal.h"
+#ifdef OTIUM_FFI
 #include "foreign_types.h"
 #include <limits.h>
 #include <stdlib.h>

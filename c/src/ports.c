@@ -51,7 +51,7 @@ void oti_port_repr(FILE* out, ot_value p) {
 }
 
 #ifndef OTIUM_FREESTANDING
-static int posix_open(void* userdata, const char* path, unsigned flags, intptr_t* handle) {
+static int fd_open(void* userdata, const char* path, unsigned flags, intptr_t* handle) {
   (void)userdata;
   int mode = flags & OT_IO_WRITE ? O_WRONLY : O_RDONLY;
   if (flags & OT_IO_CREATE) mode |= O_CREAT;
@@ -72,19 +72,19 @@ static int posix_open(void* userdata, const char* path, unsigned flags, intptr_t
   return 0;
 }
 
-static long posix_read(void* userdata, intptr_t handle, uint8_t* bytes, size_t length) {
+static long fd_read(void* userdata, intptr_t handle, uint8_t* bytes, size_t length) {
   (void)userdata;
   ssize_t n = read((int)handle, bytes, length);
   return n < 0 ? -errno : (long)n;
 }
 
-static long posix_write(void* userdata, intptr_t handle, const uint8_t* bytes, size_t length) {
+static long fd_write(void* userdata, intptr_t handle, const uint8_t* bytes, size_t length) {
   (void)userdata;
   ssize_t n = write((int)handle, bytes, length);
   return n < 0 ? -errno : (long)n;
 }
 
-static int posix_close(void* userdata, intptr_t handle) {
+static int fd_close(void* userdata, intptr_t handle) {
   (void)userdata;
   return close((int)handle) ? errno : 0;
 }
@@ -92,7 +92,7 @@ static int posix_close(void* userdata, intptr_t handle) {
 #else
 /* Without an operating system the host must install an I/O host; until then
  * every call fails. */
-static int posix_open(void* userdata, const char* path, unsigned flags, intptr_t* handle) {
+static int fd_open(void* userdata, const char* path, unsigned flags, intptr_t* handle) {
   (void)userdata;
   (void)path;
   (void)flags;
@@ -100,7 +100,7 @@ static int posix_open(void* userdata, const char* path, unsigned flags, intptr_t
   return ENOSYS;
 }
 
-static long posix_read(void* userdata, intptr_t handle, uint8_t* bytes, size_t length) {
+static long fd_read(void* userdata, intptr_t handle, uint8_t* bytes, size_t length) {
   (void)userdata;
   (void)handle;
   (void)bytes;
@@ -108,7 +108,7 @@ static long posix_read(void* userdata, intptr_t handle, uint8_t* bytes, size_t l
   return -ENOSYS;
 }
 
-static long posix_write(void* userdata, intptr_t handle, const uint8_t* bytes, size_t length) {
+static long fd_write(void* userdata, intptr_t handle, const uint8_t* bytes, size_t length) {
   (void)userdata;
   (void)handle;
   (void)bytes;
@@ -116,27 +116,27 @@ static long posix_write(void* userdata, intptr_t handle, const uint8_t* bytes, s
   return -ENOSYS;
 }
 
-static int posix_close(void* userdata, intptr_t handle) {
+static int fd_close(void* userdata, intptr_t handle) {
   (void)userdata;
   (void)handle;
   return 0;
 }
 #endif
 
-static const ot_io_host posix_host = {posix_open, posix_read, posix_write, posix_close, NULL};
+static const ot_io_host fd_host = {fd_open, fd_read, fd_write, fd_close, NULL};
 
 bool ot_set_io_host(ot_state* rt, const ot_io_host* host, void* userdata) {
   if (!oti_host_entry(rt)) return false;
   if (host && (!host->open || !host->read || !host->write || !host->close))
     return oti_error(rt, "I/O host requires open, read, write and close callbacks");
-  rt->io_host = host ? *host : posix_host;
+  rt->io_host = host ? *host : fd_host;
   rt->io_host_set = host != NULL;
   rt->io_userdata = host ? userdata : NULL;
   return true;
 }
 
 static void port_host(ot_state* rt, ot_value port) {
-  port_object(port)->host = rt->io_host_set ? rt->io_host : posix_host;
+  port_object(port)->host = rt->io_host_set ? rt->io_host : fd_host;
   port_object(port)->userdata = rt->io_host_set ? rt->io_userdata : NULL;
 }
 
@@ -150,7 +150,7 @@ static void port_host(ot_state* rt, ot_value port) {
 static void port_readiness(ot_value port) {
 #ifndef OTIUM_FREESTANDING
   oti_port_obj* p = port_object(port);
-  if (p->host.read == posix_read && p->host.write == posix_write) {
+  if (p->host.read == fd_read && p->host.write == fd_write) {
     struct stat st;
     if (!fstat((int)p->handle, &st)) {
       bool regular = S_ISREG(st.st_mode), terminal = S_ISCHR(st.st_mode) && isatty((int)p->handle),
@@ -161,6 +161,11 @@ static void port_readiness(ot_value port) {
       p->write_chunk = regular || device || p->socket     ? SIZE_MAX
                        : S_ISFIFO(st.st_mode) || terminal ? PIPE_BUF
                                                           : 1;
+#ifdef __EMSCRIPTEN__
+      /* Emscripten can't poll most streams, and a WASM process has no
+       * interrupts or other threads to wait for, so transfers just block. */
+      p->may_block = p->poll_reads = false;
+#endif
     }
   }
 #else
@@ -286,7 +291,7 @@ static long transfer(ot_state* rt, ot_value* port, bool writing, size_t start, s
   for (;;) {
     if (!interrupt_poll(rt)) return -1;
 #ifndef OTIUM_FREESTANDING
-    bool waits = port_object(*port)->may_block && port_object(*port)->host.read == posix_read &&
+    bool waits = port_object(*port)->may_block && port_object(*port)->host.read == fd_read &&
                  can_wait(rt);
     if (waits && port_object(*port)->socket) {
       /* Try first: MSG_DONTWAIT leaves the shared file flags alone. */

@@ -1,139 +1,177 @@
 # ✨ Macros
 
-## Define a macro
+Macros let you add forms that control evaluation or introduce bindings. Prefer a
+function when you only need to compute with argument values: functions evaluate
+their arguments once and can be passed to `map` or stored as callbacks. Use a
+macro when some arguments must remain unevaluated, or when the caller needs new
+local names.
 
-Use `defmacro` to receive unevaluated argument forms and return the code that
-should replace the call. Define the macro before any top-level form that uses
-it.
+An Otium macro receives unevaluated forms as ordinary data and returns a form
+that replaces its call. Its body runs during expansion; the returned code runs
+later. Define a macro before the code that uses it.
+
+## Write a code template
+
+`defmacro` takes a name, parameters, and a body. Use a syntax-quote template,
+written ``#` ``, to construct the returned code:
+
+- `,expression` inserts one value into the template.
+- `,@expression` splices a list of forms into it.
+- `name#` introduces a fresh name.
+
+This macro evaluates an expression once, then runs its body only if the result
+is positive:
 
 ```otium
-(defmacro twice (expression)
+(ns app.macros)
+
+(def- (positive? value)
+  (> value 0))
+
+(defmacro when-positive (expression . body)
   #`(let ((value# ,expression))
-      (+ value# value#)))
-
-(twice (+ 2 3)) ; => 10
+      (if (positive? value#)
+          (begin ,@body)
+          nil)))
 ```
 
-Here `expression` receives the list `(+ 2 3)`, not the number `5`. The macro
-runs during expansion. Its returned `let` runs later and evaluates the supplied
-expression once.
+`expression` holds the caller's form, not its result. `body` holds a list of the
+remaining forms. Comma inserts the expression into the generated `let`; comma-at
+inserts the body forms into `begin`.
 
-A macro body can use ordinary Otium functions that are already defined.
+Every `value#` in this template denotes the same fresh symbol. Each evaluation
+of the template creates a new one, preventing the generated binding from
+capturing a caller's variable.
 
-## Build code with templates
+## Keep expansions safe across namespaces
 
-Use syntax quote, ``#` ``, for code templates:
-
-- `,expression` inserts the value of an expression into the template.
-- `,@expressions` splices a list of forms into the surrounding list.
-
-A rest parameter collects unevaluated forms into a list:
+Syntax quote resolves free names where the template is written. Here,
+`positive?` becomes `app.macros/positive?`. That qualified reference reaches the
+private helper and cannot be captured by a caller's local binding.
 
 ```otium
-(defmacro listed (& forms)
-  #`(list ,@forms))
+(ns app.client)
 
-(listed (+ 1 2) (* 3 4)) ; => (3 12)
+(let ((value 10)
+      (positive? (fn (x) #f)))
+  (app.macros/when-positive value
+    (+ value 2)))
+;; => 12
 ```
 
-The comma expressions run while the macro builds its result. The inserted forms
-run when the resulting code is evaluated.
+Core and referred bindings are qualified with their defining namespaces;
+namespace aliases become full namespace names. Unresolved bare names are
+qualified with the template's namespace, so they can refer to helpers defined
+later. Special forms such as `let` and `if` stay bare.
 
-Keep plain backquote for data. It supports comma and comma-at, but does not
-qualify names or make `name#` fresh:
+The template does not qualify inserted caller forms. The `value` in the example
+still refers to the caller's local variable.
+
+Use `name#` for bindings your macro owns. A bare binding name in a syntax-quote
+template gets qualified, and binding a qualified name is an error. If the caller
+supplies a binding name, insert it with comma instead.
+
+Fresh names prevent capture, but you must also control how often arguments run.
+Bind an expression once if you need its result more than once:
 
 ```otium
-(let ((n 3))
-  `(amount ,n)) ; => (amount 3)
+(let ((calls 0))
+  (list (app.macros/when-positive
+          (begin (set! calls (+ calls 1)) -1)
+          (error "not reached"))
+        calls))
+;; => (nil 1)
 ```
 
-## Keep names safe
+The test runs once and the body is skipped. An ordinary function accepting those
+expressions directly could not skip its body argument, because arguments are
+evaluated before a function is called.
 
-Syntax quote resolves ordinary names in the namespace where the template is
-written. Core and referred names use their defining namespace; aliases expand to
-full namespace names. Unresolved bare names use the template's current
-namespace.
+## Capture a name deliberately
+
+Sometimes a macro intentionally makes a name available to its body. `,'name`
+inserts a bare symbol, bypassing template qualification:
 
 ```otium
-(ns app.tools)
+(defmacro with-it (expression . body)
+  #`(let ((,'it ,expression))
+      ,@body))
 
-(def- (helper x)
-  (* x 10))
-
-(defmacro tenfold (expression)
-  #`(helper ,expression))
-
-(tenfold 4) ; => 40
+(with-it (+ 2 3)
+  (* it it))
+;; => 25
 ```
 
-The generated call refers to `app.tools/helper`. It still reaches that private
-helper when another namespace uses `tenfold`, even if the caller has a local
-variable named `helper`. Special forms such as `let` stay bare, as do symbols
-inside quoted data.
+This deliberately binds the body's `it`. Document such names, since they can
+shadow names the caller already uses. Prefer caller-supplied binding names when
+a fixed name is unnecessary.
 
-### Introduce fresh bindings
+## Backquote and Lisp expectations
 
-Give each binding your template introduces a name ending in `#`, as with
-`value#` in `twice`. Every occurrence of that name in one template denotes the
-same fresh symbol. Each evaluation of the template creates a new one.
+Plain backquote constructs data without namespace qualification or automatic
+fresh names:
 
 ```otium
-(let ((value 7))
-  (twice value)) ; => 14
+(let ((tail '(b c)))
+  `(a ,@tail))
+;; => (a b c)
 ```
 
-The generated binding cannot capture the caller's `value`. A bare binding name
-in a syntax-quoted template becomes qualified, and binding a qualified name is
-an error.
+Use plain backquote for data and ``#` `` for code templates. Ordinary quoted
+symbols inside a syntax-quote template also remain data rather than becoming
+namespace references.
 
-### Capture a name deliberately
+For a Common Lisp programmer, comma and comma-at play familiar roles. Otium's
+``#` `` adds definition-site namespace qualification and `name#` fresh names.
+Common Lisp-style backquote alone does not provide those protections.
 
-Use `,'name` to insert a bare symbol that should resolve in the caller's scope:
+For a Scheme programmer, this is not `syntax-rules`. A macro is ordinary Otium
+code manipulating forms, with no pattern rules or ellipsis-driven repetitions.
+Namespace qualification and explicit fresh names protect generated code; they do
+not provide `syntax-rules`' automatic lexical hygiene.
+
+## Local symbol macros
+
+`symbol-macrolet` replaces references to a local name with an expression. This
+is useful when a macro wants to expose a table field as if it were a variable.
+Unlike `let`, it substitutes the expression at each reference rather than
+storing its result.
+
+An optional writer gives the name an assignment operation:
 
 ```otium
-(defmacro add-amount (expression)
-  #`(+ ,'amount ,expression))
-
-(let ((amount 10))
-  (add-amount 3)) ; => 13
+(let ((point {:x 2}))
+  (symbol-macrolet ((x (get point :x)
+                       (value (put! point :x value))))
+    (set! x (+ x 3))
+    (list x (get point :x))))
+;; => (5 5)
 ```
 
-Here the macro deliberately depends on the caller providing `amount`. Use this
-only when that dependency is part of the macro's contract. Forms inserted from
-macro arguments also retain their caller-supplied names.
+Reading `x` reads the field. Assigning to `x` evaluates the new value once,
+binds it to the writer's `value` parameter, and runs the writer form. Without a
+writer, assignment is an error.
 
-## Give local names to expressions
+Inner lexical bindings shadow symbol macros, and quoted names remain data.
+Symbol macros are local; there are no global symbol macros.
 
-Use `symbol-macrolet` when a bare name should expand to an expression, such as a
-table-field access.
+## Inspect and reload
+
+Use [`macroexpand-1`](/reference/otium.core/#macroexpand-1) to inspect one
+expansion of a quoted call:
 
 ```otium
-(let ((cell {:x 1}))
-  (symbol-macrolet
-      ((x (get cell :x)
-          (value (put! cell :x value))))
-    (set! x (+ x 10))
-    x)) ; => 11
+(car (macroexpand-1
+       '(app.macros/when-positive 3 42)))
+;; => let
 ```
 
-Each read of `x` becomes `(get cell :x)`. The optional `(value write-form)`
-supplies the writer: `set!` evaluates its right-hand side once, binds it to
-`value`, then runs the write form. Without a writer, assigning to the symbol
-macro is an error.
+[`macroexpand`](/reference/otium.core/#macroexpand) continues expanding the
+outermost macro call, but does not recursively expand every nested form.
 
-The replacement uses the scope where the symbol macro was defined. Inner lexical
-bindings shadow it, and quoted occurrences remain data. These bindings are
-local; there are no global symbol macros.
+Function bodies are expanded when their definitions are evaluated, not on each
+call. Redefining a macro therefore leaves existing callers unchanged.
+Re-evaluate or reload those callers' definitions to use the new expansion. See
+[Live programming](live-programming.md).
 
-## Inspect and update expansions
-
-Inspect a macro's output with `(macroexpand-1 '(twice 5))`. It expands one outer
-macro call. `macroexpand` follows successive outer macro calls, but neither
-function recursively expands the whole result.
-
-Function bodies expand when their definitions are evaluated. After changing a
-macro, re-evaluate or reload the definitions that call it. Existing callers keep
-their old expansions; calling them again does not re-expand them. See [Live
-programming](live-programming.md) for reloading code.
-
-<!-- generated from macros.md.spec sha256:86031a43c2afbf89227606b9898746aba372335b609917b37a4f967d49e6e41d -->
+<!-- generated from macros.md.spec sha256:b2846fc81e2a8dc785cfcdb1f70b406c2487f77013238f4d68a94c7561d5d247 -->

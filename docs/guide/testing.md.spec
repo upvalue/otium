@@ -1,7 +1,9 @@
 ---
 title: "Testing"
 prompt: |
-  Write a guide to testing Otium code in Otium for a programmer who knows some Lisp and is learning Otium.
+  Write a guide to testing Otium code in Otium for a programmer who knows some
+  Lisp and is learning Otium. They should come away able to write tests for their own namespaces with
+  `otium.test`, run them, and read a failure.
 ---
 
 ## Sources

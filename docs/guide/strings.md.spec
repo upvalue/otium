@@ -1,7 +1,9 @@
 ---
 title: "Strings, symbols and keywords"
 prompt: |
-  Write a guide to working with text and names in Otium for a programmer who knows some Lisp and is learning Otium.
+  Write a guide to working with text and names in Otium for a programmer who knows some
+  Lisp and is learning Otium. They should come away able to build, take apart and format strings, and
+  know when to use a symbol, a keyword or a string.
 ---
 
 ## Sources

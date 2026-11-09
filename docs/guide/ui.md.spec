@@ -1,7 +1,10 @@
 ---
 title: "User interface"
 prompt: |
-  Write a guide to building a user interface with `otium.ui` in Otium for a programmer who knows some Lisp and is learning Otium.
+  Write a guide to building a user interface with `otium.ui` in Otium for a programmer who knows some
+  Lisp and is learning Otium. They should come away understanding how a UI program is put together (what
+  a widget is, where state lives and how an update reaches the screen), able to
+  build a small interactive window, and able to change it while it runs.
 ---
 
 ## Sources

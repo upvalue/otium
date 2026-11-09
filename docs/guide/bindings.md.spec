@@ -1,7 +1,11 @@
 ---
 title: "Bindings"
 prompt: |
-  Write a guide to naming values in Otium in Otium for a programmer who knows some Lisp and is learning Otium.
+  Write a guide to naming values in Otium for a programmer who knows some Lisp
+  and is learning Otium. They should come away knowing how to name things at the top level and
+  locally, how to change a binding, and which definitions survive a reload.
+  Point out that plain `let` is sequential like Scheme's `let*`, and that
+  `def` replaces `define`.
 ---
 
 ## Sources

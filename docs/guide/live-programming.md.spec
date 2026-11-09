@@ -1,7 +1,11 @@
 ---
 title: "Live programming"
 prompt: |
-  Write a guide to changing a running Otium program in Otium for a programmer who knows some Lisp and is learning Otium.
+  Write a guide to changing a running Otium program in Otium for a programmer who knows some
+  Lisp and is learning Otium. They should come away understanding why Otium is built for live changes,
+  what happens to existing callers and state when code is redefined or
+  reloaded, and how to work against a running program with the development
+  server.
 ---
 
 ## Sources

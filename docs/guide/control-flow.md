@@ -1,12 +1,30 @@
 # ✨ Control flow
 
-## Choose a value with if
+Branching chooses which expressions to evaluate; sequencing runs several
+expressions in order. Otium's conditionals are expressions too, so you can use
+their results as values.
 
-Only `#f` and `nil` are falsy in Otium. Everything else is truthy, including
-`0`, `""`, and the empty list `'()`.
+Use `if` for two alternatives, `cond` for several cases, and `when` or `unless`
+for a conditional action. Use `and` and `or` to combine tests or select values
+without evaluating unnecessary expressions.
 
-Use `(if test then else)` to choose between two expressions. Only the chosen
-branch runs, and its value becomes the result.
+## Truth and falsehood
+
+Only `nil` and `#f` are false. Every other value is truthy, including zero,
+empty strings, and the empty list. In particular, `'()` is distinct from `nil`.
+
+```otium
+(if 0 :yes :no)   ; => :yes
+(if '() :yes :no) ; => :yes
+(if "" :yes :no)  ; => :yes
+(if #f :yes)      ; => nil
+```
+
+## Choose between alternatives with `if`
+
+`if` evaluates its test, then evaluates only the selected branch and returns
+that branch's value. An `if` without an else returns `nil` when its test is
+false.
 
 ```otium
 (let ((score 75))
@@ -16,131 +34,123 @@ branch runs, and its value becomes the result.
 ; => :pass
 ```
 
-You can omit the alternative. If the test is falsy, the result is `nil`:
+## Choose among cases with `cond`
 
-```otium
-(if #f 42)
-; => nil
-```
-
-## Sequence expressions with begin
-
-Each `if` branch takes one expression. Use `begin` when a branch needs several
-steps. It evaluates them in order and returns the last value.
-
-```otium
-(let ((count 0))
-  (if (< count 1)
-      (begin
-        (set! count (+ count 1))
-        :updated)
-      :unchanged))
-; => :updated
-```
-
-An empty `(begin)` returns `nil`.
-
-Function and `let` bodies already accept several expressions and return the last
-value. You do not need `begin` just to sequence their bodies.
-
-## Choose among several cases with cond
-
-Use `cond` when you have several tests. Tests run in order; the first truthy
-test selects its clause. The remaining clauses are skipped.
+`cond` tests clauses from top to bottom. It selects the first clause with a
+truthy test and skips later tests and bodies. Put an `else` clause last for a
+fallback.
 
 ```otium
 (let ((score 75))
   (cond
     ((>= score 90) :excellent)
     ((>= score 60) :pass)
-    (else :fail)))
+    (else :retry)))
 ; => :pass
 ```
 
-Put `else` last as the fallback. Without a matching clause, `cond` returns
-`nil`.
+A clause can contain several body expressions. They run in order, and `cond`
+returns the last value. A clause containing only a test returns that test's
+value when truthy.
 
-Each clause can contain several body expressions; the last one's value is the
-result. A clause containing only a test returns that test's value when it is
-truthy.
-
-## Run a body conditionally with when and unless
-
-Use `when` for steps that should run only when a test is truthy. Use `unless`
-when they should run only when the test is falsy. Both accept several body
-expressions without `begin`.
+If no clause matches, `cond` returns `nil`:
 
 ```otium
-(let ((count 0))
-  (when (< count 1)
-    (set! count (+ count 1))
-    count))
-; => 1
-```
-
-```otium
-(let ((name nil))
-  (unless name
-    (set! name "anonymous"))
-  name)
-; => "anonymous"
-```
-
-When the body runs, its last value is the result. When it is skipped, the result
-is `nil`.
-
-## Combine tests and choose defaults with and and or
-
-`and` and `or` evaluate left to right and short-circuit. They return operand
-values, not necessarily booleans.
-
-Use `and` to require several conditions. It stops at the first falsy value and
-returns it. If every operand is truthy, it returns the last value.
-
-```otium
-(let ((score 75))
-  (and (>= score 60) (< score 90)))
-; => #t
-
-(and 1 nil 3)
+(cond
+  ((> 2 3) :yes))
 ; => nil
 ```
 
-Use `or` to choose the first truthy value, such as a supplied value or a
-default. If all operands are falsy, it returns the last value.
+## Group expressions with `begin`
+
+Each branch of `if` accepts one expression. Use `begin` when a branch needs
+several steps. It evaluates them in order and returns the last value. An empty
+`begin` returns `nil`.
+
+Here, `set!` changes an existing binding before the branch constructs its
+result:
 
 ```otium
-(let ((name nil))
-  (or name "anonymous"))
-; => "anonymous"
+(let ((count 0))
+  (if (= count 0)
+      (begin
+        (set! count (+ count 1))
+        (list :started count))
+      :already-started))
+; => (:started 1)
 ```
 
-Because empty strings and zero are truthy, `or` keeps them. It also treats `#f`
-as a reason to use the fallback, so use an explicit `nil?` test if `#f` is a
-valid supplied value.
+Bodies of `let`, functions, and `cond` clauses already accept multiple
+expressions, so they do not need an extra `begin`.
 
-With no operands, `(and)` returns `#t` and `(or)` returns `#f`.
+## Run conditional actions with `when` and `unless`
 
-## Repeat while mutable state meets a condition
+Use [`when`](/reference/otium.core/#when) for an action that should run on a
+truthy test, and [`unless`](/reference/otium.core/#unless) for one that should
+run on a false test.
 
-Use `while` when changes to mutable state drive the loop. It checks its test
-before each iteration, so the body may never run.
+Both accept multiple body expressions, evaluate them in order, and return the
+last value. If the body is skipped, they return `nil`.
 
 ```otium
-(let ((i 0)
+(let ((count 0))
+  (when (= count 0)
+    (set! count (+ count 1))
+    count))
+; => 1
+
+(unless #f :ready) ; => :ready
+(when #f :ready)   ; => nil
+(unless #t :ready) ; => nil
+```
+
+## Stop early with `and` and `or`
+
+Both forms evaluate left to right and return actual values, not necessarily
+booleans.
+
+- `and` stops at the first false value and returns it. Otherwise, it returns
+  the last value.
+- `or` stops at the first truthy value and returns it. Otherwise, it returns
+  the last value.
+
+Use `and` to guard an expression and `or` to choose a fallback.
+
+```otium
+(and (> 3 2) :ready)             ; => :ready
+(and nil (error "not reached"))  ; => nil
+
+(or nil #f :fallback)            ; => :fallback
+(or 0 (error "not reached"))     ; => 0
+(or #f nil)                      ; => nil
+```
+
+A fallback with `or` replaces both `nil` and `#f`. It does not replace zero or
+an empty string.
+
+With no arguments, `and` returns `#t` and `or` returns `#f`.
+
+## Repeat while state changes
+
+Use `while` when repetition depends on mutable state. It checks its test before
+every iteration and runs its body in order while the test remains truthy. The
+body may run zero times.
+
+```otium
+(let ((remaining 3)
       (total 0))
-  (while (< i 5)
-    (set! total (+ total i))
-    (set! i (+ i 1)))
+  (while (> remaining 0)
+    (set! total (+ total remaining))
+    (set! remaining (- remaining 1)))
   total)
-; => 10
+; => 6
 ```
 
-The body accepts several expressions. Make sure it changes the state that lets
-the loop finish. `while` itself returns `nil`; read the accumulated value
-afterward.
+`while` itself always returns `nil`, so the example reads `total` afterward to
+get the accumulated result. Make sure something changes so the test can
+eventually become false.
 
-For walking collections, building results, indexed repetition, and named `let`,
-see [Loops](loops.md).
+For walking collections, building results, or using named loops, see
+[Loops](loops.md).
 
-<!-- generated from control-flow.md.spec sha256:7c79108bd426d58655d37d9a3c8ca8c4b421834c2adb5229059d613b6e1c252b -->
+<!-- generated from control-flow.md.spec sha256:fb1ff3282e0f3d4e4f18bf032d0b6754446ba2362dfa5541ee17c34510bb3a7b -->

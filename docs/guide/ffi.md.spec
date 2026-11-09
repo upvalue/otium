@@ -1,7 +1,9 @@
 ---
 title: "Foreign functions"
 prompt: |
-  Write a guide to calling C from Otium in Otium for a programmer who knows some Lisp and is learning Otium.
+  Write a guide to calling C from Otium for a programmer who knows some
+  Lisp and is learning Otium. They should come away able to call a function in a C library from Otium,
+  and know which runtimes and builds support it.
 ---
 
 ## Sources

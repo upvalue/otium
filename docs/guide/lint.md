@@ -1,109 +1,128 @@
 # ✨ Lint and diagnostics
 
+Lint catches likely mistakes before you run a program, including unfamiliar Lisp
+spellings, unresolved names, and suspicious bindings. Error reports help you
+find failures that occur while reading, expanding, or running code.
+
+Both use diagnostics: messages with a severity, a code, and a source location.
+Lint codes start with `L`; error codes start with `E`. A lint finding also names
+its rule, such as `if-chain`, so you can configure or suppress it.
+
 ## Run lint
 
-From the repository root, check selected files with:
+From the repository root, run `./otium lint` followed by the paths you want to
+check. `just lint` checks `lib`, `examples`, and `benchmarks`.
 
-```sh
-./otium lint path/to/file.ot
-```
+Useful commands and options:
 
-Run `just lint` to check `lib`, `examples`, and `benchmarks`.
+- `./otium lint --rules` lists rules and their default levels.
+- `./otium explain L0201` explains the `unbound-name` rule.
+- `--deny-warnings` makes warnings fail the command too.
+- `--format=short` gives one-line reports; `--format=json` gives
+  machine-readable output.
 
-Lint reports each finding with a source location, code, and rule name. To list
-the rules and their default levels, or get advice about a finding:
+Rules have three levels: `allow` disables a rule, `warn` reports a warning, and
+`deny` reports an error that fails the command. Warnings alone do not fail it by
+default.
 
-```sh
-./otium lint --rules
-./otium explain L0201
-```
+Lint checks names after macro expansion. This loads dependencies and runs
+macros, so linting executes code. Use `--no-expand` for syntax-only checks
+without loading dependencies. An `expansion-failed` warning means lint could not
+run checks that need expansion on that form. Fix the reported expansion or
+dependency problem before relying on its name checks.
 
-Deny-level findings appear as errors and fail the command. Warnings do not fail
-it unless you add `--deny-warnings`:
+## Act on a finding
 
-```sh
-./otium lint --deny-warnings path/to/file.ot
-```
+Lint checks for:
 
-Name checks load dependencies and run macros during expansion. Use `--no-expand`
-when you want syntax checks without loading those dependencies; name checks will
-be skipped. If lint reports `expansion-failed`, fix that problem before relying
-on the name checks for the affected form.
+- Otium syntax and name problems: foreign forms such as `define` or `lambda`,
+  square brackets where binding lists belong, and unbound names. Use `def`,
+  `fn`, and parenthesized binding lists; check spelling and imports.
+- Suspicious code, including unused bindings, definitions that hide core names,
+  and calls to a named `for` loop outside tail position.
+- Readability and allocation issues: nested `if` chains, independent nested
+  helpers, and rest parameters that allocate argument lists.
+- Macro problems, including missing unquotes, accidental capture of caller
+  names, namespace mistakes, and expansion-time state changes.
 
-## Act on findings
-
-Common findings include:
-
--  Lisp spellings that differ in Otium, such as `define` instead of `def`, or
-  `lambda` instead of `fn`.
--  Square brackets used for bindings or parameters. Use parentheses; square
-  brackets build arrays.
--  Unbound names, unused local bindings, and definitions that hide core names.
-  An intentionally unused parameter can start with `_`.
--  An `if` in another `if`'s else branch, where `cond` would be clearer, or a
-  nested helper that could move to a top-level `def-`.
--  Rest parameters that allocate argument lists. Use `&optional` for a bounded
-  set of optional arguments.
-- Calls to a named `for` loop outside tail position.
--  Macro mistakes such as missing unquotes, accidental capture, namespace
-  references, and state changes during expansion.
-
-Use the rule's explanation to decide whether to change the code. To change a
-rule's level for a run, pass `--allow RULE`, `--warn RULE`, or `--deny RULE`.
-
-## Suppress a finding with a reason
-
-Put an `allow` comment before the form it covers. Use the rule name, not its
-diagnostic code:
+For example, `if-chain` suggests replacing an `if` in another `if`'s else
+branch:
 
 ```otium
-(def (f)
-  ;; lint: allow(liftable-function) kept near its only caller
-  (def (a) 1)
-  (a))
+(let ((score 75))
+  (if (>= score 90) :high
+      (if (>= score 60) :pass :retry)))
+;; => :pass
 ```
 
-The comment suppresses `liftable-function` for the following definition. Calling
-`f` returns `1`.
+Use `cond` to put the choices at the same depth:
 
-You can also put the comment at the end of the form's first line. To suppress a
-rule throughout a file, put `;; lint: allow-file(rule-name) reason` before the
-first form.
+```otium
+(let ((score 75))
+  (cond
+    ((>= score 90) :high)
+    ((>= score 60) :pass)
+    (else :retry)))
+;; => :pass
+```
 
-Give a concrete reason for keeping the code. Missing reasons and unknown rule
-names are errors. Lint also warns when a suppression suppresses nothing; remove
-it when it is no longer needed.
+For an unused binding, first check whether you forgot to use it. Remove it if
+unnecessary, or start its name with `_` when it is intentionally unused, for
+example, a callback parameter required by its caller.
+
+## Suppress a warning deliberately
+
+When the code is intentional, put a suppression comment immediately before the
+form it covers. Name the rule and explain why it should not apply here:
+
+```otium
+;; lint: allow(if-chain) keeps the two decision stages separate
+(let ((score 75))
+  (if (>= score 90) :high
+      (if (>= score 60) :pass :retry)))
+;; => :pass
+```
+
+The comment covers the next form, including its contents. You can also place it
+at the end of the form's first line.
+
+For a whole file, use `;; lint: allow-file(if-chain) reason` before the first
+form, replacing `reason` with a concrete explanation. Prefer a local suppression
+when only one form needs an exception.
+
+A missing reason or unknown rule is an error. A suppression that no longer
+suppresses anything produces an `unused-suppression` warning; remove it so it
+cannot hide future problems.
+
+For command-wide policy, `--allow RULE`, `--warn RULE`, and `--deny RULE`
+override project defaults. Use a source comment when future readers need to know
+why a particular exception exists.
 
 ## Read an error report
 
-An error report starts with its severity, code, and message. For example:
+Start with the header. For example, `error[E0401]: ` followed by
+`` `car` expected a pair, got 5 `` identifies a type error and tells you which
+operation rejected the value. Run `./otium explain E0401` for an explanation.
 
-```text
-error[E0201]: unbound name `countr`
-```
+Then work through the report:
 
-Read the rest of the report in this order:
+1. Find the location after `-->`. It is written as `path:line:column`, with
+   lines and columns counted from one.
+2. Read the source excerpt and carets. They mark the expression or token
+   associated with the failure. For an unclosed form, the location points to the
+   opening delimiter, not the end of the file.
+3. Follow the notes. `in` names the innermost function. `called from` entries
+   lead outward through callers, with locations where available. If `car`
+   received a number, those callers can help you find where that number came
+   from.
+4. Check any help text. An unbound-name report may suggest a similar spelling or
+   explain Otium's spelling of a familiar Lisp form.
 
-1. Follow the `--> path:line:column` location. Lines and columns start at one.
-2.  Look at the source line and the `^` underline to find the expression or name
-   involved.
-3.  Read any `note:` lines. For runtime calls, `in` identifies the innermost
-   function, followed by `called from` locations working outward.
-4.  Check `help:` for spelling suggestions or Otium equivalents of familiar Lisp
-   names.
+When loading a dependency fails, the main location can be inside that
+dependency. A `reached from` note points back to the source that caused it to
+load.
 
-For an unclosed form, the location points to the opening delimiter that was
-never closed.
+Fix the reported cause, then run lint or the program again. For catching errors
+and recovering inside a program, see [Errors and recovery](errors.md).
 
-Ask for a fuller explanation using the reported code:
-
-```sh
-./otium explain E0201
-```
-
-For editor or script integration, lint accepts `--format=short` for one-line
-reports and `--format=json` for one JSON object per finding.
-
-To handle errors within a program, see [Errors and recovery](errors.md).
-
-<!-- generated from lint.md.spec sha256:ff67f0c798bbceb4522c8c91ff03c2c9b5bd6d544e3aaf0a6101e505336e8b5f -->
+<!-- generated from lint.md.spec sha256:fca2c694429310a863cbb40eae02930a21d396418ab5fc69678f1d72eadbb0e9 -->

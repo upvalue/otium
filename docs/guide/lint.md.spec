@@ -1,7 +1,9 @@
 ---
 title: "Lint and diagnostics"
 prompt: |
-  Write a guide to using lint and reading error reports in Otium for a programmer who knows some Lisp and is learning Otium.
+  Write a guide to using lint and reading error reports in Otium for a programmer who knows some
+  Lisp and is learning Otium. They should come away able to run lint, act on or deliberately silence a
+  warning, and read an error report to find the problem in their source.
 ---
 
 ## Sources

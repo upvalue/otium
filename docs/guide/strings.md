@@ -1,209 +1,220 @@
 # ✨ Strings, symbols and keywords
 
-## Work with strings and characters
+Use strings for text you want to read, transform or show to someone. Symbols
+represent names in code; keywords make convenient tags and table keys. A
+character is a single Unicode code point, such as `#\a` or `#\λ`.
 
-Write strings in double quotes and characters with `#\`. A character is a
-separate type from a one-character string.
+## Strings and characters
+
+Strings use double quotes and are immutable. Operations such as trimming and
+replacement return new strings. Common escapes include `\n` for a newline, `\t`
+for a tab, `\"` for a quote and `\\` for a backslash.
+
+String positions are zero-based and count Unicode code points, not bytes. A
+displayed character made from several code points still occupies several
+positions.
 
 ```otium
-(char? #\a)       ; => #t
-(char? "a")       ; => #f
-(string #\a #\é #\🙂) ; => "aé🙂"
+(def text "aé🙂")
+
+(string-length text)       ; => 3
+(string-ref text 1)        ; => #\é
+(substring text 1 3)       ; => "é🙂"
 ```
 
-Strings support escapes such as `\n`, `\t`, `\"`, and `\\`. For character
-literals, use names such as `#\space`, `#\newline`, and `#\tab`.
+[`substring`](/reference/otium.core/#substring) includes the start position and
+excludes the end. Omit the end to take the rest of the string. `string-ref`
+raises an error for an out-of-range index; `get` returns `nil` when the position
+is absent.
 
-Strings are immutable. Their lengths and indexes count Unicode code points, not
-bytes. Indexes start at zero; a visible character made from several code points
-occupies several positions.
+Characters are distinct from one-character strings. Use `string` to assemble
+characters, or convert between strings and character lists to process characters
+individually.
 
 ```otium
-(string-length "héllo")    ; => 5
-(get "aé🙂" 1)             ; => #\é
-(substring "aé🙂z" 1 3)    ; => "é🙂"
+(string->list text)                    ; => (#\a #\é #\🙂)
+(list->string '(#\a #\é #\🙂))           ; => "aé🙂"
+(string #\H #\i #\newline)              ; => "Hi\n"
+
+(char-upcase #\a)                      ; => #\A
+(char-whitespace? #\tab)                ; => #t
+(char->integer #\λ)                    ; => 955
+(integer->char 955)                    ; => #\λ
 ```
 
-`substring` excludes the end position; omit it to take the rest of the string.
-`get` returns `nil` for an out-of-range index. Use `string-ref` when an invalid
-index should raise an error.
+Named character literals include `#\space`, `#\newline` and `#\tab`. Character
+comparisons such as `char=?` and `char<?` compare code points. Do not assume
+case conversion and character classification handle every Unicode language.
 
-Convert to a list of characters when you need to process characters
-individually:
+## Taking text apart
+
+[`string-split`](/reference/otium.core/#string-split) returns an array. Supply a
+literal separator, or omit it to split on runs of whitespace.
+[`string-join`](/reference/otium.core/#string-join) takes the separator first.
 
 ```otium
-(string->list "aé🙂")       ; => (#\a #\é #\🙂)
-(list->string '(#\x #\y))   ; => "xy"
-(char->integer #\🙂)        ; => 128578
-(integer->char 955)         ; => #\λ
+(def tags (string-split (string-trim " red,green,blue ") ","))
+
+tags                              ; => ["red" "green" "blue"]
+(string-join " / " tags)           ; => "red / green / blue"
+(string-split " red\tgreen  blue ")
+; => ["red" "green" "blue"]
 ```
 
-Compare characters with `char=?`, `char<?`, and their ordering counterparts. Use
-`char-alphabetic?`, `char-numeric?`, and `char-whitespace?` to classify them.
-Character classification and case conversion are ASCII-only on the C runtime.
+Search and replacement functions work with literal text, not regular
+expressions. `string-replace` replaces every occurrence.
 
 ```otium
-(char-upcase #\a)           ; => #\A
-(char-whitespace? #\tab)    ; => #t
-(digit-value #\7)           ; => 7
-(digit-value #\a)           ; => nil
+(string-replace "red-green-red" "red" "blue")
+; => "blue-green-blue"
+
+(string-starts-with? "notes.ot" "notes") ; => #t
+(string-ends-with? "notes.ot" ".ot")     ; => #t
+(string-contains? "notes.ot" "tes")      ; => #t
 ```
 
-## Clean up and split text
-
-String operations return new strings. Use `equal?` to compare their contents.
+Use `equal?` to compare string contents. Case conversion is useful for simple
+text normalization.
 
 ```otium
-(string-trim " \té\n")             ; => "é"
-(string-upcase "abC")              ; => "ABC"
-(string-replace "abab" "b" "X")    ; => "aXaX"
-(string-contains? "a🙂b" "🙂")      ; => #t
-(string-starts-with? "abc" "ab")    ; => #t
-(string-ends-with? "abc" "bc")      ; => #t
+(string-upcase "hello")                    ; => "HELLO"
+(string-downcase "HELLO")                  ; => "hello"
+(equal? "hello" (string-downcase "HELLO"))  ; => #t
+
+(string->number "42")     ; => 42
+(string->number "hello")  ; => nil
 ```
 
-`string-downcase` converts in the other direction. As with character conversion,
-string case conversion is ASCII-only on the C runtime. Searches and replacements
-use literal text, not regular expressions; `string-replace` replaces every
-occurrence.
+`string->number` returns `nil` when the text is not a number. `number->string`
+converts a number back to its display text.
 
-`string-split` returns an array. Without a separator, it splits on whitespace
-runs. An explicit separator preserves empty fields.
+## Building strings
+
+Use `string-append` when all the pieces are strings.
+[`str`](/reference/otium.core/#str) accepts other values too and joins their
+display forms without inserting spaces. `string-join` inserts a separator
+between items.
 
 ```otium
-(string-split "  a\tb\nc ")   ; => ["a" "b" "c"]
-(string-split "a,,b," ",")    ; => ["a" "" "b" ""]
-(string-join ":" [1 2 3])     ; => "1:2:3"
+(string-append "Hello, " "Ada" "!") ; => "Hello, Ada!"
+(str "Items: " 3)                   ; => "Items: 3"
+(string-join ", " '(1 2 3))         ; => "1, 2, 3"
 ```
 
-The separator comes first in `string-join`. Each element is converted to its
-display form.
-
-For numeric input, use `string->number`. It accepts surrounding whitespace and
-returns `nil` when conversion fails.
+To assemble text a piece at a time, use a mutable
+[`buffer`](/reference/otium.core/#buffer). Append with `buffer-push!`, then get
+a string with `buffer->string`.
 
 ```otium
-(string->number " 42\n")   ; => 42
-(string->number "nope")    ; => nil
-```
-
-## Build strings
-
-Use `string-append` to concatenate strings. Use `str` when the pieces include
-other kinds of values. Neither inserts spaces.
-
-```otium
-(string-append "hello" " " "world") ; => "hello world"
-(str "a" 1 :k)                     ; => "a1:k"
-(str #\a "bc")                     ; => "abc"
-```
-
-`str` leaves top-level strings unquoted. Strings inside collections keep their
-quotes and escapes.
-
-For text assembled a piece at a time, use a mutable buffer:
-
-```otium
-(let ((out (buffer "é")))
-  (buffer-push! out "🙂" 7)
+(let ((out (buffer "Items:")))
+  (for ((item :in '(10 20 30)))
+    (buffer-push! out " " item))
   (buffer->string out))
-; => "é🙂7"
+; => "Items: 10 20 30"
 ```
 
-`buffer-push!` appends display forms, just like `str`. `buffer->string` returns
-an immutable string; you can keep using the buffer afterward.
+`buffer->string` gives you a snapshot. You can keep appending to the buffer
+without changing that string.
 
-## Format and output text
+## Output and formatting
 
-For ordinary messages, build text with `str` or `string-join`. To send values to
-output:
-
--  `display` and `print` separate arguments with spaces, without adding a
-  newline.
-- `println` also adds a newline.
-- `write` uses printed representations, including quotes around strings.
-- `newline` emits a newline.
-
-See [Files and I/O](io.md) for working with ports and files.
-
-### Format Otium source with `otium.format`
-
-`otium.format` formats Otium source text. It is not a message-template or
-`printf` library.
-
-Load it and pass source text plus layout rules to `format-text`:
+`println` displays its arguments separated by spaces and adds a newline.
+`display` does the same without the newline. `write` uses printed
+representations, so strings retain quotes and escapes.
 
 ```otium
-(require otium.format :as format)
+(println "Hello," "Ada")
+; prints: Hello, Ada
 
-(format/format-text "(foo  a\n   b)" format/builtin-rules)
-; => "(foo a b)\n"
-
-(format/format-text "(def (f x) x)" format/builtin-rules)
-; => "(def (f x)\n  x)\n"
+(write "Hello, Ada")
+(newline)
+; prints: "Hello, Ada"
 ```
 
-The result is a string, so you can save it or display it yourself. The formatter
-keeps comments, normalizes spacing and line breaks, and adds a final newline to
-nonempty source.
+Display leaves top-level strings unquoted. Strings inside collections retain
+their quotes and escapes, including when you convert a collection with `str`.
 
-## Choose symbols or keywords
+### Formatting Otium source with `otium.format`
 
-Use strings for text, symbols for program names or symbolic data, and keywords
-for tags and table keys.
+`otium.format` formats Otium source text. For ordinary messages containing
+values, use the string-building functions above.
 
-An unquoted symbol refers to a binding. Quote it when you want the name itself:
+Load the module and pass source text and layout rules to
+`format-text`. It returns a string
+without printing or evaluating it.
 
 ```otium
-(let ((status "ready"))
-  (list status 'status :status))
-; => ("ready" status :status)
+(require otium.format :as fmt)
+
+(fmt/format-text
+  "(def (greet name) (str \"Hello, \" name))"
+  fmt/builtin-rules)
+; => "(def (greet name)\n  (str \"Hello, \" name))\n"
 ```
 
-Keywords start with `:` and evaluate to themselves. They need no quote, which
-makes them convenient for fixed field names and choices such as `:ready` or
-`:pending`.
+The built-in rules lay out definitions and other forms while preserving
+comments. Nonempty formatted source ends with a newline. You can display the
+returned string or save it using the functions described in [Files and
+I/O](io.md).
 
-A keyword can also look up its key in a table:
+## Choosing strings, symbols or keywords
+
+A string holds text whose contents you process: a message, filename or
+user-entered label.
+
+Use a symbol for a name in code, including code represented as data. An unquoted
+symbol refers to a binding; quote it to obtain the symbol itself.
+
+Keywords are useful for fixed tags or field names. They evaluate to themselves,
+so they need no quote. They can also look themselves up in a table.
 
 ```otium
-(:a {:a 7})   ; => 7
+(def status :ready)
+
+status        ; => :ready
+'status       ; => status
+
+(:status {:status :ready :message "Ready to start"})
+; => :ready
+
+(eq? 'ready :ready) ; => #f
 ```
 
-Use `eq?` to compare ordinary symbols or keywords by name. A symbol and a
-keyword with the same spelling are different values. Use `symbol?` and
-`keyword?` when you need to distinguish them.
+The symbol `ready`, keyword `:ready` and string `"ready"` are different values.
+Ordinary symbols and keywords are interned: repeated names of the same kind
+identify the same value, so `eq?` is suitable for comparing them. Compare string
+contents with `equal?`.
 
-See [Namespaces](namespaces.md) for symbols used to refer to names in other
-modules.
+See [Bindings](bindings.md) for name lookup and [Data
+structures](data-structures.md) for tables.
 
-## Convert text and names
+## Converting names to and from text
 
 Use `string->symbol` and `symbol->string` for explicit string/symbol
-conversions. The broader `symbol` and `keyword` functions accept strings,
-symbols, or keywords.
+conversions. `symbol` and `keyword` accept strings, symbols or keywords and
+produce the requested kind of name.
 
 ```otium
-(string->symbol "status")   ; => status
-(symbol->string 'status)    ; => "status"
-(symbol :status)            ; => status
-(keyword "status")          ; => :status
-(keyword 'status)           ; => :status
+(string->symbol "ready") ; => ready
+(symbol->string 'ready) ; => "ready"
+
+(keyword "ready")       ; => :ready
+(keyword 'ready)        ; => :ready
+(symbol :ready)         ; => ready
 ```
 
-Pass the name without a leading colon to `keyword`.
+When constructing a keyword from a string, pass the bare name without a leading
+colon. Constructing a symbol does not look up its binding.
 
-Use `name` to get plain text from any of these three types. For a keyword, it
-omits the colon. Use `str` when you want its displayed spelling instead.
+[`name`](/reference/otium.core/#name) extracts name text from a symbol or
+keyword and leaves a string unchanged. For keywords, it omits the colon; `str`
+preserves the colon in the display form.
 
 ```otium
-(name 'status)   ; => "status"
-(name :status)   ; => "status"
-(name "status")  ; => "status"
-(str :status)    ; => ":status"
+(name :ready)  ; => "ready"
+(name 'ready)  ; => "ready"
+(name "ready") ; => "ready"
+(str :ready)   ; => ":ready"
 ```
 
-Creating a symbol produces a name value; it does not look up or evaluate the
-binding with that name.
-
-<!-- generated from strings.md.spec sha256:492e16aa051c76a51e9032c7b929c6de8405a204ea70726114c7dd7ae5cb77d0 -->
+<!-- generated from strings.md.spec sha256:54f0afa9bf72dcabfdaa1590c1175b59d1e3c794e5553d39517a9881fea56c20 -->

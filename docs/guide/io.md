@@ -176,9 +176,9 @@ kind. See [bytevector](/reference/otium.core/#bytevector),
 
 ## JSON
 
-[json/parse](/reference/otium.json/#parse) converts a string to Otium values.
+json/parse converts a string to Otium values.
 JSON objects become tables with string keys, and arrays become Otium arrays.
-JSON `null` is [json/null](/reference/otium.json/#null), not `nil`.
+JSON `null` is json/null, not `nil`.
 
 Read a JSON file by passing its contents to the parser:
 
@@ -188,7 +188,7 @@ Read a JSON file by passing its contents to the parser:
 (json/parse (read-file "settings.json"))
 ```
 
-[json/encode](/reference/otium.json/#encode) returns JSON text. Write that
+json/encode returns JSON text. Write that
 string through a file port:
 
 ```otium

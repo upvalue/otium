@@ -10,7 +10,7 @@
       "guide/testing.md", "guide/lint.md", "guide/ffi.md"
     ]
   },
-  { "title": "Records and classes", "items": ["classes.md"] },
-  { "title": "User interface", "items": ["ui.md"] },
+  { "title": "Records and classes", "items": ["guide/classes.md"] },
+  { "title": "User interface", "items": ["guide/ui.md"] },
   { "title": "Reference", "generated": "reference" }
 ]

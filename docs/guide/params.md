@@ -1,73 +1,94 @@
 # ✨ Dynamic params
 
-Use a param for a setting that several functions need during an operation,
-without passing it through every intervening call. A temporary binding applies
-to calls made while that binding is active.
+Some settings should apply throughout an operation, including helper calls,
+without being passed through every function. A param gives a setting a default
+value and lets a caller override it for a stretch of code.
+
+Otium params work like Scheme's parameters and `parameterize`: `defparam`
+defines a setting, `(setting)` reads its current value, and `with-params`
+temporarily overrides it.
+
+## Choosing a param
+
+Use an argument for a function's ordinary inputs, especially when callers need
+to see and choose them explicitly.
+
+A param suits a setting shared across a chain of calls, such as diagnostic
+verbosity or output formatting. Intermediate functions need not accept and
+forward a setting they do not use, though this makes the dependency less visible
+in function signatures.
+
+An ordinary global is enough for a value that does not need scoped overrides. If
+you find yourself changing a global before an operation and restoring it
+afterward, a param usually expresses that intent more safely.
 
 ## Define and read a setting
 
-Define params at the top level with `defparam`, giving each a default value:
+Define a param at the top level with
+[`defparam`](/reference/otium.core/#defparam), giving it a name and default
+value:
 
 ```otium
-(defparam detail-level :brief)
+(defparam verbose? #f)
 
-(detail-level) ; => :brief
+(verbose?)
+;; => #f
 ```
 
-Read a param by calling it with no arguments: `(detail-level)`. The name
-`detail-level` alone refers to the param itself.
+The name `verbose?` refers to the param itself. Calling it with no arguments
+reads its current value.
 
-## Override it for a call
+## Override it for an operation
 
-Use `with-params` to bind a temporary value:
+[`with-params`](/reference/otium.core/#with-params) takes parenthesized pairs of
+params and temporary values, followed by a body. It returns the body's last
+result.
+
+Continuing with `verbose?`:
 
 ```otium
-(def (report-detail)
-  (detail-level))
+(def (status-label name)
+  (if (verbose?) (list :status name :ready) name))
 
-(with-params ((detail-level :full))
-  (report-detail)) ; => :full
+(status-label "worker")
+;; => "worker"
 
-(report-detail) ; => :brief
+(with-params ((verbose? #t))
+  (status-label "worker"))
+;; => (:status "worker" :ready)
+
+(verbose?)
+;; => #f
 ```
 
-`report-detail` sees the override even though it was defined outside
-`with-params`. The value depends on the active calls, not where the function was
-defined. Functions called further down see the same override.
+The override is dynamically scoped: it applies to calls made while the body
+runs, including calls further down the chain. `status-label` sees the override
+even though it was defined outside `with-params`.
 
-`with-params` returns the value of its last body expression. When it exits, the
-previous setting is restored, including when an error unwinds out of the body.
+Here, `name` is an argument because it identifies what the function is
+describing. Verbosity is a param because the caller may want one setting to
+govern many such calls.
+
+Otium restores the previous value automatically when the body finishes,
+including when an error exits the body.
 
 ## Nest overrides
 
-The innermost active binding wins. Leaving it restores the enclosing value:
+The innermost active binding wins. Leaving an inner `with-params` restores the
+enclosing value:
 
 ```otium
-(with-params ((detail-level :full))
-  (list
-    (detail-level)
-    (with-params ((detail-level :brief))
-      (detail-level))
-    (detail-level)))
-; => (:full :brief :full)
+(with-params ((verbose? #t))
+  (list (verbose?)
+        (with-params ((verbose? #f)) (verbose?))
+        (verbose?)))
+;; => (#t #f #t)
 
-(detail-level) ; => :brief
+(verbose?)
+;; => #f
 ```
 
-You can bind several params in one `with-params`. Bindings take effect in order,
-so later value expressions can read earlier bindings.
+Neither override changes the default, so outside both scopes the setting is back
+to `#f`.
 
-## Choose between a param and an argument
-
-Prefer an argument for a function's main inputs, or when callers need to see and
-choose the value at each call.
-
-Use a param for a shared setting with a useful default, such as reporting detail
-or an output destination. It helps when intermediate functions would otherwise
-accept an argument only to pass it onward.
-
-Keep overrides around the operation that needs them. A param makes a dependency
-less visible in a function's argument list, so use ordinary arguments when that
-would make the code easier to follow.
-
-<!-- generated from params.md.spec sha256:70b89bf9476913ef70565c485c3c8d078850dfabd7429c0742162a2faea4c51e -->
+<!-- generated from params.md.spec sha256:6bdad7c02541daee6d6f836c955d1df93082fcda59505e5847def15d57905d0f -->

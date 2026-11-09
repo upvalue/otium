@@ -1,109 +1,187 @@
 # ✨ Data structures
 
+Otium has three everyday collections for grouping values:
+
+- Use a list for head-and-tail processing and building by prepending. Lists are
+  chains of pairs, so accessing a distant element means walking through the
+  list.
+- Use an array for indexed access or a sequence that grows at the end. Reading
+  and replacing an indexed element take constant time.
+- Use a table for key-based lookup, such as settings or counts. Tables remember
+  insertion order.
+
+Unlike Clojure's vectors and maps, Otium arrays and tables are mutable. `put!`
+changes an existing collection; `put` returns an updated copy. Lists also
+support pair mutation, as in Scheme.
+
 ## Lists
 
-Quote a literal list; use `list` when its elements should be evaluated. `cons`
-adds a head to a tail, while `car` and `cdr` retrieve them.
+Quote a literal list with `'(1 2 3)`, or use `list` to evaluate its elements.
+`cons` adds a head to an existing tail without changing that tail. `car` reads
+the head; `cdr` reads the tail.
 
 ```otium
-(list 1 (+ 1 1) 3)       ; => (1 2 3)
-(cons 1 '(2 3))          ; => (1 2 3)
-(car '(1 2 3))           ; => 1
-(cdr '(1 2 3))           ; => (2 3)
-(append '(1 2) '(3 4))   ; => (1 2 3 4)
+(def xs (list 2 3))
+
+(cons 1 xs)             ; => (1 2 3)
+(car xs)                ; => 2
+(cdr xs)                ; => (3)
+(list-ref xs 1)         ; => 3
+(append '(1) xs)        ; => (1 2 3)
+(reverse xs)            ; => (3 2)
 ```
 
-The empty list is `'()`, distinct from `nil`. Use `null?` to test for it. `car`
-and `cdr` require a pair; `first` and `rest` also handle empty sequences.
+Indexes start at zero. `list-tail` returns the tail starting at an index; `cadr`
+is shorthand for `car` of `cdr`. `member` searches for a value and returns the
+matching tail, or `nil`.
 
-Useful list helpers include:
+`append` requires proper lists for every argument, including the last. Unlike
+Scheme's `append`, it does not accept a non-list final tail. Otium's empty list,
+`'()`, is distinct from `nil` and is truthy.
 
-- `cadr`, `cddr` and related compositions of `car` and `cdr`.
--  `(list-ref xs i)` for an element and `(list-tail xs i)` for a tail, using
-  zero-based indexes.
--  `(member x xs)` for the first matching tail, or `nil`; `memq` compares by
-  identity.
--  `(assoc key alist)` for the matching pair in an association list, or `nil`;
-  `assq` compares keys by identity.
--  `length`, `reverse`, and `append`. All arguments to `append` must be proper
-  lists.
+To change a pair directly, use `set-car!` or `set-cdr!`. Any other reference to
+that pair sees the change.
 
-Use `list-to-array` and `array-to-list` to convert between kinds.
+```otium
+(set-car! xs 20)
+xs                     ; => (20 3)
+```
+
+For ordinary transformations, prefer the sequence functions below. The helpers
+`first`, `rest`, `second`, `last`, and `nth` work with both lists and arrays.
+`first` returns `nil` for an empty sequence, whereas `car` requires a pair.
 
 ## Arrays
 
-`[...]` evaluates its elements and constructs a mutable array. Indexes start at
-zero. Indexed access is constant-time; accessing a list by index requires
-walking it.
+Square brackets construct an array and evaluate its elements. Use `get` with a
+zero-based index, or call the array itself.
+
+`put!` replaces an existing element; it does not grow the array. `push!`
+appends, and `pop!` removes and returns the last element.
 
 ```otium
-(let ((a [1 2]))
-  (put! a 0 9)
-  (push! a 3 4)
-  (pop! a)               ; removes and returns 4
-  a)                     ; => [9 2 3]
+(def scores [3 1 2])
 
-(get [10 20] 1)          ; => 20
-(get [10 20] 5)          ; => nil
+(get scores 0)         ; => 3
+(scores 1)             ; => 1
+
+(put! scores 0 4)
+(push! scores 5)
+(pop! scores)          ; => 5
+scores                 ; => [4 1 2]
 ```
 
-`put!` replaces an existing array element; it does not grow the array. `push!`
-appends elements. `pop!` returns `nil` on an empty array. Arrays are also
-callable: `(a 0)` means `(get a 0)`.
+Use `list-to-array` and `array-to-list` to convert between the two kinds.
 
 ## Tables
 
-`{...}` evaluates alternating keys and values to construct a mutable table.
-Tables keep insertion order: `keys` and `values` return arrays in that order.
-Updating a key keeps its position; deleting and reinserting it moves it to the
-end.
+Braces construct a table from alternating keys and values. Both are evaluated;
+keywords such as `:red` are convenient self-evaluating keys.
+
+[`get`](/reference/otium.core/#get) returns `nil` for a missing key unless you
+supply a default.
 
 ```otium
-(get {:a 1} :missing 99)  ; => 99
+(def counts {:red 2 :blue 1})
 
-(let ((t {:a 1})
-      (other (put t :b 2)))
-  (list (count t) (count other) (get other :b)))
-; => (1 2 2)
+(get counts :red)      ; => 2
+(get counts :green 0)  ; => 0
 ```
 
-`get` returns `nil` for a missing key unless you supply a default. `put!`
-changes the original table; `put` returns an updated shallow copy.
+[`put`](/reference/otium.core/#put) copies before updating, while
+[`put!`](/reference/otium.core/#put!) changes the original. Both work this way
+on arrays too.
 
-Putting `nil` deletes a key, with either `put!` or `put`. Use `#f` if you need
-to store a false value. `(contains? t key)` tests whether a key exists.
-
-## Transforming sequences
-
-These functions work on lists and arrays. `map`, `filter`, `take`, `drop`,
-`reverse`, `sort` and `sort-by` keep the input's kind: a list produces a list,
-an array produces an array.
+Putting `nil` in a table deletes the key with either operation. A table cannot
+hold a "present with nil" entry; use `#f` when you need a stored false value.
 
 ```otium
-(map inc '(1 2 3))                    ; => (2 3 4)
-(filter odd? [1 2 3 4 5])             ; => [1 3 5]
-(reduce + 0 [1 2 3 4])                ; => 10
-(take 2 [1 2 3])                      ; => [1 2]
-(drop 1 '(1 2 3))                     ; => (2 3)
-(sort '(3 1 2))                       ; => (1 2 3)
-(sort-by first [[2 :x] [1 :y]])        ; => [[1 :y] [2 :x]]
+(def revised (put counts :red 3))
+(get counts :red)      ; => 2
+(get revised :red)     ; => 3
+
+(put! counts :green 4)
+(put! counts :blue nil)
+
+(keys counts)                  ; => [:red :green]
+(values counts)                ; => [2 4]
+(get counts :blue :missing)     ; => :missing
 ```
 
-`map` accepts one sequence. `reduce` calls its function with the accumulator and
-next element, starting from the supplied initial value; its result need not be a
-sequence. `take` and `drop` clamp their counts to the available elements.
+`keys` and `values` return arrays in insertion order. Replacing an existing
+value keeps its position. Deleting and reinserting a key moves it to the end.
 
-Sorting returns a sorted copy and is stable. Values, or derived keys for
-`sort-by`, must belong to one orderable class; integers and floats can be mixed.
+`update` computes a replacement value from the old one, while `merge` combines
+tables. Both return new tables. When keys overlap in a merge, the value comes
+from the later table.
 
-Use `first`, `second`, `third`, `last` and `nth` to retrieve elements; missing
-elements return `nil`. `count` gives the collection's size.
+```otium
+(update counts :red inc)
+; => {:red 3 :green 4}
+
+(merge counts {:red 10 :yellow 1})
+; => {:red 10 :green 4 :yellow 1}
+```
+
+Use `update!` to change the original with the computed replacement. Unlike
+Clojure's `assoc`, Otium's `assoc` looks up a key in an association list; use
+`put` to update a copy of a table.
+
+## Transforming lists and arrays
+
+The shared sequence functions work on lists and arrays, not tables. `map`,
+`filter`, `take`, `drop`, `reverse`, and sorting return the same kind of
+sequence as the input: a list for a list, an array for an array. They do not
+mutate the input.
+
+`map` takes one sequence. `reduce` takes the initial accumulator before the
+sequence and calls its function with the accumulator and the next element.
+
+```otium
+(map inc '(3 1 2))         ; => (4 2 3)
+(map inc [3 1 2])          ; => [4 2 3]
+(filter odd? [3 1 2])      ; => [3 1]
+(reduce + 0 [3 1 2])       ; => 6
+
+(take 2 '(3 1 2))          ; => (3 1)
+(drop 1 [3 1 2])           ; => [1 2]
+```
+
+`reduce` returns the accumulator, so it has no kind-preservation rule. Use
+`for-each` for effects rather than to build a result.
+
+`sort` returns a copy sorted in ascending order. `sort-by` derives a sorting key
+from each element. Sorting is stable: elements with equal keys retain their
+relative order.
+
+```otium
+(sort '(3 1 2))            ; => (1 2 3)
+(sort [3 1 2])             ; => [1 2 3]
+
+(sort-by first [[2 :b] [1 :a] [2 :c]])
+; => [[1 :a] [2 :b] [2 :c]]
+```
+
+Sorting keys must belong to one orderable category, such as numbers or strings;
+integer and floating-point numbers can be mixed.
 
 ## Shallow copies
 
-`copy` makes a new array or table. Replacing an entry in the copy leaves the
-original unchanged, but nested mutable values stay shared. Mutating a shared
-inner array or table is visible through both collections. The same rule applies
-to copies made by `put`.
+[`copy`](/reference/otium.core/#copy) makes a new outer array or table. Nested
+mutable values stay shared. Copying updates such as `put` are shallow too.
 
-<!-- generated from data-structures.md.spec sha256:ae25b98f51ffbda6fc7ff536a7159a947564d74d7b8cccb36f65d90888ec1192 -->
+```otium
+(def original {:items [1 2]})
+(def duplicate (copy original))
+
+(put! duplicate :label :draft)
+(push! (get duplicate :items) 3)
+
+(get original :label)      ; => nil
+(get original :items)      ; => [1 2 3]
+(get duplicate :items)     ; => [1 2 3]
+```
+
+Copy a nested collection too if you need to change it independently.
+
+<!-- generated from data-structures.md.spec sha256:fb30165e0e66a76b17d921ae8eed02fae003402f3f2e8882373c377efcbabb0f -->

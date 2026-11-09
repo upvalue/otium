@@ -1,299 +1,280 @@
 # ✨ Records and classes
 
-Use records for plain data with fixed fields. Use classes when values need
-shared behavior through generic functions. The examples below build a small
-model of animals.
+Use a table for loose data, such as room descriptions, game settings, or
+anything whose keys vary from value to value. A record fits values that should
+all have the same fields, with errors for misspelt field names. Choose a class
+when behaviour should depend on the kind of value, such as using a sword
+differently from a potion.
 
-## Store plain data in records
+Records hold fields. Class instances hold slots, and generic functions choose
+methods based on their arguments' types. Methods belong to the generic function,
+not to an individual class.
 
-Declare a record's fields, then supply their values in order:
+The examples build on each other in one session.
 
-```scheme
-(defrecord AnimalTag (name number))
+## Records
 
-(def tag (record-new AnimalTag "Milo" 17))
+A room's coordinates have a fixed shape. Declare a `Position` record and
+construct it with values in field order:
 
-(tag :name)                    ; => "Milo"
-(record-ref tag :number)        ; => 17
-(set! (tag :number) 18)          ; => 18
+```otium
+(defrecord Position (x y))
+(def entrance (record-new Position 2 3))
+
+(entrance :x)                    ; => 2
 ```
 
-`record-new` requires exactly one value per field. Fields are named with symbols
-in the declaration and keywords when accessing them. Unknown fields are errors.
+`record-new` requires every field; missing or extra values are errors. Access
+fields using keywords. An unknown field is also an error.
 
-`defrecord` also defines named helpers:
+Fields are mutable by default. You can read and assign through a call, or use
+the explicit record operations:
 
-```scheme
-(def spare-tag (make-animal-tag :name "Pip"))
+```otium
+(set! (entrance :x) 4)
+(record-ref entrance :x)         ; => 4
 
-(animal-tag? spare-tag)                 ; => #t
-(animal-tag-number spare-tag)           ; => nil
-(set-animal-tag-number! spare-tag 19)    ; => 19
+(record-set! entrance :y 5)
+(entrance :y)                    ; => 5
 ```
 
-The generated keyword constructor fills omitted fields with `nil`.
+Use `:immutable #t` when fields should not be reassigned:
 
-Records are mutable by default. To prevent field assignment, declare an
-immutable record:
+```otium
+(defrecord Exit (direction destination) :immutable #t)
+(def north-exit (record-new Exit :north "Hall"))
 
-```scheme
-(defrecord AnimalBirth (year month) :immutable #t)
-
-(def birth (record-new AnimalBirth 2024 6))
-(birth :year)                  ; => 2024
+(north-exit :destination)        ; => "Hall"
 ```
 
-Immutability is shallow: a field can still hold a mutable array or table.
-Records compare by identity, even when immutable. They have no inheritance and
-are separate from the class system.
+Both assignment forms reject writes to an immutable record. Immutability is
+shallow: a field can still contain a mutable value.
 
-## Define classes and parents
+Records have no methods or inheritance. Their field lists and mutability cannot
+change while the program runs. You can re-evaluate an unchanged declaration, but
+changing it requires a new record name or restarting the program.
 
-An abstract type groups classes for method dispatch. Define `Animal`, then two
-concrete classes:
+## Classes and slots
 
-```scheme
-(defabstract Animal)
+A class declares the slots its instances hold. A room can have a required name
+and position, with a default visitation flag:
 
-(defclass Dog :is Animal
+```otium
+(defclass Room
   name
-  (age :init 0)
-  (tricks :init []))
+  position
+  (visited :init #f))
 
-(defclass Cat :is Animal
-  name
-  (age :init 0))
+(def hall (make Room :name "Hall" :position entrance))
 
-(def dog (make Dog :name "Milo"))
-(def cat (make Cat :name "Pip" :age 3))
-
-(dog :name)                    ; => "Milo"
-(dog :age)                     ; => 0
+(hall :visited)                 ; => #f
 ```
 
-Class fields are called *slots*. A bare slot such as `name` is required. A slot
-with `:init` gets its default only when omitted from `make`. Each construction
-evaluates its own defaults, so each dog gets a separate `tricks` array. Use
-`:init nil` for an optional slot with no other default.
+`make` takes keyword/value pairs. A slot without `:init` is required, so
+omitting `name` or `position` is an error. For each new instance, each omitted
+slot's default is evaluated separately.
 
-`make` takes alternating slot keywords and values. Missing required slots and
-unknown keywords are errors.
+Read and write slots with the same call syntax used for record fields:
 
-A class has one abstract parent, specified by `:is`, or defaults to `Object`.
-Abstract types can also have an abstract parent. They have no slots and cannot
-be instantiated.
-
-Concrete classes are final: you cannot derive another class from `Dog`. No slots
-are inherited. To share stored data, put another object in a slot.
-
-### Read and change slots
-
-Instances support the same call-shaped reads and assignments as records:
-
-```scheme
-(set! (dog :age) 2)            ; => 2
-(slot-set! dog :age 3)         ; => 3
-
-(with-slots dog (age)
-  (set! age (+ age 1))
-  age)                        ; => 4
+```otium
+(set! (hall :visited) #t)
+(hall :name)                    ; => "Hall"
+((hall :position) :x)           ; => 4
 ```
 
-`with-slots` gives local names that read and write the object's slots. These are
-live accesses, not copied values.
+Unknown slot names are errors. An instance is not a table: use slot access
+rather than `get` or `put!`. You cannot add a slot to just one instance, though
+a declared slot can hold a table for open-ended data.
 
-Instances have a fixed set of slots. They are not tables, so use slot access
-instead of `get` or `put!`. Equality is by identity; `copy` makes a shallow
-copy.
+## Abstract types group classes
 
-## Check membership and use built-in classes
+An abstract type names a family of types for method dispatch. It has no slots
+and cannot be instantiated. Use `:is` to place a class in that family:
 
-Pass a class descriptor, without quoting it, to `is-a?`:
+```otium
+(defabstract Item)
+(defabstract Creature)
 
-```scheme
-(is-a? dog Dog)                ; => #t
-(is-a? dog Animal)             ; => #t
-(is-a? dog Object)             ; => #t
-(is-a? cat Dog)                ; => #f
-(is-a? (dog :age) Number)      ; => #t
-(is-a? (dog :name) String)     ; => #t
+(defclass Sword :is Item
+  (cursed :init #f))
+
+(defclass Potion :is Item
+  (cursed :init #f))
+
+(defclass Troll :is Creature
+  (wounds :init 3))
+
+(defclass Bat :is Creature)
 ```
 
-Ordinary values have built-in dispatch classes. These include `Number` for
-integers and floats, `String`, `Keyword`, `Vector` for arrays, `Hashtable` for
-tables, and `Procedure`.
+Classes are final. Unlike CLOS or Java, Otium does not let one class extend
+another class. A class can extend only an abstract type. Abstract types can
+themselves extend an abstract type, and each type has at most one parent.
 
-Built-in classes are final and have `Object` as their parent. You can specialize
-methods on them, but cannot construct their values with `make`.
+Methods specialized on the abstract type provide shared behaviour. Slots are
+never inherited: `Sword` and `Potion` each declare `cursed`. To share a larger
+piece of state, hold another object in a slot, as `Room` holds a `Position`.
 
-Use `instance?` to check for a user class instance. For an exact class check
-without ancestors, compare `(dispatch-type value)` with the class using `eq?`.
+Create the game's items and creatures:
 
-## Define generic functions and methods
+```otium
+(def sword (make Sword))
+(def potion (make Potion))
+(def troll (make Troll))
+(def bat (make Bat))
 
-Declare a generic function's parameters, then add methods:
-
-```scheme
-(defgeneric (speak animal))
-
-(defmethod (speak (animal Animal))
-  "Silence.")
-
-(defmethod (speak (animal Dog))
-  "Bark!")
-
-(defmethod (speak (animal Cat))
-  "Meow.")
-
-(speak dog)                   ; => "Bark!"
-(speak cat)                   ; => "Meow."
+(is-a? sword Item)               ; => #t
 ```
 
-A parameter written as `(animal Dog)` specializes that method on `Dog`. An
-ordinary parameter name accepts any value, just like specializing on `Object`.
+## Generic functions choose behaviour
 
-The most specific applicable method runs. A `Dog` method wins over an `Animal`
-method, which wins over an `Object` method. If no method applies, the call
-raises an error.
+A generic function names an operation and declares its fixed argument list.
+Methods supply implementations. In a method parameter such as `(thing Sword)`,
+`Sword` is the type that parameter must match.
 
-Generics have fixed arity. Methods must take the declared number of arguments;
-optional and rest parameters are not supported.
+```otium
+(defgeneric (describe-thing thing))
 
-### Dispatch on more than one argument
+(defmethod (describe-thing (thing Item))
+  "An item lies here.")
 
-Methods can specialize any argument position:
+(defmethod (describe-thing (thing Creature))
+  "A creature watches you.")
 
-```scheme
-(defgeneric (meet first second))
+(defmethod (describe-thing (thing Sword))
+  "A steel sword lies here.")
 
-(defmethod (meet (first Animal) (second Animal))
-  :sniff)
-
-(defmethod (meet (first Dog) (second Cat))
-  :chase)
-
-(meet dog cat)                ; => :chase
-(meet cat dog)                ; => :sniff
+(describe-thing sword)           ; => "A steel sword lies here."
+(describe-thing potion)          ; => "An item lies here."
+(describe-thing troll)           ; => "A creature watches you."
+(describe-thing bat)             ; => "A creature watches you."
 ```
 
-Specificity considers every argument. Suppose `meet` had methods for
-`(Dog, Animal)` and `(Animal, Cat)`. A call with `(dog, cat)` would be
-ambiguous: each method is more specific in a different position. A `(Dog, Cat)`
-method resolves that ambiguity. Argument order does not break ties.
+An abstract-type method applies to every class in its family. The `Sword` method
+wins over the `Item` method because it is more specific. An unspecialized
+parameter, written as just a name, accepts any value. Built-in values also have
+dispatch classes, such as `Number` and `String`.
 
-## Call the next method
+### Dispatch on both arguments
 
-Use `:next` immediately after a method's signature to name a local next-method
-procedure:
+Using an item depends on both the item and its target. Specialize both
+parameters:
 
-```scheme
-(defgeneric (animal-details animal))
+```otium
+(defgeneric (use item target))
 
-(defmethod (animal-details (animal Animal))
-  '(animal))
+(defmethod (use (item Item) (target Creature))
+  "Nothing happens.")
 
-(defmethod (animal-details (animal Dog))
-  :next super
-  (cons 'dog (super animal)))
+(defmethod (use (item Sword) (target Troll))
+  "The troll retreats.")
 
-(animal-details dog)          ; => (dog animal)
+(defmethod (use (item Potion) (target Bat))
+  "The bat falls asleep.")
+
+(use sword troll)               ; => "The troll retreats."
+(use potion bat)                ; => "The bat falls asleep."
+(use sword bat)                  ; => "Nothing happens."
 ```
 
-`super` is a name chosen by the method author. Pass every argument explicitly
-when calling it. Its value is `#f` when no next method remains, so guard the
-call when a fallback is optional.
+A method wins only if it is at least as specific in every argument position and
+more specific in at least one. If two applicable methods are tied, with neither
+more specific overall, the call raises an ambiguity error.
 
-A next-method call continues among the remaining methods applicable to the
-original call. Passing different arguments does not start fresh dispatch or
-bring in methods excluded from that call.
+For example, methods for `(Sword, Creature)` and `(Item, Troll)` would conflict
+on a sword used on a troll. A method for `(Sword, Troll)` resolves that
+conflict. Definition order does not break ties.
 
-### Wrap methods with `:around`
+## Calling the next method
 
-An `:around` method wraps the primary method chain:
+A specialized method can build on a more general one. Put `:next` followed by a
+local name immediately after the method signature. Call that name with all
+arguments explicitly:
 
-```scheme
-(defmethod :around (animal-details (animal Animal))
-  :next super
-  (cons 'checked (super animal)))
+```otium
+(defmethod (describe-thing (thing Sword)) :next next
+  (string-append (next thing) " Its blade is steel."))
 
-(animal-details dog)          ; => (checked dog animal)
+(describe-thing sword)
+; => "An item lies here. Its blade is steel."
 ```
 
-When several around methods apply, the most specific runs outermost. Calling its
-next method proceeds through the remaining around methods, then the primaries.
+This replaces the earlier `Sword` method. `next` calls the less-specific `Item`
+method, not the replaced definition. You can choose the local name; its value is
+`#f` when no next method exists.
 
-An around method can return without calling its next method, skipping everything
-inside it. The outermost around method supplies the final result. Otium has no
-`:before` or `:after` methods.
+Redefining a method with the same signature and qualifier replaces it.
+Subsequent generic calls use the new method, so behaviour can change without
+recreating the game's objects.
 
-## Keep instances across reloads
+### Around methods
 
-Reevaluating `defclass` or `defabstract` in the same namespace preserves the
-type's identity. Existing instances and methods specialized on that type remain
-usable.
+An `:around` method wraps the primary methods. It can call the next method and
+alter its result, or return without calling it.
 
-For example, reevaluate `Dog` with an added slot:
+Here, cursed items misfire before any primary `use` method runs:
 
-```scheme
-(defclass Dog :is Animal
-  name
-  (age :init 0)
-  (tricks :init [])
-  (vaccinated? :init #f))
+```otium
+(defmethod :around (use (item Item) (target Creature)) :next next
+  (if (item :cursed)
+      "The curse turns the item against you."
+      (next item target)))
 
-(dog :vaccinated?)            ; => #f
-(dog :age)                    ; => 4
+(use sword troll)               ; => "The troll retreats."
+
+(set! (sword :cursed) #t)
+(use sword troll)
+; => "The curse turns the item against you."
 ```
 
-Existing instances migrate when their slots are next accessed. Kept slots retain
+The primary methods remain unchanged. If several around methods apply, the most
+specific wraps the others. Calling `next` eventually reaches the primary
+methods.
+
+## Changing classes while the game runs
+
+You can change class declarations without replacing existing instances.
+Re-evaluate the full declaration with a new slot:
+
+```otium
+(defclass Bat :is Creature
+  (health :init 10))
+
+(bat :health)                   ; => 10
+(describe-thing bat)             ; => "A creature watches you."
+```
+
+The existing `bat` picks up `health` when it is accessed. Existing slots keep
 their values, added slots receive their defaults, and removed slots disappear.
-Changing a default does not overwrite an existing value. Changing an abstract
-parent changes membership and dispatch for existing instances.
+The class keeps its identity, so methods specialized on it still apply.
 
-### Convert old data during migration
+### Converting old data
 
-Specialize `update-instance` when a layout change needs a conversion. It
-receives the instance with its new slots and a table of old slot values keyed by
+When defaults are not enough, specialize `update-instance`. It receives the
+instance with its new slots and a table of its old slot values, keyed by
 keywords.
 
-Here, a new required `display-name` slot gets its value from the old `name`:
+The troll currently tracks wounds. Replace that with remaining health, using the
+old wounds to calculate the new value. Install the conversion method before
+accessing instances under the new declaration:
 
-```scheme
-(defmethod (update-instance (animal Dog) old-slots)
-  (set! (animal :display-name) (get old-slots :name)))
+```otium
+(defmethod (update-instance (creature Troll) old-slots)
+  (set! (creature :health)
+        (- 20 (get old-slots :wounds 0))))
 
-(defclass Dog :is Animal
-  name
-  display-name
-  (age :init 0)
-  (tricks :init [])
-  (vaccinated? :init #f))
+(defclass Troll :is Creature
+  (health :init 20))
 
-(dog :display-name)           ; => "Milo"
+(troll :health)                 ; => 17
+((make Troll) :health)          ; => 20
 ```
 
-A new required slot must be filled by `update-instance` or migration fails. New
-calls to `make` must supply it normally. If migration fails, the instance's
-layout and slot values are restored, and a later access retries.
+`update-instance` converts existing instances; ordinary `make` uses the new
+declaration's defaults. If you add a required slot without `:init`, the
+conversion method must fill it for existing instances.
 
-### Reload methods and records
+See [Live programming](live-programming.md) for keeping game state across
+reloads.
 
-Reevaluating `defgeneric` with the same arity preserves its methods. Defining a
-method with the same specializers and qualifier replaces that method. A primary
-method and an around method with the same specializers are separate definitions.
-
-Deleting a method from source does not remove the installed method. Remove it
-explicitly:
-
-```scheme
-(remove-method! animal-details (list Animal) :around) ; => #t
-```
-
-Records have stricter reload rules. Repeating the same declaration preserves the
-record type and existing records. Changing fields, field order, or mutability is
-an error. Use a new record name or restart the process for a changed layout.
-
-For module reloads and retained bindings, see [Live
-programming](guide/live-programming.md).
-
-<!-- generated from classes.md.spec sha256:ede5686533d1fb17e683186f60e96554a282d749b70cc530a86d4364eab63a09 -->
+<!-- generated from classes.md.spec sha256:9da0c1b249a31036d8c4531eb86969c62f96d68c7850739f48671750fc7bede0 -->

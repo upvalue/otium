@@ -1,7 +1,11 @@
 ---
 title: "Errors and recovery"
 prompt: |
-  Write a guide to handling errors in Otium for a programmer who knows some Lisp and is learning Otium.
+  Write a guide to handling errors in Otium for a programmer who knows some
+  Lisp and is learning Otium. They should come away able to signal and catch errors, clean up reliably, and
+  understand when recovering at the point of the error with restarts is worth
+  it over catching it further up. Point out that this works like Common Lisp's
+  condition system rather than Scheme's `guard`.
 ---
 
 ## Sources

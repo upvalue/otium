@@ -1,7 +1,11 @@
 ---
 title: "Data structures"
 prompt: |
-  Write a guide to lists, arrays and tables in Otium for a programmer who knows some Lisp and is learning Otium.
+  Write a guide to lists, arrays and tables in Otium for a programmer who knows some
+  Lisp and is learning Otium. They should come away knowing when to use a list, an array or a table, and
+  how to build, read, change and transform each. Point out where Otium differs
+  from Scheme and Clojure: arrays and tables are mutable, `put!` mutates while
+  `put` copies, and putting `nil` in a table deletes the key.
 ---
 
 ## Sources

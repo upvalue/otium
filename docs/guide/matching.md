@@ -1,123 +1,137 @@
 # ✨ Pattern matching
 
-Use `match` to choose a case and bind pieces of a value:
+Use [`match`](/reference/otium.core/#match) to check a value's shape and use its
+parts. It combines the tests you might put in a `cond` with the bindings you
+would otherwise build from `car`, `cdr`, or `get`.
 
-```scheme
-(match '(1 2)
-  ((list a b) (+ a b))
-  (_ 0))
-;; => 3
+A `match` contains a value expression followed by clauses. Each clause has a
+pattern and a body. Patterns describe the expected structure and name the pieces
+you want to use.
+
+```otium
+(match '(move 3 4)
+  ((list 'move dx dy) (list dx dy))
+  (_ :unknown))
+;; => (3 4)
 ```
 
-`match` evaluates its input once and tries clauses in order. Each clause has a
-pattern followed by its body. The first matching clause runs and returns its
-last expression.
+The pattern `(list 'move dx dy)` requires a three-element list beginning with
+the symbol `move`. It binds the remaining elements to `dx` and `dy`.
 
-## Bind names and match literals
+`match` evaluates its input once and tries clauses from top to bottom. The first
+matching clause runs, and its last body expression becomes the result.
 
-A bare name matches anything and binds that value within the clause. `_` matches
-anything without binding it.
+## Names, literals, and `_`
 
-```scheme
-(match '((1 2) (3 4))
-  ((list (list _ _) (list _ d)) d))
-;; => 4
+Within a pattern:
+
+- A bare name matches anything and binds that value for the clause's body.
+- `_` matches anything without binding it.
+- Numbers, strings, keywords, booleans, and `nil` match literal values.
+- Quotation matches data literally: `'move` matches the symbol `move`, and
+  `'(1 2)` matches that whole list.
+
+Bare names always bind, even if a variable with that name already exists. Use
+`(== expected)` to compare against an existing variable's value instead. Each
+binding name must be unique within a pattern.
+
+A final `_` clause provides a fallback. If no clause matches, `match` signals a
+`match-error`; it does not silently return `nil`.
+
+## Lists and arrays
+
+A `(list ...)` pattern requires exactly the listed number of elements. Add
+`& name` to bind the remaining list:
+
+```otium
+(match '(log "started" "ready")
+  ((list 'log & messages) messages)
+  (_ '()))
+;; => ("started" "ready")
 ```
 
-Numbers, strings, keywords, booleans, and `nil` match literally. Quote symbols
-and whole lists when you want their literal values: `'sym` matches the symbol
-`sym`, and `'(1 2)` matches that list. Literals use `equal?`; an integer literal
-does not match a float.
+The tail can be empty. Use `& _` if you only care about the prefix.
 
-A bare name always binds, even if that name already exists. Use `(== name)` to
-compare with an existing value:
+Array patterns use square brackets. They also require an exact length unless
+they end in `& _`:
 
-```scheme
-(let ((expected 5))
-  (match 5
-    ((== expected) 'same)
-    (_ 'different)))
-;; => same
+```otium
+(match [10 20 :unused]
+  ([x y] (list :point x y))
+  ([x _ & _] x)
+  (_ nil))
+;; => 10
 ```
 
-Use each binding name only once in a pattern.
+The first clause fails because the array has three elements. The second requires
+at least two, binds the first to `x`, and ignores everything else. Arrays
+support ignoring the rest with `& _`, but not binding it to a name.
 
-## Unpack lists and arrays
+List patterns match lists, and array patterns match arrays; they do not
+substitute for each other.
 
-`(list a b)` matches a proper list with exactly two elements. Add `& rest` to
-bind the remaining tail:
+## Tables and nested patterns
 
-```scheme
-(match '(1 2 3)
-  ((list first & rest) (list first rest)))
-;; => (1 (2 3))
+A table pattern specifies required keys and patterns for their values, ignoring
+extra keys. Keys must be literals, such as keywords or strings.
+
+Patterns can nest, so a table's value can itself be unpacked as an array:
+
+```otium
+(match {:type :click :pos [10 20] :button :left}
+  ({:type :click :pos [x y]} (list x y))
+  (_ nil))
+;; => (10 20)
 ```
 
-For tagged lists, quote the tag and bind the remaining elements:
+This pattern requires a table with `:type` equal to `:click` and a `:pos`
+containing a two-element array. The `:button` key does not affect the match. The
+clause fails if a required key is missing, a collection has the wrong kind, or
+the array has the wrong length.
 
-```scheme
-(match '(move 1 2)
-  ((list 'move dx dy) (+ dx dy))
-  (_ 0))
-;; => 3
+Binding a name does not check its type, so `x` and `y` can be any values.
+
+## Dispatching on event tables
+
+A guard adds a test after the pattern has matched. Write `:when` followed by an
+expression before the body. The guard can use the pattern's bindings. If it
+returns `#f` or `nil`, matching continues with the next clause.
+
+This dispatcher returns an action description rather than performing an action:
+
+```otium
+(def (dispatch-event event)
+  (match event
+    ({:type :click :pos [x y]}
+     (list 'click x y))
+    ({:type :key :key k} :when (string? k)
+     (list 'insert k))
+    ({:type t}
+     (list 'unhandled t))
+    (_ :not-an-event)))
+
+(dispatch-event {:type :click :pos [10 20] :button :left})
+;; => (click 10 20)
+
+(dispatch-event {:type :key :key "a"})
+;; => (insert "a")
+
+(dispatch-event {:type :key :key 5})
+;; => (unhandled :key)
+
+(dispatch-event {:type :click :pos [10]})
+;; => (unhandled :click)
+
+(dispatch-event {:pos [10 20]})
+;; => :not-an-event
 ```
 
-Array patterns use square brackets. `[a b]` matches exactly two elements;
-`[a b & _]` accepts additional elements and ignores them:
+The key clause checks the table's shape before testing whether `k` is a string.
+A failed guard falls through just like a failed pattern. The malformed click
+also falls through because its position array has the wrong length.
 
-```scheme
-(match [1 2 3]
-  ([a b & _] (+ a b)))
-;; => 3
-```
+Keep specific clauses before broad ones: `{:type t}` accepts any table
+containing `:type`, so placing it first would hide both event-specific clauses.
+The final `_` handles values that lack even that basic shape.
 
-Array rest patterns only support `_`, so you cannot bind an array's remaining
-elements this way. List patterns do not match arrays, and array patterns do not
-match lists.
-
-## Dispatch on event tables
-
-Table patterns name the keys to check. Those keys must be literals and must be
-present; extra keys are ignored. Patterns can nest, so an event's position can
-be unpacked as an array.
-
-This function converts event tables into tagged lists:
-
-```scheme
-(def (event e)
-  (match e
-    ({:type :click :pos [x y]} (list 'click x y))
-    ({:type :key :key k} :when (string? k) (list 'key k))
-    ({:type t} (list 'other t))
-    (_ 'not-an-event)))
-
-(event {:type :click :pos [1 2]})
-;; => (click 1 2)
-
-(event {:type :key :key "a" :mods [:shift]})
-;; => (key "a")
-
-(event {:type :key :key 5})
-;; => (other :key)
-
-(event {:pos [1 2]})
-;; => not-an-event
-```
-
-The click clause requires `:type` to be `:click` and `:pos` to contain exactly
-two array elements. It binds those elements to `x` and `y`.
-
-The key clause adds a guard with `:when`. The guard runs after the pattern
-matches and can use its bindings. If it returns `nil` or `#f`, matching
-continues with the next clause. Here, a numeric key falls through to
-`{:type t}`.
-
-Put specific cases before general ones. Once a clause succeeds, later clauses do
-not run, even if its body returns a false value.
-
-The final `_` handles values that no earlier clause accepts, including tables
-without `:type`. Without a matching clause, `match` signals a `match-error`; it
-does not silently return `nil`. See [Errors and recovery](errors.md) for
-handling errors.
-
-<!-- generated from matching.md.spec sha256:9b2380abba10307e05adab5e71c12d2d834b31ac04c7faf7673bbecdfed60be8 -->
+<!-- generated from matching.md.spec sha256:dce9204f767be85c838ed6d8120dfe0779e8f0ac63980ee6713662b38107df26 -->

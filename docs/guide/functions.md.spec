@@ -1,7 +1,12 @@
 ---
 title: "Functions"
 prompt: |
-  Write a guide to writing and calling functions in Otium for a programmer who knows some Lisp and is learning Otium.
+  Write a guide to writing and calling functions in Otium for a programmer who knows some
+  Lisp and is learning Otium. They should come away able to write functions with optional and rest
+  arguments, know that tail calls don't grow the stack, and know that tables,
+  arrays and keywords can be called like functions. Point out where Otium
+  differs from Scheme: `def` defines functions, `&optional` takes defaults,
+  and optional and rest parameters can't be combined.
 ---
 
 ## Sources

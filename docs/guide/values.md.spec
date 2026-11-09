@@ -1,7 +1,11 @@
 ---
 title: "Values and types"
 prompt: |
-  Write a guide to Otium's values and how they compare in Otium for a programmer who knows some Lisp and is learning Otium.
+  Write a guide to Otium's values and how they compare for a programmer who knows some Lisp
+  and is learning Otium. They should come away knowing which values Otium has, which are false, and
+  which equality test to use. Point out where Otium differs from Scheme: `nil`
+  and `'()` are different values, there are no rationals or bignums, and `/`
+  returns a float for a fractional result.
 ---
 
 ## Sources

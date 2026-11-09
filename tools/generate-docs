@@ -65,7 +65,9 @@ Rules:
   and exhaustive tables of operations. Where it helps, build examples on each
   other so the page reads as one piece of work.
 - Read AGENT-LANG.md before writing any Otium code examples. Keep examples short
-  and check them against the source. Prefer examples that return a value over
+  and check them against the source. Run each example with run_otium in the
+  order a reader would type them, and make every result comment match what
+  it prints. Don't tell the reader to do something that fails. Prefer examples that return a value over
   ones that print. Mark code blocks as ```otium.
 - Leave out options and alternatives that don't help the reader understand the
   subject or use it.
@@ -74,7 +76,8 @@ Rules:
   and a path from the repository root, and only name files that exist.
 - Link to a function or other binding in the API reference with
   `/reference/<namespace>/#<name>`, for example
-  ``[`read-line`](/reference/otium.core/#read-line)``. Only link names that exist.
+  ``[`read-line`](/reference/otium.core/#read-line)``. The reference covers only
+  these namespaces: {{reference}}. Only link names that exist there.
 - Link to other docs with relative links from {{target}}. The docs that exist:
 {{index}}
 - Do not edit any files. Your only output is the reply.
@@ -181,6 +184,7 @@ of changes, no code fence around the whole thing.
 </humanizer-skill>
 """
 SKILL = ROOT / '.agents/skills/humanizer/SKILL.md'
+REFERENCE = [ns['name'] for ns in json.loads((DOCS / 'reference.json').read_text())['namespaces']]
 
 
 def pi_command(system, args):
@@ -188,7 +192,7 @@ def pi_command(system, args):
         'pi', '--print', '--mode', 'json', '--no-session',
         '--provider', args.provider, '--model', args.model,
         '--thinking', args.thinking,
-        '--tools', 'read,grep,find,ls',
+        '--tools', 'read,grep,find,ls,run_otium',
         '--no-extensions', '--no-skills', '--no-prompt-templates',
         '--no-themes', '--no-approve',
         '--skill', str(ROOT / '.agents/skills/humanizer'),
@@ -214,6 +218,13 @@ def final_reply(output):
         raise ValueError(f'Pi did not finish a complete assistant reply: {detail}')
     return ''.join(block['text'] for block in messages[-1].get('content', [])
                    if block.get('type') == 'text').strip()
+
+
+def examples_run(output):
+    """How many times Pi called run_otium."""
+    return sum(1 for line in output.splitlines()
+               if (event := json.loads(line)).get('type') == 'tool_execution_start'
+               and event.get('toolName') == 'run_otium')
 
 
 def files_read(output):
@@ -256,14 +267,22 @@ def words(text):
 
 
 def wrap_line(first, rest, text):
-    lines, line = [], first
+    lines, line, empty = [], first, True
     for word in words(text):
-        if line.strip() and len(line) + 1 + len(word) > WIDTH and not BLOCK_START.match(word):
+        if not empty and len(line) + 1 + len(word) > WIDTH and not BLOCK_START.match(word):
             lines.append(line)
             line = rest + word
         else:
-            line += (' ' if line.strip() else '') + word
+            line += ('' if empty else ' ') + word
+        empty = False
     return lines + [line]
+
+
+def straighten(line):
+    """Replace curly quotes with straight ones outside inline code."""
+    parts = re.split(r'(`+[^`]*`+)', line)
+    table = str.maketrans({'\u2018': "'", '\u2019': "'", '\u201c': '"', '\u201d': '"'})
+    return ''.join(p if p.startswith('`') else p.translate(table) for p in parts)
 
 
 def wrap(markdown):
@@ -272,6 +291,8 @@ def wrap(markdown):
     for line in markdown.split('\n'):
         if line.lstrip().startswith('```'):
             fenced = not fenced
+        if not fenced:
+            line = straighten(line)
         if fenced or line.lstrip().startswith('```') or len(line) <= WIDTH or \
                 re.match(r'\s*(#|\||<|>)', line):
             out.append(line)
@@ -298,7 +319,8 @@ def generate(spec, index, args):
     if not args.force and up_to_date(spec):
         print(f'{rel}: unchanged spec, skipped', file=sys.stderr)
         return True
-    system = RULES.format(target=rel, title=meta['title'], index=index)
+    system = RULES.format(target=rel, title=meta['title'], index=index,
+                          reference=', '.join(REFERENCE))
     prompt = meta['prompt'] + ('\n\n' + body if body else '')
     command = pi_command(system, args)
     if args.dry_run:
@@ -310,6 +332,7 @@ def generate(spec, index, args):
         output = run_pi(command, prompt, args)
         draft = final_reply(output)
         print(f'{rel}: read {", ".join(files_read(output)) or "nothing"}', file=sys.stderr)
+        print(f'{rel}: ran {examples_run(output)} examples', file=sys.stderr)
         if draft.splitlines()[:1] != [title]:
             raise ValueError('draft does not start with the expected document title')
         # The writer spends its attention on the facts, so a second pass with

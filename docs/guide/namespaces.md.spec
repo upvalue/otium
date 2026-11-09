@@ -1,7 +1,10 @@
 ---
 title: "Namespaces"
 prompt: |
-  Write a guide to organising code into namespaces in Otium for a programmer who knows some Lisp and is learning Otium.
+  Write a guide to organising code into namespaces in Otium for a programmer who knows some
+  Lisp and is learning Otium. They should come away able to split a program across files, require one
+  namespace from another, and keep helpers private. Point out that a
+  namespace's name must match its file path, as in Clojure.
 ---
 
 ## Sources

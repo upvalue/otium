@@ -1,7 +1,10 @@
 ---
 title: "Concurrency"
 prompt: |
-  Write a guide to running work concurrently in Otium for a programmer who knows some Lisp and is learning Otium.
+  Write a guide to running work concurrently in Otium for a programmer who knows some
+  Lisp and is learning Otium. They should come away knowing when to use a thread and when to use an actor,
+  and what happens when one fails. Say plainly that threads take turns on one
+  native thread, so they help with waiting, not with using more cores.
 ---
 
 ## Sources

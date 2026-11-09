@@ -1,29 +1,34 @@
 # ✨ Loops
 
-Reach for `for` first when walking or building collections. `for` and `dotimes`
-are available everywhere without a `require`.
+Use `for` to walk the dragon's hoard, build collections, or keep running totals.
+Drivers supply values for each pass; accumulators gather results. `for` and
+`dotimes` are available everywhere without a `require`.
 
 ## The shape of `for`
 
-The shape is `(for [name] (clause ...) [=> final] body ...)`, where square
-brackets mark optional parts. Clauses step together, and the loop stops when any
-driver runs out. Without `=>`, an unnamed loop returns `nil`.
+`(for [name] (clause ...) [=> final] body ...)` uses brackets to mark optional
+parts. Clauses step together, and the loop stops when any driver runs out. An
+unnamed loop advances automatically after its body.
 
-The dragon walks its hoard, putting each coin on the counting tray:
+To inspect each coin:
 
 ```otium
 (def hoard '(5 12 3 40 7))
 
-(let ((tray []))
-  (for ((coin :in hoard))
-    (push! tray coin)))
+(for ((coin :in hoard))
+  (println coin))
+; prints 5, 12, 3, 40, 7 on separate lines
 ; => nil
 ```
 
-## Choose a driver
+Without `=>`, normal completion returns `nil`. With `=>`, the expression after
+it supplies the result. `:collect` gathers values into a list.
 
-`(x :in seq)` walks a list, an array, or a string. Strings yield characters. Use
-`:collect` and `=>` to return the coins in order:
+## Drivers
+
+### Sequences
+
+`(x :in seq)` walks a list, an array, or a string. Strings supply characters.
 
 ```otium
 (for ((coin :in hoard)
@@ -32,118 +37,127 @@ The dragon walks its hoard, putting each coin on the counting tray:
 ; => (5 12 3 40 7)
 ```
 
-`(k v :in table)` walks entries in insertion order. The dragon inventories its
-gems:
+### Tables
+
+`(k v :in table)` visits keys and values in insertion order. The dragon keeps
+gem counts in a table:
 
 ```otium
-(let ((gems {:ruby 3 :emerald 5 :opal 1}))
-  (for ((gem count :in gems)
-        (inventory :collect (list gem count)))
-    => inventory))
+(def gems {:ruby 3 :emerald 5 :opal 1})
+
+(for ((gem count :in gems)
+      (inventory :collect (list gem count)))
+  => inventory)
 ; => ((:ruby 3) (:emerald 5) (:opal 1))
 ```
 
+### Ranges
+
 `(i :range [start] end [step])` defaults to start `0` and step `1`. The end is
-exclusive: counting from 1 through 10 requires `(i :range 1 11)`. A negative
-step counts down, here through the days left to sleep on the hoard:
+exclusive: counting from 1 through 10 requires `(i :range 1 11)`.
+
+A negative step counts down through the days left to sleep:
 
 ```otium
 (for ((day :range 3 0 -1)
-      (days :collect day))
-  => days)
+      (sleep :collect day))
+  => sleep)
 ; => (3 2 1)
 ```
 
-`(x := init next)` starts at `init` and computes a new value each pass. The
-dragon doubles the number of villages raided each day:
+### Stepped variables
+
+`(x := init next)` starts at `init` and computes a new value after each pass. It
+does not stop the loop itself, so pair it with a finite driver or stop the loop
+explicitly.
+
+The dragon plans to double its gold each day:
 
 ```otium
-(for ((day :range 1 5)
-      (villages := 1 (* villages 2))
-      (raids :collect (list day villages)))
-  => raids)
-; => ((1 1) (2 2) (3 4) (4 8))
+(for ((day :range 4)
+      (gold := 1 (* gold 2))
+      (counts :collect gold))
+  => counts)
+; => (1 2 4 8)
 ```
 
-## Step together or nest
+## Together, not nested
 
-Multiple drivers step side by side; they do not nest. This assigns one coin to
-each of two days, then stops because the day range ends:
+Two drivers in one clause list advance side by side. This assigns one coin to
+each day and stops after three days:
 
 ```otium
-(for ((day :range 1 3)
-      (coin :in hoard)
-      (checks :collect (list day coin)))
-  => checks)
-; => ((1 5) (2 12))
+(for ((coin :in hoard)
+      (day :range 1 4)
+      (counts :collect (list day coin)))
+  => counts)
+; => ((1 5) (2 12) (3 3))
 ```
 
-For every day-and-coin pair, put one `for` inside another:
+For every combination, put one `for` inside another. The dragon checks both gems
+each day:
 
 ```otium
 (for ((day :range 1 3)
       (rows :collect
-        (for ((coin :in hoard)
-              (checks :collect (list day coin)))
-          => checks)))
+        (for ((gem :in [:ruby :opal])
+              (pairs :collect (list day gem)))
+          => pairs)))
   => rows)
-; => (((1 5) (1 12) (1 3) (1 40) (1 7))
-;     ((2 5) (2 12) (2 3) (2 40) (2 7)))
+; => (((1 :ruby) (1 :opal)) ((2 :ruby) (2 :opal)))
 ```
 
 An inner loop cannot add to the outer loop's accumulator. To get one flat list,
-collect inner lists and join them with `(apply append rows)` in `=>`:
+collect the inner lists and join them in `=>`:
 
 ```otium
 (for ((day :range 1 3)
       (rows :collect
-        (for ((coin :in hoard)
-              (checks :collect (list day coin)))
-          => checks)))
+        (for ((gem :in [:ruby :opal])
+              (pairs :collect (list day gem)))
+          => pairs)))
   => (apply append rows))
-; => ((1 5) (1 12) (1 3) (1 40) (1 7)
-;     (2 5) (2 12) (2 3) (2 40) (2 7))
+; => ((1 :ruby) (1 :opal) (2 :ruby) (2 :opal))
 ```
 
-For a flat array, let both loops share one array and call `push!` from the inner
-body:
+You can also push into one shared array from the inner body:
 
 ```otium
-(let ((checks []))
+(let ((pairs []))
   (for ((day :range 1 3))
-    (for ((coin :in hoard))
-      (push! checks [day coin])))
-  checks)
-; => [[1 5] [1 12] [1 3] [1 40] [1 7]
-;     [2 5] [2 12] [2 3] [2 40] [2 7]]
+    (for ((gem :in [:ruby :opal]))
+      (push! pairs (list day gem))))
+  pairs)
+; => [(1 :ruby) (1 :opal) (2 :ruby) (2 :opal)]
 ```
 
-## Accumulate results
+## Accumulators and results
 
-Use `:collect` for a list, `:collect-array` for an array, and `:sum` for a
-total. Each accepts an optional `:when test` that filters its contributions. Use
-the accumulator names in `=>`.
+`:collect` builds a list, `:collect-array` builds an array, and `:sum` adds
+numbers. Each accepts an optional `:when test` to include only matching values.
+Use their names in `=>` to return the results.
 
-The dragon sorts out gems and weighs its gold in one pass, returning several
-results as an array:
+The dragon sorts out gold treasures while weighing everything, returning several
+results in an array from one pass:
 
 ```otium
-(let ((treasures [{:name :ruby :kind :gem :weight 2}
-                  {:name :crown :kind :gold :weight 8}
-                  {:name :opal :kind :gem :weight 1}]))
-  (for ((treasure :in treasures)
-        (gems :collect (:name treasure)
-              :when (eq? (:kind treasure) :gem))
-        (heavy :collect-array (:name treasure)
-               :when (> (:weight treasure) 1))
-        (gold :sum (:weight treasure)
-              :when (eq? (:kind treasure) :gold)))
-    => [gems heavy gold]))
-; => [(:ruby :opal) [:ruby :crown] 8]
+(def treasures
+  [{:name :crown :kind :gold :weight 12}
+   {:name :cup :kind :silver :weight 3}
+   {:name :ring :kind :gold :weight 2}])
+
+(for ((treasure :in treasures)
+      (names :collect (:name treasure)
+             :when (eq? (:kind treasure) :gold))
+      (weights :collect-array (:weight treasure))
+      (gold :sum (:weight treasure)
+            :when (eq? (:kind treasure) :gold)))
+  => [names weights gold])
+; => [(:crown :ring) [12 3 2] 14]
 ```
 
 For another kind of fold, use a `:=` variable and read its final value in `=>`.
-This finds the largest coin:
+The dragon uses this to find its most valuable coin:
 
 ```otium
 (for ((coin :in hoard)
@@ -152,45 +166,53 @@ This finds the largest coin:
 ; => 40
 ```
 
-## Control a named loop
+## Named loops: skip or stop
 
-In `(for next (clauses) => final body ...)`, the body goes round only by calling
-`(next)` in tail position. Lint warns when that call is not in tail position.
+In `(for next (clauses) => final body ...)`, the body controls whether another
+pass happens. Call `(next)` in tail position: its result must be the result of
+that branch, with no work afterward. Lint warns when `next` is not in tail
+position.
 
-To skip the rest of a pass, call `(next)` in the skip branch. Here the dragon
-skips small coins, sets aside the remaining even coins, then goes round:
+### Skip the rest of a pass
+
+Small coins need no extra guarding. Their branch calls `next` early; the other
+branch records the coin before continuing:
 
 ```otium
-(let ((gold []))
+(let ((guarded []))
   (for next ((coin :in hoard))
-    => gold
+    => guarded
     (if (< coin 10)
         (next)
         (begin
-          (when (even? coin)
-            (push! gold coin))
+          (push! guarded coin)
           (next)))))
 ; => [12 40]
 ```
 
-Calling `(next)` still steps the clauses, including accumulators. Use an
-accumulator's `:when` to exclude a contribution.
+Calling `next` still steps all clauses, including accumulators. Use an
+accumulator's `:when` if it should also exclude skipped values.
 
-Not calling `next` stops immediately and returns the body's value without
-running `=>`. The dragon stops guarding the cave when it catches a thief:
+### Stop with the body's value
+
+If the body does not call `next`, the loop stops immediately and returns the
+body's value without evaluating `=>`. Finding the largest coin sends the dragon
+back to guard the cave:
 
 ```otium
-(for next ((thieves :in [0 0 2 0]))
-  => :quiet
-  (if (> thieves 0)
-      :thieves-caught
+(for next ((coin :in hoard)
+           (gold :sum coin))
+  => gold
+  (if (= coin 40)
+      :guard-cave
       (next)))
-; => :thieves-caught
+; => :guard-cave
 ```
 
-Call `(next :done)` to finish this pass, including its accumulator
-contributions, and return `final`. The dragon counts through the first coin
-worth 40:
+### Stop with the final expression
+
+`(next :done)` finishes the current pass, including its accumulator updates,
+then returns `final`:
 
 ```otium
 (for next ((coin :in hoard)
@@ -202,47 +224,47 @@ worth 40:
 ; => 60
 ```
 
-### Cost
+## Cost
 
-On Chez, `for` costs the same as the named `let` you would write by hand and
-allocates nothing beyond what the accumulators build.
+`for` costs about the same as the named `let` you would write by hand. You need
+not avoid it in fast code.
 
-## Repeat with `dotimes`
+## `dotimes`
 
-`(dotimes (i count) body ...)` runs with `i` from zero up to, but excluding,
-`count`. It returns `nil`; return a surrounding value when you need a result.
-
-The dragon records three nights guarding the cave:
+`(dotimes (i count) body ...)` repeats the body with `i` from zero up to, but
+not including, `count`. It returns `nil`. The surrounding expression returns the
+array filled with village-raid days:
 
 ```otium
-(let ((guarded-nights []))
+(let ((villages []))
   (dotimes (day 3)
-    (push! guarded-nights day))
-  guarded-nights)
+    (push! villages day))
+  villages)
 ; => [0 1 2]
 ```
 
-## Recur with named `let`
+## Named `let`
 
-Use Scheme-style named `let`, `(let loop ((x init) ...) ... (loop next ...))`,
-when the work does not fit `for`'s clauses. Keep the recursive call in tail
-position.
+Scheme-style named `let` has the shape
+`(let loop ((x init) ...) ... (loop next ...))`. A tail call to `loop` starts
+another pass with new values.
 
-The dragon counts coins stored in nested chests, including its hoard:
+Use it when the work does not fit `for`'s clauses, such as counting coins in
+nested piles. Here `piles` holds the remaining work and `gold` holds the total:
 
 ```otium
-(let loop ((chests (list hoard '(2 (8))))
+(let loop ((piles (list hoard '(2 (8 1))))
            (gold 0))
   (cond
-    ((null? chests) gold)
-    ((list? (car chests))
-     (loop (append (car chests) (cdr chests)) gold))
+    ((null? piles) gold)
+    ((pair? (car piles))
+     (loop (append (car piles) (cdr piles)) gold))
     (else
-     (loop (cdr chests) (+ gold (car chests))))))
-; => 77
+     (loop (cdr piles) (+ gold (car piles))))))
+; => 78
 ```
 
-For a loop driven by mutable state, use `(while test body ...)` to repeat while
-the test is truthy.
+For loops driven by mutable state, use `(while test body ...)`, which repeats
+while `test` is true.
 
-<!-- generated from loops.md.spec sha256:f4f80e595ed807feebb39365f553f75ec6989c244d61cb78d3436b6fe69f71f2 -->
+<!-- generated from loops.md.spec sha256:46f9a81c2ca7a0af55b73416d1c2fbe9214b76bfe2fde8d172f004f1e9b921d2 -->

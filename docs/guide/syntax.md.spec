@@ -1,7 +1,10 @@
 ---
 title: "Syntax"
 prompt: |
-  Write a guide to how Otium source is read in Otium for a programmer who knows some Lisp and is learning Otium.
+  Write a guide to how Otium source is read for a programmer who knows some Lisp
+  and is learning Otium. They should come away able to read any Otium code they meet, and know where
+  Otium's syntax differs from Scheme: square brackets make arrays, braces make
+  tables, and `nil` is its own value.
 ---
 
 ## Sources

@@ -1,7 +1,10 @@
 ---
 title: "Control flow"
 prompt: |
-  Write a guide to branching and sequencing in Otium for a programmer who knows some Lisp and is learning Otium.
+  Write a guide to branching and sequencing in Otium for a programmer who knows some
+  Lisp and is learning Otium. They should come away knowing which conditional to reach for and what each
+  returns, remembering that only `nil` and `#f` are false and that an `if`
+  without an else returns `nil`.
 ---
 
 ## Sources

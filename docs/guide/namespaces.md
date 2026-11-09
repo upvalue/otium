@@ -1,93 +1,104 @@
 # ✨ Namespaces
 
-## Choose a namespace
+Namespaces let you split a program into modules while keeping their names
+separate. Each namespace owns its definitions and can give short aliases to
+other namespaces. Public definitions form its interface; private definitions
+hold helpers.
 
-Start a module with `ns`, then define its values and functions:
+Programs start in the `user` namespace. Use `ns` at the top of a module to
+select the namespace for its definitions. Core functions such as `get` and `+`
+are available automatically.
 
-```otium
-(ns app.counts)
+## Namespaces and files
 
-(def- (twice n) (* 2 n))
+As in Clojure, a namespace's name must match its file path. Replace dots with
+directory separators and add `.ot`: the namespace `shop.report` belongs in a
+file named `shop/report.ot`, relative to a load path.
 
-(def (double-count n)
-  (twice n))
-```
+A load path is a directory where Otium searches for modules. Add your source
+directory with `-L directory` when running Otium. For example, if your modules
+are under `src`, pass `-L src`. You can supply multiple `-L` directories; Otium
+searches them in order.
 
-`ns` creates the namespace if needed and makes it current for the following
-top-level forms. Definitions belong to that namespace. Core functions such as
-`*` are available automatically.
+To split a program across files:
 
-Use `def` for public definitions and `def-` for private helpers. Both support
-function and value definitions. Private names cannot be imported with `:refer`,
-though qualified access can still reach them; privacy is not an access barrier.
+1. Give each module a namespace and a matching path under your source directory.
+2. Start each module with its `ns` form.
+3. Use `require` in the modules that depend on it.
 
-## Put modules on the load path
+## Requiring a namespace
 
-Module names map to files by replacing dots with directory separators and adding
-`.ot`. For example, `otium.extra` is provided by `lib/otium/extra.ot`, with
-`lib` as the load-path root.
-
-Add a root with the command-line option `-L directory`. For that example, use
-`-L lib`. You can repeat `-L`; directories are searched in order.
-
-When writing your own module, make its `ns` name match the module name used by
-callers.
-
-## Load and use a dependency
-
-Use `require` with `:as` to give a dependency a short local name:
+[`require`](/reference/otium.core/#require) loads a module and makes its
+definitions accessible. `:as` gives the namespace a short name:
 
 ```otium
+(ns shop.report)
 (require otium.extra :as extra)
 
-(get (extra/frequencies [:a :a :b]) :a)
-;; => 2
+(extra/frequencies '(tea tea coffee))
+;; => {tea 2 coffee 1}
 ```
 
-The slash separates the namespace alias from the definition name. `require`
-loads the module if it has not already been loaded; ordinary repeated requires
-do not reevaluate it.
+The slash in `extra/frequencies` separates the namespace alias from the
+definition's name. Requiring a module again normally reuses the loaded module.
 
-Use `:refer` when you want selected public names available without a prefix:
+Use `:refer` to make selected public names available without a prefix:
 
 ```otium
 (require otium.extra :refer (frequencies))
 
-(get (frequencies [:a :a :b]) :a)
-;; => 2
+(frequencies '(tea tea coffee))
+;; => {tea 2 coffee 1}
 ```
 
-You can combine `:as` and `:refer` in the same require. Prefer an alias when it
-helps readers see where a name comes from.
+Aliases make it clear where a function comes from and help avoid name clashes.
+You can use both options in the same `require`.
 
-## Declare dependencies in `ns`
+## Declaring dependencies with `ns`
 
-At the top of a module, put dependencies in an `ns` form with a `:require`
-clause:
+A `:require` clause inside `ns` keeps the module name and its dependencies
+together. Each dependency goes in its own parenthesized specification:
 
 ```otium
-(ns app.counts
+(ns shop.report
   (:require (otium.extra :as extra)))
+```
 
-(def (count-a items)
-  (get (extra/frequencies items) :a 0))
+This replaces the separate `ns` and `require` forms above. As the module grows,
+add dependency specifications inside the same `:require` clause.
 
-(count-a [:a :a :b])
+## Keeping helpers private
+
+Use `def` for definitions other modules should use, and `def-` for internal
+helpers. Both support function and value definitions.
+
+Continuing in `shop.report`:
+
+```otium
+(def- (counts items)
+  (extra/frequencies items))
+
+(def (count-item items item)
+  (get (counts items) item 0))
+
+(count-item '(tea tea coffee) 'tea)
 ;; => 2
 ```
 
-Each dependency has its own parenthesized specification. Those specifications
-accept the same `:as` and `:refer` options as `require`.
+Another module can require `shop.report` and call its public `count-item`
+function. The function still resolves `counts` in its own namespace.
 
-## Keep references live
+Private definitions cannot be imported with `:refer`, but they remain accessible
+through qualified names. Privacy marks an internal interface rather than
+enforcing an access barrier. Callers should use the public definitions.
 
-Calls through namespace names, aliases and referred names see later
-redefinitions, even inside functions defined earlier. You do not need to import
-a name again after redefining it.
+## References stay live
 
-Saving a function value is different: that saved value keeps its old code.
+Qualified names and names imported with `:refer` follow redefinitions. Existing
+functions that call through those names see the updated definition.
 
-See [Live programming](live-programming.md) for reloading modules and preserving
-state across reloads.
+A saved function value, however, keeps its old code. See [Live
+programming](live-programming.md) for reloading modules and preserving state
+across reloads.
 
-<!-- generated from namespaces.md.spec sha256:6da9d81cdb6367b58333f7cfecc7c3dd90ff61d408327eb11dad045f535733d1 -->
+<!-- generated from namespaces.md.spec sha256:5a4e4967a2433bc956580725cdb12c35bcbba8b7c612757a1af87f0a4a1f2f90 -->

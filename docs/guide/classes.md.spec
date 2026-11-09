@@ -44,7 +44,9 @@ behaviour depends on what kind of thing they are, through generic functions.
 Then, in order:
 
 1. Records: declaring one, constructing it, reading and setting fields,
-   `:immutable`. Records have no methods or inheritance.
+   `:immutable`. Records have no methods or inheritance. A record's fields
+   can't change in a running program, so show `:immutable` on a second
+   record rather than by redeclaring `Position`.
 2. Classes: slots, `:init` defaults, required slots, `make`, reading and
    setting slots.
 3. Abstract types and `:is`. Classes are final: a class can't extend another
@@ -57,7 +59,7 @@ Then, in order:
 5. Calling the next method with `:next`, and `:around` methods.
 6. Changing a class while the program runs: existing instances keep working
    and pick up new slots, and `update-instance` converts old data. Link to
-   [Live programming](guide/live-programming.md).
+   [Live programming](live-programming.md).
 
 Leave out built-in classes beyond a sentence, `:state` slots, `:accessor`, and
 performance.

@@ -1,7 +1,11 @@
 ---
 title: "Macros"
 prompt: |
-  Write a guide to writing macros in Otium for a programmer who knows some Lisp and is learning Otium.
+  Write a guide to writing macros in Otium for a programmer who knows some
+  Lisp and is learning Otium. They should come away able to write a macro that is safe to use from any
+  namespace, and know when a function would do instead. Point out where
+  Otium's ``#` `` templates differ from Common Lisp's backquote and from
+  Scheme's `syntax-rules`.
 ---
 
 ## Sources

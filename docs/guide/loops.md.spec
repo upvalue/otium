@@ -68,9 +68,9 @@ Teach these in order, one short example each unless noted:
    this, otherwise do that, then go round". Say briefly that lint warns when
    `next` isn't in tail position.
 
-6. **Cost.** One or two sentences: on Chez, `for` costs the same as the named
-   `let` you would write by hand and allocates nothing beyond what the
-   accumulators build. No numbers, no internals.
+6. **Cost.** One sentence: `for` costs about the same as the named `let` you
+   would write by hand, so there's no reason to avoid it in fast code. No
+   numbers, no internals.
 
 `for` and `dotimes` are available everywhere without a `require`. Say this
 once, near the top.

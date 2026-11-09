@@ -1,7 +1,9 @@
 ---
 title: "Pattern matching"
 prompt: |
-  Write a guide to unpacking data with `match` in Otium for a programmer who knows some Lisp and is learning Otium.
+  Write a guide to unpacking data with `match` in Otium for a programmer who knows some
+  Lisp and is learning Otium. They should come away able to replace a chain of `get`s and `cond` tests with
+  one `match` that both checks the shape of a value and names its parts.
 ---
 
 ## Sources

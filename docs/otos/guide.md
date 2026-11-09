@@ -2,7 +2,7 @@
 
 otos is a small operating system for Otium. It is a unikernel: one program, the Otium C runtime, linked with a thin kernel layer into a single RISC-V image. It boots in QEMU straight into an Otium REPL on the serial console.
 
-This guide covers building, booting and changing otos. For the language itself, see the [language guide](../language-guide.md). For the rest of the docs, see the [docs index](../README.md).
+This guide covers building, booting and changing otos. For the rest of the docs, see the [docs index](../index.md).
 
 ## What works today
 
@@ -206,7 +206,7 @@ The I/O host in `otos/src/ot-kernel.c` presents the table as a read-only file sy
 
 ### Loading namespaces
 
-`ot_load_core` adds `/lib` to the runtime's module search path, so `(require otium.json)` loads `/lib/otium/json.ot`. The runtime also tries `.` and `lib`, which resolve to `/` and `/lib` here. Only namespaces under `lib/` can be required. See the [language guide](../language-guide.md) for how `require` and namespaces behave.
+`ot_load_core` adds `/lib` to the runtime's module search path, so `(require otium.json)` loads `/lib/otium/json.ot`. The runtime also tries `.` and `lib`, which resolve to `/` and `/lib` here. Only namespaces under `lib/` can be required.
 
 ### otos.gfx
 
@@ -290,5 +290,5 @@ otos builds the C runtime, which is experimental and can lag behind the Chez Sch
 - **No FFI.** `otium.ffi` is unavailable, so namespaces that depend on it (for example SDL, SQLite and Objective-C) cannot work.
 - **Plain error messages.** Errors print the runtime's message, not the rendered diagnostics with source lines that `otium.diagnostics` gives on the host.
 - **No development server.** The live tools used with `--dev` on the host are not available. Changes reach the kernel only by rebuilding.
-- **Bounded integers.** Like the C runtime on any host, otos has no bignums, and on rv32 integers stop at 30 bits. See the [language guide](../language-guide.md).
+- **Bounded integers.** Like the C runtime on any host, otos has no bignums, and on rv32 integers stop at 30 bits.
 - **Simple console editing.** Lines longer than one terminal row, and wide characters, are not drawn correctly.

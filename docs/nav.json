@@ -7,10 +7,9 @@
       "guide/control-flow.md", "guide/loops.md", "guide/strings.md", "guide/data-structures.md",
       "guide/matching.md", "guide/namespaces.md", "guide/macros.md", "guide/errors.md",
       "guide/params.md", "guide/live-programming.md", "guide/concurrency.md", "guide/io.md",
-      "guide/testing.md", "guide/lint.md", "guide/ffi.md"
+      "guide/testing.md", "guide/lint.md", "guide/ffi.md", "guide/classes.md"
     ]
   },
-  { "title": "Records and classes", "items": ["guide/classes.md"] },
   { "title": "User interface", "items": ["guide/ui.md"] },
   { "title": "Reference", "generated": "reference" }
 ]

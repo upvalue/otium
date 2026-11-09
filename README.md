@@ -12,7 +12,6 @@ unikernel operating system.
 
 Here's a couple of factoids about it:
 
-
 - Most directly descended from Scheme, but takes some ideas from Clojure,
   Janet, Common Lisp in terms of practicality.
 - Runtime is intended to be suitable for multi-MB memory embedded systems e.g.
@@ -32,22 +31,21 @@ Here's a couple of factoids about it:
 There are some examples in ./examples, including handwritten code, to show how
 it feels to use.
 
-The best place to learn more about the language is starting in
+The best place to learn more about the language is the website
+[otium.sh](https://otium.sh), which is also built out of the local markdown at
 [./docs/index.md](./docs/index.md).
 
-# Manse
+# Other programs in this repsoitory
+
+## Manse
 
 Manse is a terminal multiplexer based on libghostty that uses scrolling (like
 the wayland compositor Niri) as its terminal management paradigm.
 
-# OtOS 
+## OtOS 
 
 OtOS is a unikernel operating system for embedded devices in the multi-MB
 memory range. Its userspace is written in the Otium language.
-
-# Learn more
-
-Best place to learn more is in [the documentation index](docs/index.md).
 
 # The older operating system
 

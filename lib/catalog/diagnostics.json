@@ -327,6 +327,14 @@
     "example": "(require otium.thread :as thread)\n(let ((t (thread/spawn (fn () (thread/sleep 1)))))\n  (handler-bind ((error? (fn (c) (thread/join t))))\n    (error \"failed\")))",
     "fixed": "(require otium.thread :as thread)\n(let ((t (thread/spawn (fn () (thread/sleep 1)))))\n  (try (error \"failed\")\n    (catch e (thread/join t))))"
   },
+  "E0507": {
+    "title": "actor ended during a call",
+    "type": "actor-exited",
+    "message": "the actor ended before replying",
+    "explanation": "actor/call sends a request and waits for the reply. When the actor ends first, whether it returned, failed or was killed, no reply can come, so the call raises this condition at once with the actor under `:thread` and why it ended under `:reason`: `:normal`, the kill reason, or the condition it failed with.",
+    "example": "(require otium.actor :as actor)\n(require otium.thread :as thread)\n(actor/call (thread/spawn (fn () (car 1))) :ping)",
+    "fixed": "(require otium.actor :as actor)\n(require otium.thread :as thread)\n(try (actor/call (thread/spawn (fn () (car 1))) :ping)\n  (catch (actor/exited? e) (get e :reason)))"
+  },
   "L0001": {
     "name": "if-chain",
     "group": "style",

@@ -61,14 +61,37 @@
   (check "expired requests are not served" [] log))
 
 (check "call to a finished thread"
-       #t
+       :normal
        (let ((t (spawn (fn () nil))))
          (thread/join t)
          (try
-           (begin
-             (actor/call t 'x)
-             #f)
-           (catch _ #t))))
+           (actor/call t 'x nil)
+           (catch (actor/exited? e) (get e :reason)))))
+
+;; A call to an actor that ends mid-request raises at once, even with no
+;; timeout, and leaves no exit message behind.
+(def (call-reason handle)
+  (let ((t (spawn (fn () (receive (m (handle)))))))
+    (try
+      (actor/call t 'x nil)
+      (catch (actor/exited? e) (list (get e :code) (eq? (get e :thread) t) (get e :reason))))))
+
+(check "actor that returns mid-call" '("E0507" #t :normal) (call-reason (fn () 'done)))
+(check "actor killed mid-call" '("E0507" #t :bye) (call-reason (fn () (thread/kill! (self) :bye))))
+(check "actor that fails mid-call"
+       "`car` expected a pair, got 1"
+       (condition-message (caddr (call-reason (fn () (car 1))))))
+(check "no exit message is left behind" #t (mailbox-empty?))
+(check "a successful call leaves no exit message"
+       #t
+       (begin
+         (actor/call counter {:op :get})
+         (settle)
+         (mailbox-empty?)))
+(let ((t (spawn (fn () (receive (:call _ 'answer)) 'finished))))
+  (check "an actor that replies and then ends" 'answer (actor/call t 'x nil))
+  (thread/join t)
+  (check "its exit message is dropped" #t (mailbox-empty?)))
 
 ;; --- receive details
 

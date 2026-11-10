@@ -250,6 +250,12 @@
             :explanation "Some Otium code runs as a call from the runtime's C code: handler-bind handlers, interrupt thunks, macro expanders, slot initializers, callbacks from foreign code. C frames can't be set aside while another thread runs, so such code runs to the end without other threads running, and it can't wait for one: no join, lock, receive or condvar wait. Sleeping is allowed; the whole process waits. Do the waiting in ordinary code, for example after the handler has returned or in a restart."
             :example "(require otium.thread :as thread)\n(let ((t (thread/spawn (fn () (thread/sleep 1)))))\n  (handler-bind ((error? (fn (c) (thread/join t))))\n    (error \"failed\")))"
             :fixed "(require otium.thread :as thread)\n(let ((t (thread/spawn (fn () (thread/sleep 1)))))\n  (try (error \"failed\")\n    (catch e (thread/join t))))"}
+   "E0507" {:title "actor ended during a call"
+            :type :actor-exited
+            :message "the actor ended before replying"
+            :explanation "actor/call sends a request and waits for the reply. When the actor ends first, whether it returned, failed or was killed, no reply can come, so the call raises this condition at once with the actor under `:thread` and why it ended under `:reason`: `:normal`, the kill reason, or the condition it failed with."
+            :example "(require otium.actor :as actor)\n(require otium.thread :as thread)\n(actor/call (thread/spawn (fn () (car 1))) :ping)"
+            :fixed "(require otium.actor :as actor)\n(require otium.thread :as thread)\n(try (actor/call (thread/spawn (fn () (car 1))) :ping)\n  (catch (actor/exited? e) (get e :reason)))"}
    "L0001" {:title "if in the else branch of an if"
             :name "if-chain"
             :group :style

@@ -27,17 +27,34 @@
   (put! %state :refs (+ (%state :refs) 1))
   (%state :refs))
 
+(def (exited? c)
+  "Whether c is the condition actor/call raises when the actor ends before replying."
+  (and (table? c) (eq? (get c :type) 'actor-exited)))
+
 (def (call t message &optional (timeout (call-timeout)))
-  "(actor/call t message [timeout])\nSend message as a request to t, a thread or registered name, and wait for the reply from its receive's (:call pattern body ...) clause. An error in the body is raised here. With no reply within timeout seconds, raises a timeout condition with a use-value restart; nil waits for good."
+  "(actor/call t message [timeout])\nSend message as a request to t, a thread or registered name, and wait for the reply from its receive's (:call pattern body ...) clause. An error in the body is raised here. If t ends before replying, raises an actor-exited condition with why it ended under :reason. With no reply within timeout seconds, raises a timeout condition with a use-value restart; nil waits for good."
   (let ((target (thread/%resolve t))
         (ref (next-ref)))
     (unless target (error "actor/call: no live thread" t))
-    (send target {:call ref :from (self) :expiry (%thread-deadline timeout) :msg message})
-    (receive ({:reply (== ref) :from (== target) :failed? #t :error (opt e nil)} (error e))
-             ({:reply (== ref) :from (== target) :value (opt v nil)} v)
-             (:after timeout
-                     (restart-case (error (thread/timeout-condition "actor/call"))
-                       (use-value "Return a value instead" (v) v))))))
+    ;; Watch the target for the length of the call, so its end stops the wait.
+    (let ((watch (monitor target)))
+      (defer
+        (begin
+          (send target {:call ref :from (self) :expiry (%thread-deadline timeout) :msg message})
+          (receive ({:reply (== ref) :from (== target) :failed? #t :error (opt e nil)} (error e))
+                   ({:reply (== ref) :from (== target) :value (opt v nil)} v)
+                   ({:exit (== target) :ref (== watch) :reason (opt reason nil)}
+                    (error {:type 'actor-exited
+                            :message "the actor ended before replying"
+                            :code "E0507"
+                            :thread target
+                            :reason reason}))
+                   (:after timeout
+                           (restart-case (error (thread/timeout-condition "actor/call"))
+                             (use-value "Return a value instead" (v) v)))))
+        (demonitor watch)
+        ;; An exit message sent before the demonitor is no use to anyone.
+        (receive ({:exit (== target) :ref (== watch)} nil) (:after 0 nil))))))
 
 (def (monitor t)
   "(actor/monitor t)\nWhen t ends, send the calling thread {:exit t :ref ref :reason reason}, at once if it has ended. The reason is :normal, the kill reason or the condition t failed with. Returns ref."

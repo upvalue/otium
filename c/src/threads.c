@@ -78,6 +78,9 @@ struct oti_thread {
   /* Links on the run queue or the wait queue it is parked on. */
   oti_thread *next, *prev;
   oti_waitq* queue;
+  /* The wait queue object queue is part of, kept alive while this thread is
+   * parked on it, or nil for a queue in a thread record. */
+  ot_value queue_object;
   uint64_t deadline;
   /* woken: the parked builtin call is being dispatched again. */
   bool timed, daemon, kill_pending, mail_waiting, woken;
@@ -101,9 +104,6 @@ struct oti_threads {
   oti_waitq run;
   oti_thread** timers;
   size_t timer_count, timer_capacity;
-  /* Wait queues made for Otium code, freed with the runtime. */
-  oti_waitq** queues;
-  size_t queue_count, queue_capacity;
   /* Descriptor waits from ports and %wait-fds, rebuilt at each switch.
    * Entries sharing a port queue are coalesced before polling. */
   size_t fd_waiters;
@@ -136,9 +136,11 @@ typedef struct {
 
 OTI_LAYOUT(oti_thread_obj, 3, thread);
 
+/* The queue is part of the object, which is pinned, so a parked thread's
+ * queue pointer stays good; the thread's queue_object keeps it alive. */
 typedef struct {
   oti_object_header header;
-  oti_waitq* queue;
+  oti_waitq queue;
 } oti_waitq_obj;
 
 OTI_LAYOUT(oti_waitq_obj, 0, queue);
@@ -247,6 +249,7 @@ static void wake(ot_state* rt, oti_thread* t, ot_value value) {
   if (t->queue) {
     unlink_from(t->queue, t);
     t->queue = NULL;
+    t->queue_object = OT_NIL;
   }
   remove_timer(ts, t);
   if (t->fd_waiting) {
@@ -284,6 +287,7 @@ static void visit_thread(ot_state* rt, oti_thread* t, oti_root_visitor visit, vo
   visit(context, &t->args);
   visit(context, &t->wake_value);
   visit(context, &t->kill_reason);
+  visit(context, &t->queue_object);
   visit(context, &t->watchdog);
   for (size_t i = 0; i < t->interrupt_count; i++) visit(context, &t->interrupts[i]);
   visit(context, &t->watchers);
@@ -387,7 +391,7 @@ static bool setup(ot_state* rt) {
   rt->threads = ts;
   primordial->object = primordial->entry = primordial->args = OT_NIL;
   primordial->wake_value = primordial->kill_reason = OT_NIL;
-  primordial->watchdog = OT_NIL;
+  primordial->watchdog = primordial->queue_object = OT_NIL;
   primordial->watchers = OT_EMPTY;
   primordial->state = T_RUNNING;
   ts->primordial = ts->current = primordial;
@@ -433,8 +437,6 @@ void oti_threads_destroy(ot_state* rt) {
     }
     free_thread(t);
   }
-  for (size_t i = 0; i < ts->queue_count; i++) free(ts->queues[i]);
-  free(ts->queues);
   free(ts->all);
   free(ts->timers);
   free(ts->polled);
@@ -811,9 +813,10 @@ _Noreturn void oti_thread_wait(ot_state* rt) {
 }
 
 /* Park the running thread on q, when given, and until deadline, when not
- * 0. The waiting builtin returns what this returns: OTI_PARKED, or 0 when
- * it can't wait here. */
-static ot_value wait_on(ot_state* rt, oti_waitq* q, uint64_t deadline) {
+ * 0. owner is the wait queue object q is part of, or nil. The waiting
+ * builtin returns what this returns: OTI_PARKED, or 0 when it can't wait
+ * here. */
+static ot_value wait_on(ot_state* rt, oti_waitq* q, ot_value owner, uint64_t deadline) {
   oti_thread* me = rt->threads->current;
   if (!can_switch(rt)) {
     if (loading_module(rt))
@@ -825,6 +828,7 @@ static ot_value wait_on(ot_state* rt, oti_waitq* q, uint64_t deadline) {
   me->wake_value = OT_NIL;
   if (q) {
     me->queue = q;
+    me->queue_object = owner;
     enqueue(q, me);
   }
   if (deadline) {
@@ -832,6 +836,7 @@ static ot_value wait_on(ot_state* rt, oti_waitq* q, uint64_t deadline) {
     if (!add_timer(rt, me)) {
       if (q) unlink_from(q, me);
       me->queue = NULL;
+      me->queue_object = OT_NIL;
       me->state = T_RUNNING;
       return 0;
     }
@@ -1018,7 +1023,8 @@ static ot_value spawn_builtin(ot_state* rt, size_t first, size_t count) {
   if (!start_ticker(rt)) return 0;
   oti_thread* t = calloc(1, sizeof(*t));
   if (!t) return oti_fail(rt, "out of host memory");
-  t->object = t->entry = t->args = t->wake_value = t->kill_reason = t->watchdog = OT_NIL;
+  t->object = t->entry = t->args = t->wake_value = t->kill_reason = t->watchdog = t->queue_object =
+      OT_NIL;
   t->watchers = OT_EMPTY;
   t->resume = R_BEGIN;
   if (!oti_native_stack_new(rt, &t->exec.native)) {
@@ -1098,7 +1104,7 @@ static ot_value sleep_builtin(ot_state* rt, size_t first, size_t count) {
     return OT_NIL;
   }
   if (now(rt->threads) >= deadline) return OT_NIL;
-  return wait_on(rt, NULL, deadline);
+  return wait_on(rt, NULL, OT_NIL, deadline);
 }
 
 /* (%wait-fds fds deadline): wait until one of fds is ready or the deadline
@@ -1150,7 +1156,7 @@ static ot_value wait_fds_builtin(ot_state* rt, size_t first, size_t count) {
     if (ready < 0 && errno != EINTR) return oti_fail(rt, "fd poll failed");
     if (!blocking) {
       if (deadline && now(ts) >= deadline) return rt->threads->timeout;
-      ot_value result = wait_on(rt, NULL, deadline);
+      ot_value result = wait_on(rt, NULL, OT_NIL, deadline);
       if (result == OTI_PARKED) {
         me->fd_waiting = true;
         ts->fd_waiters++;
@@ -1188,7 +1194,7 @@ static ot_value join_builtin(ot_state* rt, size_t first, size_t count) {
   if (!t || !rt->threads) return OT_TRUE;
   if (t == rt->threads->current) return oti_fail(rt, "a thread cannot join itself");
   if (deadline && now(rt->threads) >= deadline) return rt->threads->timeout;
-  return wait_on(rt, &t->joiners, deadline);
+  return wait_on(rt, &t->joiners, OT_NIL, deadline);
 }
 
 static ot_value status_builtin(ot_state* rt, size_t first, size_t count) {
@@ -1345,22 +1351,15 @@ static ot_value make_waitq_builtin(ot_state* rt, size_t first, size_t count) {
   (void)first;
   if (!oti_check_arity(rt, "%make-waitq", count, 0, 0)) return 0;
   if (!setup(rt)) return 0;
-  oti_threads* ts = rt->threads;
-  oti_waitq* q = calloc(1, sizeof(*q));
-  if (!q || !oti_grow(rt, (void**)&ts->queues, &ts->queue_capacity, ts->queue_count + 1,
-                      sizeof(oti_waitq*))) {
-    free(q);
-    return oti_fail(rt, "out of host memory");
-  }
-  ts->queues[ts->queue_count++] = q;
   ot_value v = oti_alloc(rt, K_WAITQ, 0, OTI_BYTES(oti_waitq_obj, 0));
   if (!v) return 0;
-  OTI_CAST(oti_waitq_obj, K_WAITQ, v)->queue = q;
+  ((oti_object_header*)v)->gc |= OTI_GC_PINNED;
+  OTI_CAST(oti_waitq_obj, K_WAITQ, v)->queue = (oti_waitq){NULL, NULL};
   return v;
 }
 
 static oti_waitq* waitq_arg(ot_state* rt, ot_value v) {
-  if (oti_kind(v, K_WAITQ)) return OTI_CAST(oti_waitq_obj, K_WAITQ, v)->queue;
+  if (oti_kind(v, K_WAITQ)) return &OTI_CAST(oti_waitq_obj, K_WAITQ, v)->queue;
   oti_type_error(rt, "wait queue", "a wait queue", v);
   return NULL;
 }
@@ -1394,7 +1393,9 @@ ot_value oti_thread_io_wait(ot_state* rt, ot_value queue, int fd, bool writing) 
   if (!oti_grow(rt, (void**)&me->fds, &me->fd_capacity, 1, sizeof(struct pollfd))) return 0;
   me->fds[0] = (struct pollfd){.fd = fd, .events = writing ? POLLOUT : POLLIN};
   me->fd_count = fd >= 0 ? 1 : 0;
-  ot_value result = wait_on(rt, waitq_arg(rt, queue), 0);
+  oti_waitq* q = waitq_arg(rt, queue);
+  if (!q) return 0;
+  ot_value result = wait_on(rt, q, queue, 0);
   if (result == OTI_PARKED && fd >= 0) {
     me->fd_waiting = true;
     rt->threads->fd_waiters++;
@@ -1417,7 +1418,7 @@ static ot_value park_builtin(ot_state* rt, size_t first, size_t count) {
     rt->atomic = me->saved_atomic;
     return woke;
   }
-  ot_value result = wait_on(rt, q, deadline);
+  ot_value result = wait_on(rt, q, rt->stack[first], deadline);
   if (result == OTI_PARKED) {
     me->saved_atomic = rt->atomic;
     rt->atomic = 0;
@@ -1481,7 +1482,7 @@ static ot_value mailbox_next_builtin(ot_state* rt, size_t first, size_t count) {
   retried(rt, NULL);
   if (me->cursor < me->mailbox_count) return me->mailbox[me->cursor++];
   if (deadline && now(ts) >= deadline) return rt->threads->timeout;
-  ot_value result = wait_on(rt, NULL, deadline);
+  ot_value result = wait_on(rt, NULL, OT_NIL, deadline);
   if (result == OTI_PARKED) me->mail_waiting = true;
   return result;
 }

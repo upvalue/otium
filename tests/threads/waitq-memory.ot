@@ -1,0 +1,30 @@
+;; Wait queues live on the heap: dropped ones are freed, and one that only a
+;; parked thread can reach stays alive for it.
+(require otium.test :refer (check report))
+(require otium.memory :as memory)
+(require otium.thread :as thread :refer (spawn self sleep))
+
+(def (collect)
+  (let ((start (memory/heap-stat :collections)))
+    (let loop ()
+      (when (= (memory/heap-stat :collections) start)
+        (range 1000)
+        (loop)))))
+
+;; Only the parked thread holds the queue.
+(let ((t (spawn (fn () (%park (%make-waitq) nil)))))
+  (sleep 0.01)
+  (collect)
+  (collect)
+  (check "parked thread still waiting after collections" :waiting (thread/status t))
+  (thread/interrupt! t (fn () (thread/kill! (self) :stopped)))
+  (check "and still wakes" :stopped (thread/join t)))
+
+;; Each queue used to leak a calloc and a registry slot: about 24 MB here.
+(let ((before (memory/footprint)))
+  (when before
+    (dotimes (_ 1000000) (%make-waitq))
+    (let ((grown (- ((memory/footprint) :current) (before :current))))
+      (check "dropped wait queues are freed" #t (< grown 8000000)))))
+
+(report "wait queues")

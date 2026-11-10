@@ -55,9 +55,12 @@ typedef struct oti_interruption {
   bool woken;
 } oti_interruption;
 
-/* A wait queue: threads parked until something wakes them. */
+/* A wait queue: threads parked until something wakes them. poll_round and
+ * poll_slot mark where poll_fds put its fd in this round. */
 typedef struct {
   oti_thread *head, *tail;
+  uint64_t poll_round;
+  size_t poll_slot;
 } oti_waitq;
 
 struct oti_thread {
@@ -78,6 +81,10 @@ struct oti_thread {
   /* Links on the run queue or the wait queue it is parked on. */
   oti_thread *next, *prev;
   oti_waitq* queue;
+  /* Where it is in the timer heap while timed, and the order it was added
+   * in, which breaks ties between equal deadlines. */
+  size_t timer_index;
+  uint64_t timer_order;
   /* The wait queue object queue is part of, kept alive while this thread is
    * parked on it, or nil for a queue in a thread record. */
   ot_value queue_object;
@@ -105,14 +112,17 @@ struct oti_threads {
   /* NULL while a finished thread hands over to the next. */
   oti_thread *current, *primordial;
   oti_waitq run;
+  /* A binary heap of timed threads, earliest deadline first. */
   oti_thread** timers;
   size_t timer_count, timer_capacity;
+  uint64_t timer_order;
   /* Descriptor waits from ports and %wait-fds, rebuilt at each switch.
    * Entries sharing a port queue are coalesced before polling. */
   size_t fd_waiters;
   struct pollfd* polled;
   oti_thread** polled_threads;
   size_t polled_capacity;
+  uint64_t poll_round;
   int poll_error;
   /* When fds were last polled, in real time: with runnable threads they are
    * polled at most once a millisecond, not at every switch. */
@@ -219,29 +229,49 @@ static size_t queue_length(const oti_waitq* q) {
   return n;
 }
 
+static bool timer_before(const oti_thread* a, const oti_thread* b) {
+  return a->deadline < b->deadline ||
+         (a->deadline == b->deadline && a->timer_order < b->timer_order);
+}
+
+static void timer_place(oti_threads* ts, size_t i, oti_thread* t) {
+  ts->timers[i] = t;
+  t->timer_index = i;
+}
+
+/* Move t, at i, up or down the heap to where it belongs. */
+static void timer_settle(oti_threads* ts, size_t i, oti_thread* t) {
+  while (i && timer_before(t, ts->timers[(i - 1) / 2])) {
+    timer_place(ts, i, ts->timers[(i - 1) / 2]);
+    i = (i - 1) / 2;
+  }
+  for (;;) {
+    size_t child = 2 * i + 1;
+    if (child >= ts->timer_count) break;
+    if (child + 1 < ts->timer_count && timer_before(ts->timers[child + 1], ts->timers[child]))
+      child++;
+    if (!timer_before(ts->timers[child], t)) break;
+    timer_place(ts, i, ts->timers[child]);
+    i = child;
+  }
+  timer_place(ts, i, t);
+}
+
 static bool add_timer(ot_state* rt, oti_thread* t) {
   oti_threads* ts = rt->threads;
   if (!oti_grow(rt, (void**)&ts->timers, &ts->timer_capacity, ts->timer_count + 1,
                 sizeof(oti_thread*)))
     return false;
-  size_t i = ts->timer_count++;
-  while (i && ts->timers[i - 1]->deadline > t->deadline) {
-    ts->timers[i] = ts->timers[i - 1];
-    i--;
-  }
-  ts->timers[i] = t;
+  t->timer_order = ts->timer_order++;
+  timer_settle(ts, ts->timer_count++, t);
   t->timed = true;
   return true;
 }
 
 static void remove_timer(oti_threads* ts, oti_thread* t) {
   if (!t->timed) return;
-  size_t i = 0;
-  while (i < ts->timer_count && ts->timers[i] != t) i++;
-  if (i < ts->timer_count) {
-    memmove(ts->timers + i, ts->timers + i + 1, (ts->timer_count - i - 1) * sizeof(oti_thread*));
-    ts->timer_count--;
-  }
+  oti_thread* last = ts->timers[--ts->timer_count];
+  if (last != t) timer_settle(ts, t->timer_index, last);
   t->timed = false;
 }
 
@@ -595,17 +625,20 @@ static void poll_fds(ot_state* rt, int timeout_ms) {
   }
   n = 1;
   ts->polled[0] = (struct pollfd){.fd = rt->wake_pipe[0], .events = POLLIN};
+  /* Threads parked on one port's queue share its fd's entry. */
+  uint64_t round = ++ts->poll_round;
   for (size_t i = 0; i < ts->count; i++) {
     oti_thread* t = ts->all[i];
     if (!t->fd_waiting) continue;
     for (size_t j = 0; j < t->fd_count; j++) {
-      size_t k = 1;
-      if (t->queue) {
-        for (; k < n; k++)
-          if (ts->polled_threads[k]->queue == t->queue && ts->polled[k].fd == t->fds[j].fd) break;
-      } else k = n;
-      if (k < n) ts->polled[k].events |= t->fds[j].events;
+      oti_waitq* q = t->queue;
+      size_t k = q && q->poll_round == round ? q->poll_slot : n;
+      if (k < n && ts->polled[k].fd == t->fds[j].fd) ts->polled[k].events |= t->fds[j].events;
       else {
+        if (q && q->poll_round != round) {
+          q->poll_round = round;
+          q->poll_slot = n;
+        }
         ts->polled[n] = t->fds[j];
         ts->polled_threads[n++] = t;
       }
@@ -1419,7 +1452,7 @@ static ot_value make_waitq_builtin(ot_state* rt, size_t first, size_t count) {
   ot_value v = oti_alloc(rt, K_WAITQ, 0, OTI_BYTES(oti_waitq_obj, 0));
   if (!v) return 0;
   ((oti_object_header*)v)->gc |= OTI_GC_PINNED;
-  OTI_CAST(oti_waitq_obj, K_WAITQ, v)->queue = (oti_waitq){NULL, NULL};
+  OTI_CAST(oti_waitq_obj, K_WAITQ, v)->queue = (oti_waitq){0};
   return v;
 }
 

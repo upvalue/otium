@@ -201,6 +201,24 @@
   (check "sleepers wake in deadline order" [0.1 0.2 0.3] order)
   (check "virtual time passed" #t (>= (- (%scheduler-clock) start) 0.3)))
 
+;; Many sleepers started in scrambled order, a third killed before they wake,
+;; so timers leave from the middle of the heap too.
+(let ((order [])
+      (sleepers []))
+  (thread/join-all)
+  (dotimes (i 200)
+    (let ((d (* 0.002 (+ 1 (modulo (* i 37) 200)))))
+      (push! sleepers
+             (spawn (fn ()
+                      (sleep d)
+                      (push! order d))))))
+  (settle)
+  (for ((t :in sleepers) (i :range 200))
+    (when (= 0 (modulo i 3)) (thread/kill! t)))
+  (thread/join-all)
+  (check "most sleepers woke" 133 (length order))
+  (check "and in deadline order" #t (equal? order (sort order))))
+
 (check "sleep returns nil" nil (sleep 0))
 
 ;; --- Interleaving and yield

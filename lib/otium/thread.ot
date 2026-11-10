@@ -155,8 +155,12 @@
 
 (def (condvar-wait c m &optional (timeout nil))
   "(thread/condvar-wait c m [timeout])\nRelease m, wait for a signal on c, and take m again. #f if timeout passes first. Spurious wakeups happen: test again in a loop."
-  (let ((woke (atomically (unlock! m) (%park (c :waiters) (%thread-deadline timeout)))))
-    (lock! m)
+  (let ((woke nil)
+        (released #f))
+    ;; Take m again however the wait ends, so a with-lock around this can release it.
+    (defer
+      (set! woke (atomically (unlock! m) (set! released #t) (%park (c :waiters) (%thread-deadline timeout))))
+      (when released (lock! m)))
     (not (eq? woke :timeout))))
 
 (def (condvar-signal! c)

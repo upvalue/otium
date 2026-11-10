@@ -338,6 +338,27 @@
     (for-each thread/join ts)
     (check "broadcast wakes everyone" 3 woken)))
 
+;; Unwinding out of condvar-wait takes the lock again, so with-lock can
+;; release it.
+(let ((m (thread/mutex))
+      (c (thread/condvar)))
+  (let ((t (spawn (fn () (thread/with-lock m (thread/condvar-wait c m))))))
+    (settle)
+    (thread/kill! t :stop)
+    (check "killed in condvar-wait" :stop (thread/join t))
+    (check "ends killed" :killed (thread/status t)))
+  (let ((t (spawn (fn () (thread/with-lock m (thread/condvar-wait c m))))))
+    (settle)
+    (thread/interrupt! t (fn () (error "go")))
+    (check "interrupt error in condvar-wait" "go" (condition-message (get (try (thread/join t) (catch e e)) :reason))))
+  (check "the lock is free afterwards" #t (thread/lock! m 0))
+  (thread/unlock! m)
+  (check "condvar-wait without the lock leaves it free"
+         #t
+         (begin
+           (try (thread/condvar-wait c m) (catch _ nil))
+           (nil? (m :owner)))))
+
 ;; --- Mailboxes and receive
 
 (let ((echo (spawn (fn () (receive ({:from from :msg msg} (send from (list 'echo msg))))))))

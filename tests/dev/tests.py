@@ -414,6 +414,7 @@ def client(t):
     t.check(path.parent.stat().st_mode & 0o777 == 0o700, 'socket directory is not private')
     t.check_in(str(directory.resolve()), run('ls').stdout)
     t.check_in('pid: ', t.expect(run('status')).stdout)
+    t.check_in(':main', t.expect(run('threads')).stdout)
     t.expect(run('eval', '(println "out") (+ 1 2)'), stdout='out\n3\n')
     t.expect(run('eval', '-', stdin='(* 6 7)'), stdout='42\n')
     (directory / 'scratch.ot').write_text('(+ 1\n  (error "broken"))\n')

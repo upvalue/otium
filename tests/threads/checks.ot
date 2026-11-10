@@ -135,6 +135,29 @@
   (check "other threads run after the section raised" :ran (thread/join (spawn (fn () :ran)) 1))
   (thread/kill! t))
 
+;; --- What a thread waits on
+
+(let ((sleeper (spawn (fn () (sleep 5))))
+      (joiner (spawn (fn () (thread/join sleeper))))
+      (receiver (spawn (fn () (receive (:never 'x)))))
+      (m (thread/mutex))
+      (held (thread/lock! m))
+      (locker (spawn (fn () (thread/lock! m)))))
+  (settle)
+  (settle)
+  (check "running thread" nil (thread/waiting-on (self)))
+  (check "sleep" :sleep ((thread/waiting-on sleeper) :on))
+  (check "sleep deadline" #t (> ((thread/waiting-on sleeper) :until) (%scheduler-clock)))
+  (check "join" :join ((thread/waiting-on joiner) :on))
+  (check "join target" #t (eq? sleeper ((thread/waiting-on joiner) :target)))
+  (check "join without a deadline" nil ((thread/waiting-on joiner) :until))
+  (check "receive" :receive ((thread/waiting-on receiver) :on))
+  (check "lock" :wait-queue ((thread/waiting-on locker) :on))
+  (for ((t :in (list sleeper joiner receiver locker))) (thread/kill! t))
+  (thread/unlock! m)
+  (thread/join locker)
+  (check "finished thread" nil (thread/waiting-on locker)))
+
 ;; --- Interrupt
 
 (let ((log [])

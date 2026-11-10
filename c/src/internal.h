@@ -416,6 +416,7 @@ enum {
   B_WAIT_FDS,
   B_THREAD_WATCHDOG,
   B_THREAD_IDLE_MS,
+  B_THREAD_WAITING,
   /* Compiler-only helpers have no name, so they aren't globals. */
   B_QQ_APPEND,
   B_EVAL_IN_NAMESPACE,

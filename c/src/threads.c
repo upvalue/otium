@@ -1643,6 +1643,54 @@ static ot_value idle_ms_builtin(ot_state* rt, size_t first, size_t count) {
   return ms < 0 ? OT_NIL : ot_int(ms);
 }
 
+/* (%thread-waiting t): what t is parked on, as [kind target until], or nil
+ * when it isn't waiting. kind is :join, with the thread joined; :receive;
+ * :wait-queue, with the queue; :io, with an array of the fds; or :sleep.
+ * until is the deadline on the scheduler clock in seconds, or nil. */
+static ot_value waiting_builtin(ot_state* rt, size_t first, size_t count) {
+  if (!oti_check_arity(rt, "%thread-waiting", count, 1, 1)) return 0;
+  ot_value v = thread_value(rt, rt->stack[first], "thread/waiting-on");
+  if (!v) return 0;
+  oti_thread* t = as_thread(v)->thread;
+  if (!t || !rt->threads || t->state != T_WAITING) return OT_NIL;
+  size_t base = rt->sp, fds = t->fd_waiting ? t->fd_count : 0;
+  if (!oti_stack(rt, base + 3 + fds)) return 0;
+  const char* kind = ":sleep";
+  rt->stack[base] = rt->stack[base + 1] = rt->stack[base + 2] = OT_NIL;
+  rt->sp = base + 3;
+  ot_value result = 0;
+  if (t->fd_waiting) {
+    kind = ":io";
+    for (size_t i = 0; i < fds; i++) rt->stack[base + 3 + i] = ot_int(t->fds[i].fd);
+    rt->sp = base + 3 + fds;
+    ot_value list = oti_array_from(rt, base + 3, fds);
+    rt->sp = base + 3;
+    if (!list) goto done;
+    rt->stack[base + 1] = list;
+  } else if (t->mail_waiting) {
+    kind = ":receive";
+  } else if (t->queue && t->queue_object == OT_NIL) {
+    /* Only a thread's joiners queue has no object. */
+    kind = ":join";
+    rt->stack[base + 1] = ((oti_thread*)((char*)t->queue - offsetof(oti_thread, joiners)))->object;
+  } else if (t->queue) {
+    kind = ":wait-queue";
+    rt->stack[base + 1] = t->queue_object;
+  }
+  if (t->timed) {
+    ot_value until = oti_float(rt, (double)t->deadline / 1e9);
+    if (!until) goto done;
+    rt->stack[base + 2] = until;
+  }
+  ot_value name = keyword(rt, kind);
+  if (!name) goto done;
+  rt->stack[base] = name;
+  result = oti_array_from(rt, base, 3);
+done:
+  rt->sp = base;
+  return result;
+}
+
 #define THREAD_BUILTIN(id, name, fn) {id, name, fn},
 #else
 #define THREAD_BUILTIN(id, name, fn) {id, name, no_threads},
@@ -1760,5 +1808,5 @@ const oti_builtin_def oti_thread_builtins[] = {
                                                                wait_fds_builtin){B_THREAD_IDLE_MS,
                                                                                  "%thread-idle-ms",
                                                                                  idle_ms_builtin},
-    {0, NULL, NULL},
+    THREAD_BUILTIN(B_THREAD_WAITING, "%thread-waiting", waiting_builtin){0, NULL, NULL},
 };

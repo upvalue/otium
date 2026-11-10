@@ -56,6 +56,22 @@ def show_event(event):
     return text
 
 
+def show_thread(thread):
+    """One line for a thread from the threads listing."""
+    name = thread.get('name')
+    text = '%s %s %s' % (thread['thread'], show(name) if name is not None else '-', show(thread['status']))
+    if 'on' in thread:
+        text += ' on ' + show(thread['on'])
+        if 'target' in thread:
+            target = thread['target']
+            text += ' ' + (' '.join(map(show, target)) if isinstance(target, list) else show(target))
+        if 'in' in thread:
+            text += ' for %.3f s' % thread['in']
+    if thread.get('self'):
+        text += ' (server)'
+    return text
+
+
 def pick(args):
     if args.socket:
         return Path(args.socket)
@@ -160,6 +176,15 @@ def command(args, connection):
                 print('%s: %s' % (key, value if isinstance(value, str) else show(value)))
         return OK
 
+    if c == 'threads':
+        response = connection.request('threads')
+        if args.raw:
+            print(show(response))
+        else:
+            for thread in response['value']:
+                print(show_thread(thread))
+        return OK
+
     if c == 'eval':
         code, source = code_input(args)
         fields = {'code': code, 'ns': args.ns, 'max_chars': args.max_chars}
@@ -238,6 +263,7 @@ def parser():
     sub = top.add_subparsers(dest='command', required=True)
     sub.add_parser('ls', parents=[common], help='List running servers.')
     sub.add_parser('status', parents=[common], help='Show one server\'s status.')
+    sub.add_parser('threads', parents=[common], help='List threads and what each waits on.')
     p = sub.add_parser('eval', parents=[common], help='Evaluate code.')
     p.add_argument('code', nargs='?', help='Code to evaluate, or - for stdin.')
     p.add_argument('--file', help='Evaluate the forms in this file.')

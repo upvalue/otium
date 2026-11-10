@@ -92,6 +92,10 @@
   "Live threads."
   (%threads #t))
 
+(def (waiting-on t)
+  "(thread/waiting-on t)\nWhat t is parked on, or nil when it isn't waiting: a table with :on, one of :join, :receive, :wait-queue, :io or :sleep; :target, the thread it joins, the wait queue or an array of fds; and :until, its deadline on the scheduler clock in seconds. Keys with no value are left out."
+  (let ((w (%thread-waiting t))) (when w {:on (w 0) :target (w 1) :until (w 2)})))
+
 (def (daemon! t)
   "(thread/daemon! t)\nMark t so join-all doesn't wait for it."
   (%thread-daemon t))

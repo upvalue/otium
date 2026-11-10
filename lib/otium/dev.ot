@@ -108,6 +108,26 @@
               :running)
    :event event-count})
 
+(def- (thread-listing)
+  ;; Live threads numbered from 0, with what each waits on and for how many
+  ;; more seconds. A joined thread is given by its number and fds as they
+  ;; are; wait queues are left out.
+  (let ((all (thread/all)))
+    (for ((t :in all)
+          (i :range (length all))
+          (out :collect (let ((entry {:thread i :name (thread/name t) :status (thread/status t)})
+                              (w (thread/waiting-on t)))
+                          (when (eq? t (thread/self)) (put! entry :self #t))
+                          (when w
+                            (put! entry :on (w :on))
+                            (when (w :until) (put! entry :in (- (w :until) (%scheduler-clock))))
+                            (cond
+                              ((thread/thread? (w :target))
+                               (put! entry :target (find-index (fn (x) (eq? x (w :target))) all)))
+                              ((array? (w :target)) (put! entry :target (w :target)))))
+                          entry)))
+      => out)))
+
 (def- (condition-data c)
   (if (table? c)
       {:type (get c :type 'error)
@@ -215,6 +235,7 @@
              (set-started! old-start)
              (%deadline deadline))))
         ((eq? op :status) (reply! client {:id id :ok #t :value (status) :output ""}))
+        ((eq? op :threads) (reply! client {:id id :ok #t :value (thread-listing) :output ""}))
         ((eq? op :events)
          (let ((since (get request :since 0)))
            (reply! client {:id id :ok #t :value (reverse (filter (fn (e) (> (get e :seq) since)) events)) :output ""})))

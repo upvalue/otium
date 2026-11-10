@@ -66,8 +66,11 @@ struct oti_thread {
   oti_interruption* interruptions;
   oti_resume resume;
   ot_value object, entry, args, wake_value, kill_reason;
-  /* A thunk thread/interrupt! asked this thread to run, or nil. */
-  ot_value interrupt, watchdog;
+  ot_value watchdog;
+  /* Thunks thread/interrupt! and watchdogs queued for this thread, run one
+   * at a time in order: the next starts once the one before has finished. */
+  ot_value* interrupts;
+  size_t interrupt_count, interrupt_capacity;
   uint64_t watchdog_at;
   /* Monitors: (watcher . ref) pairs to send an exit message when it ends. */
   ot_value watchers;
@@ -281,8 +284,8 @@ static void visit_thread(ot_state* rt, oti_thread* t, oti_root_visitor visit, vo
   visit(context, &t->args);
   visit(context, &t->wake_value);
   visit(context, &t->kill_reason);
-  visit(context, &t->interrupt);
   visit(context, &t->watchdog);
+  for (size_t i = 0; i < t->interrupt_count; i++) visit(context, &t->interrupts[i]);
   visit(context, &t->watchers);
   for (oti_interruption* i = t->interruptions; i; i = i->previous) {
     oti_visit_exec(rt, &i->exec, visit, context);
@@ -303,6 +306,7 @@ void oti_visit_threads(ot_state* rt, oti_root_visitor visit, void* context) {
 }
 
 static void free_thread(oti_thread* t) {
+  free(t->interrupts);
   free(t->fds);
   free(t->mailbox);
   free(t);
@@ -383,7 +387,7 @@ static bool setup(ot_state* rt) {
   rt->threads = ts;
   primordial->object = primordial->entry = primordial->args = OT_NIL;
   primordial->wake_value = primordial->kill_reason = OT_NIL;
-  primordial->interrupt = primordial->watchdog = OT_NIL;
+  primordial->watchdog = OT_NIL;
   primordial->watchers = OT_EMPTY;
   primordial->state = T_RUNNING;
   ts->primordial = ts->current = primordial;
@@ -472,6 +476,18 @@ static bool can_switch(ot_state* rt) {
 
 static bool loading_module(ot_state* rt) { return oti_module_depth(rt) > 0; }
 
+/* Queue thunk to run on t at its next safe point. */
+static bool push_interrupt(ot_state* rt, oti_thread* t, ot_value thunk) {
+  if (!oti_grow(rt, (void**)&t->interrupts, &t->interrupt_capacity, t->interrupt_count + 1,
+                sizeof(ot_value)))
+    return false;
+  t->interrupts[t->interrupt_count++] = thunk;
+  return true;
+}
+
+/* Whether t has a queued interrupt it can start: none is running. */
+static bool interrupt_ready(const oti_thread* t) { return t->interrupt_count && !t->interruptions; }
+
 /* Wake threads whose deadline has passed, with :timeout. */
 static void expire(ot_state* rt) {
   oti_threads* ts = rt->threads;
@@ -482,8 +498,9 @@ static void expire(ot_state* rt) {
       oti_thread* thread = ts->all[i];
       if (thread->watchdog_at && real >= thread->watchdog_at) {
         thread->watchdog_at = 0;
-        if (thread->interrupt == OT_NIL) thread->interrupt = thread->watchdog;
-        wake(rt, thread, OT_NIL);
+        /* Out of host memory, the watchdog is lost; nothing better to do. */
+        if (push_interrupt(rt, thread, thread->watchdog)) wake(rt, thread, OT_NIL);
+        else oti_clear_error(rt);
       }
       pending |= thread->watchdog_at != 0;
     }
@@ -665,9 +682,9 @@ static bool start_interruption(ot_state* rt, oti_thread* t) {
   saved->woken = t->woken;
   saved->previous = t->interruptions;
   t->interruptions = saved;
-  t->entry = t->interrupt;
+  t->entry = t->interrupts[0];
   t->args = OT_EMPTY;
-  t->interrupt = OT_NIL;
+  memmove(t->interrupts, t->interrupts + 1, --t->interrupt_count * sizeof(ot_value));
   t->resume = R_BEGIN;
   t->woken = false;
   rt->exec = fresh;
@@ -677,7 +694,7 @@ static bool start_interruption(ot_state* rt, oti_thread* t) {
 
 /* Continue t, whose exec is now rt->exec. */
 static _Noreturn void enter(ot_state* rt, oti_thread* t) {
-  if (t->interrupt != OT_NIL && !rt->atomic && !t->kill_pending && !rt->exit_pending) {
+  if (interrupt_ready(t) && !rt->atomic && !t->kill_pending && !rt->exit_pending) {
     if (!start_interruption(rt, t)) {
       oti_ports_abandon(rt, t->object);
       if (t->resume == R_BEGIN) finish(rt, 0);
@@ -858,7 +875,7 @@ bool oti_thread_poll(ot_state* rt) {
   if (!ts->preempt || rt->atomic || !can_switch(rt)) return true;
   ts->preempt = 0;
   if (!ts->run.head && !ts->timer_count && !ts->fd_waiters && !ts->current->watchdog_at &&
-      ts->current->interrupt == OT_NIL)
+      !interrupt_ready(ts->current))
     return true;
   oti_thread* me = ts->current;
   me->state = T_RUNNABLE;
@@ -1001,8 +1018,7 @@ static ot_value spawn_builtin(ot_state* rt, size_t first, size_t count) {
   if (!start_ticker(rt)) return 0;
   oti_thread* t = calloc(1, sizeof(*t));
   if (!t) return oti_fail(rt, "out of host memory");
-  t->object = t->entry = t->args = t->wake_value = t->kill_reason = t->interrupt = t->watchdog =
-      OT_NIL;
+  t->object = t->entry = t->args = t->wake_value = t->kill_reason = t->watchdog = OT_NIL;
   t->watchers = OT_EMPTY;
   t->resume = R_BEGIN;
   if (!oti_native_stack_new(rt, &t->exec.native)) {
@@ -1241,9 +1257,10 @@ static ot_value kill_builtin(ot_state* rt, size_t first, size_t count) {
   return v;
 }
 
-/* (%thread-interrupt t thunk): run thunk on t at its next safe point, or as
- * it wakes: a parked thread is woken for it. On the running thread it runs
- * now. */
+/* (%thread-interrupt t thunk): queue thunk to run on t at its next safe
+ * point, or as it wakes: a parked thread is woken for it. Queued thunks run
+ * one at a time, in order. On the running thread it runs now, unless an
+ * interrupt is already running there or queued before it. */
 static ot_value interrupt_builtin(ot_state* rt, size_t first, size_t count) {
   if (!oti_check_arity(rt, "%thread-interrupt", count, 2, 2)) return 0;
   ot_value v = thread_value(rt, rt->stack[first], "thread/interrupt!");
@@ -1253,12 +1270,12 @@ static ot_value interrupt_builtin(ot_state* rt, size_t first, size_t count) {
   if (t == rt->threads->current) {
     if (retried(rt, NULL)) return OT_TRUE;
     if (!can_switch(rt)) return oti_native_invoke(rt, rt->stack[first + 1], 0) ? OT_TRUE : 0;
-    t->interrupt = rt->stack[first + 1];
+    if (!push_interrupt(rt, t, rt->stack[first + 1])) return 0;
     t->state = T_RUNNABLE;
     enqueue(&rt->threads->run, t);
     return OTI_PARKED;
   }
-  t->interrupt = rt->stack[first + 1];
+  if (!push_interrupt(rt, t, rt->stack[first + 1])) return 0;
   wake(rt, t, OT_NIL);
   return OT_TRUE;
 }

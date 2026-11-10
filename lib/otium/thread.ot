@@ -85,7 +85,7 @@
   t)
 
 (def (interrupt! t thunk)
-  "(thread/interrupt! t thunk)\nRun thunk on top of t's stack at its next safe point, or as it wakes. An error from thunk unwinds t."
+  "(thread/interrupt! t thunk)\nRun thunk on top of t's stack at its next safe point, or as it wakes. Thunks for one thread run one at a time, in the order they were asked for. An error from thunk unwinds t."
   (%thread-interrupt t thunk))
 
 (def (all)

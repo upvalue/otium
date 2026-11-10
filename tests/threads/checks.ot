@@ -123,6 +123,32 @@
   (check "interrupted thread carries on" 'ok (thread/join t))
   (check "interrupt runs on the target" [:interrupted :after-sleep] log))
 
+(let ((log [])
+      (t (spawn (fn ()
+                  (sleep 1)
+                  'ok))))
+  (settle)
+  (thread/interrupt! t (fn () (push! log 1)))
+  (thread/interrupt! t (fn () (push! log 2)))
+  (thread/interrupt! t (fn () (push! log 3)))
+  (check "interrupt thunks queued together all run" 'ok (thread/join t))
+  (check "queued interrupt thunks run in order" [1 2 3] log))
+
+;; A watchdog that fires while an interrupt thunk runs waits for it to finish.
+(let ((log [])
+      (t (spawn (fn ()
+                  (%thread-watchdog (+ (otium.dev/%clock) 5) (fn () (push! log :watchdog)))
+                  (sleep 0.2)
+                  'ok))))
+  (settle)
+  (thread/interrupt! t
+                     (fn ()
+                       (let ((until (+ (otium.dev/%clock) 30)))
+                         (let spin () (when (< (otium.dev/%clock) until) (spin))))
+                       (push! log :interrupt)))
+  (check "watchdog and interrupt both run" 'ok (thread/join t))
+  (check "watchdog runs after the interrupt thunk" [:interrupt :watchdog] log))
+
 (let ((t (spawn (fn ()
                   (sleep 1)
                   'ok))))

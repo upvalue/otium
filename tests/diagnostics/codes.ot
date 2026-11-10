@@ -75,6 +75,10 @@
     (thread/kill! sleeper)
     (thread/join sleeper))
   (check "E0507" "E0507" (get (raised (fn () (otium.actor/call (thread/spawn (fn () nil)) :ping nil))) :code))
+  (let ((sleeper (thread/spawn (fn () (thread/sleep 10)))))
+    (check "E0508" "E0508" (get (raised (fn () (thread/atomically (thread/join sleeper)))) :code))
+    (thread/kill! sleeper)
+    (thread/join sleeper))
   ;; Last, since it leaves a thread waiting for good.
   (let ((main (thread/self)))
     (check "E0503" "E0503" (get (raised (fn () (thread/join (thread/spawn (fn () (thread/join main)))))) :code))))

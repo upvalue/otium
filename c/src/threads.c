@@ -866,10 +866,22 @@ _Noreturn void oti_thread_wait(ot_state* rt) {
   schedule(rt);
 }
 
+/* Wait until deadline with the whole process, polling for interrupts. False
+ * after an interrupt raised. */
+static bool block_until(ot_state* rt, uint64_t deadline) {
+  for (uint64_t t = now(rt->threads); deadline > t; t = now(rt->threads)) {
+    uint64_t step = deadline - t < 10000000u ? deadline - t : 10000000u;
+    if (rt->threads && rt->threads->test) rt->threads->now += step;
+    else pause_for(step);
+    if (!ot_poll_interrupt(rt)) return false;
+  }
+  return true;
+}
+
 /* Park the running thread on q, when given, and until deadline, when not
  * 0. owner is the wait queue object q is part of, or nil. The waiting
- * builtin returns what this returns: OTI_PARKED, or 0 when it can't wait
- * here. */
+ * builtin returns what this returns: OTI_PARKED, 0 when it can't wait
+ * here, or :timeout after waiting out the deadline inside atomically. */
 static ot_value wait_on(ot_state* rt, oti_waitq* q, ot_value owner, uint64_t deadline) {
   oti_thread* me = rt->threads->current;
   if (!can_switch(rt)) {
@@ -877,6 +889,15 @@ static ot_value wait_on(ot_state* rt, oti_waitq* q, ot_value owner, uint64_t dea
       oti_coded_error(rt, "E0502", "cannot wait for another thread while loading a module");
     else oti_coded_error(rt, "E0506", "cannot wait for another thread inside a call from C");
     return 0;
+  }
+  /* No other thread runs inside atomically, so only the deadline can end
+   * this wait: the whole process waits for it. */
+  if (rt->atomic) {
+    if (!deadline) {
+      oti_coded_error(rt, "E0508", "cannot wait for another thread inside atomically");
+      return 0;
+    }
+    return block_until(rt, deadline) ? rt->threads->timeout : 0;
   }
   me->state = T_WAITING;
   me->wake_value = OT_NIL;
@@ -1130,7 +1151,8 @@ static ot_value yield_builtin(ot_state* rt, size_t first, size_t count) {
   if (!oti_check_arity(rt, "%yield", count, 0, 0)) return 0;
   oti_threads* ts = rt->threads;
   if (!ts || retried(rt, NULL)) return OT_NIL;
-  if (!can_switch(rt) || (!ts->run.head && !ts->timer_count && !ts->fd_waiters)) return OT_NIL;
+  if (!can_switch(rt) || rt->atomic || (!ts->run.head && !ts->timer_count && !ts->fd_waiters))
+    return OT_NIL;
   ts->current->state = T_RUNNABLE;
   enqueue(&ts->run, ts->current);
   return OTI_PARKED;
@@ -1144,15 +1166,7 @@ static ot_value sleep_builtin(ot_state* rt, size_t first, size_t count) {
   if (!deadline_arg(rt, rt->stack[first], &deadline)) return 0;
   if (rt->threads) retried(rt, NULL);
   if (!deadline) return OT_NIL;
-  if (!rt->threads || !can_switch(rt)) {
-    for (uint64_t t = now(rt->threads); deadline > t; t = now(rt->threads)) {
-      uint64_t step = deadline - t < 10000000u ? deadline - t : 10000000u;
-      if (rt->threads && rt->threads->test) rt->threads->now += step;
-      else pause_for(step);
-      if (!ot_poll_interrupt(rt)) return 0;
-    }
-    return OT_NIL;
-  }
+  if (!rt->threads || !can_switch(rt) || rt->atomic) return block_until(rt, deadline) ? OT_NIL : 0;
   if (now(rt->threads) >= deadline) return OT_NIL;
   return wait_on(rt, NULL, OT_NIL, deadline);
 }
@@ -1191,7 +1205,7 @@ static ot_value wait_fds_builtin(ot_state* rt, size_t first, size_t count) {
     me->fds[i].revents = 0;
   }
   me->fd_count = n;
-  bool blocking = !can_switch(rt);
+  bool blocking = !can_switch(rt) || rt->atomic;
   for (;;) {
     int timeout = 0;
     if (blocking) {
@@ -1325,7 +1339,8 @@ static ot_value interrupt_builtin(ot_state* rt, size_t first, size_t count) {
   if (!t || !rt->threads) return OT_FALSE;
   if (t == rt->threads->current) {
     if (retried(rt, NULL)) return OT_TRUE;
-    if (!can_switch(rt)) return oti_native_invoke(rt, rt->stack[first + 1], 0) ? OT_TRUE : 0;
+    if (!can_switch(rt) || rt->atomic)
+      return oti_native_invoke(rt, rt->stack[first + 1], 0) ? OT_TRUE : 0;
     if (!push_interrupt(rt, t, rt->stack[first + 1])) return 0;
     t->state = T_RUNNABLE;
     enqueue(&rt->threads->run, t);
@@ -1468,11 +1483,12 @@ static ot_value park_builtin(ot_state* rt, size_t first, size_t count) {
     rt->atomic = me->saved_atomic;
     return woke;
   }
+  /* Released before waiting, so wait_on allows it. */
+  size_t atomic = rt->atomic;
+  rt->atomic = 0;
   ot_value result = wait_on(rt, q, rt->stack[first], deadline);
-  if (result == OTI_PARKED) {
-    me->saved_atomic = rt->atomic;
-    rt->atomic = 0;
-  }
+  if (result == OTI_PARKED) me->saved_atomic = atomic;
+  else rt->atomic = atomic;
   return result;
 }
 

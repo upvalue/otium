@@ -43,4 +43,5 @@ static const struct { const char* code; const char* type; const char* message; }
   {"E0505", "timeout", "timed out"},
   {"E0506", "thread-error", "cannot wait for another thread inside a call from C"},
   {"E0507", "actor-exited", "the actor ended before replying"},
+  {"E0508", "thread-error", "cannot wait for another thread inside atomically"},
 };

@@ -111,6 +111,30 @@
                   'not-reached))))
   (check "a thread can kill itself" 'me (thread/join t)))
 
+;; --- Waiting inside atomically
+
+;; No other thread runs in the section, even while it sleeps.
+(let ((log [])
+      (t (spawn (fn ()
+                  (sleep 0.005)
+                  (push! log :b)))))
+  (thread/atomically (push! log :a1) (sleep 0.01) (push! log :a2))
+  (thread/join t)
+  (check "sleep inside atomically blocks other threads" [:a1 :a2 :b] log))
+
+(let ((t (spawn (fn () (sleep 1)))))
+  (check "join inside atomically raises" "E0508" (failure-code (fn () (thread/atomically (thread/join t)))))
+  (check "receive with nothing to take raises" "E0508" (failure-code (fn () (thread/atomically (receive (m m))))))
+  (check "a timed join waits out its timeout"
+         "E0505"
+         (failure-code (fn () (thread/atomically (thread/join t 0.01)))))
+  (check "receive with :after times out" :none (thread/atomically (receive (m m) (:after 0.01 :none))))
+  (send (self) :here)
+  (check "receive with a message to take works" :here (thread/atomically (receive (m m))))
+  (failure-code (fn () (thread/atomically (thread/join t))))
+  (check "other threads run after the section raised" :ran (thread/join (spawn (fn () :ran)) 1))
+  (thread/kill! t))
+
 ;; --- Interrupt
 
 (let ((log [])

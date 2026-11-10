@@ -335,6 +335,14 @@
     "example": "(require otium.actor :as actor)\n(require otium.thread :as thread)\n(actor/call (thread/spawn (fn () (car 1))) :ping)",
     "fixed": "(require otium.actor :as actor)\n(require otium.thread :as thread)\n(try (actor/call (thread/spawn (fn () (car 1))) :ping)\n  (catch (actor/exited? e) (get e :reason)))"
   },
+  "E0508": {
+    "title": "waiting inside atomically",
+    "type": "thread-error",
+    "message": "cannot wait for another thread inside atomically",
+    "explanation": "No other thread runs inside `thread/atomically`, so a wait there can only end without them. Sleeping, port I/O and waits with a timeout make the whole process wait; a wait with a timeout that only another thread could end, such as `(receive ... (:after 1 ...))`, waits out the timeout. A wait with no timeout that only another thread could end, such as a join or a receive with no message to take, could never finish and raises this instead. Leave the atomic section before waiting.",
+    "example": "(require otium.thread :as thread)\n(let ((t (thread/spawn (fn () 1))))\n  (thread/atomically (thread/join t)))",
+    "fixed": "(require otium.thread :as thread)\n(let ((t (thread/spawn (fn () 1))))\n  (thread/join t))"
+  },
   "L0001": {
     "name": "if-chain",
     "group": "style",

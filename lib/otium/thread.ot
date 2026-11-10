@@ -109,6 +109,7 @@
 ;; Built on wait queues and atomic sections: a park inside an atomic section
 ;; releases it for the wait, so check-then-park can't miss a wake.
 (defmacro atomically body
+  "(thread/atomically body ...)\nRun body with no other thread running. Waiting inside makes the whole process wait: sleep and port I/O block, and a join or receive with a timeout waits out the timeout, since no other thread can end it sooner. One with no timeout raises E0508. Parking on a wait queue, as lock! and condvar-wait do, releases the section while it waits."
   #`(begin
       (%atomic #t)
       (defer

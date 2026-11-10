@@ -86,8 +86,11 @@ struct oti_thread {
   bool timed, daemon, kill_pending, mail_waiting, woken;
   /* The atomic depth %park released for its wait. */
   size_t saved_atomic;
-  ot_value* mailbox;
-  size_t mailbox_count, mailbox_capacity, cursor;
+  /* Messages are mailbox_count fields of the K_ARRAY_DATA mailbox (or nil)
+   * from mailbox_head. cursor is where receive's scan is, counted from the
+   * first message. */
+  ot_value mailbox;
+  size_t mailbox_head, mailbox_count, cursor;
   oti_waitq joiners;
   /* The fds %wait-fds parked on; fd_waiting while it is parked. */
   struct pollfd* fds;
@@ -297,7 +300,7 @@ static void visit_thread(ot_state* rt, oti_thread* t, oti_root_visitor visit, vo
     visit(context, &i->args);
     visit(context, &i->wake_value);
   }
-  for (size_t i = 0; i < t->mailbox_count; i++) visit(context, &t->mailbox[i]);
+  visit(context, &t->mailbox);
   if (t != rt->threads->current && t->state < T_DONE) oti_visit_exec(rt, &t->exec, visit, context);
 }
 
@@ -312,7 +315,6 @@ void oti_visit_threads(ot_state* rt, oti_root_visitor visit, void* context) {
 static void free_thread(oti_thread* t) {
   free(t->interrupts);
   free(t->fds);
-  free(t->mailbox);
   free(t);
 }
 
@@ -322,6 +324,58 @@ static void unregister(oti_threads* ts, oti_thread* t) {
       ts->all[i] = ts->all[--ts->count];
       return;
     }
+}
+
+/* --- Mailboxes ----------------------------------------------------------- */
+
+static ot_value* mail(oti_thread* t) {
+  return oti_as_array_data(t->mailbox)->items + t->mailbox_head;
+}
+
+static size_t mailbox_capacity(const oti_thread* t) {
+  return t->mailbox == OT_NIL ? 0 : ((oti_object_header*)t->mailbox)->fields;
+}
+
+/* Append *message, which must be rooted, to t's mailbox. Room at the end
+ * comes from moving the messages to the front when they start past
+ * halfway, else from a mailbox twice the size. */
+static bool mailbox_push(ot_state* rt, oti_thread* t, const ot_value* message) {
+  size_t capacity = mailbox_capacity(t), head = t->mailbox_head, n = t->mailbox_count;
+  if (head + n == capacity) {
+    ot_value* items = capacity ? oti_as_array_data(t->mailbox)->items : NULL;
+    if (head && head >= capacity / 2) {
+      memmove(items, items + head, n * sizeof(ot_value));
+      for (size_t i = n; i < head + n; i++) items[i] = OT_NIL;
+    } else {
+      if (capacity >= UINT32_MAX / 2) return oti_error(rt, "mailbox too large");
+      size_t grown = capacity < 8 ? 8 : capacity * 2;
+      /* t->mailbox is a root while t is live, so it is current after this. */
+      ot_value storage = oti_alloc(rt, K_ARRAY_DATA, (uint32_t)grown, 0);
+      if (!storage) return false;
+      if (n) memcpy(oti_as_array_data(storage)->items, mail(t), n * sizeof(ot_value));
+      t->mailbox = storage;
+    }
+    t->mailbox_head = 0;
+  }
+  mail(t)[t->mailbox_count++] = *message;
+  return true;
+}
+
+/* Remove the message at, counted from the first, moving whichever side of
+ * it is shorter: taking the first message is constant time. Messages after
+ * it are counted one less. */
+static void mailbox_remove(oti_thread* t, size_t at) {
+  ot_value* items = mail(t);
+  size_t n = t->mailbox_count;
+  if (at < n / 2) {
+    memmove(items + 1, items, at * sizeof(ot_value));
+    items[0] = OT_NIL;
+    t->mailbox_head++;
+  } else {
+    memmove(items + at, items + at + 1, (n - at - 1) * sizeof(ot_value));
+    items[n - 1] = OT_NIL;
+  }
+  if (!--t->mailbox_count) t->mailbox_head = 0;
 }
 
 /* --- Preemption ---------------------------------------------------------- */
@@ -391,7 +445,7 @@ static bool setup(ot_state* rt) {
   rt->threads = ts;
   primordial->object = primordial->entry = primordial->args = OT_NIL;
   primordial->wake_value = primordial->kill_reason = OT_NIL;
-  primordial->watchdog = primordial->queue_object = OT_NIL;
+  primordial->watchdog = primordial->queue_object = primordial->mailbox = OT_NIL;
   primordial->watchers = OT_EMPTY;
   primordial->state = T_RUNNING;
   ts->primordial = ts->current = primordial;
@@ -1000,12 +1054,8 @@ static void notify_watchers(ot_state* rt, ot_value object, ot_value watchers, bo
                 oti_table_set(rt, live[2], live[5], oti_cdr(oti_car(live[1]))) &&
                 oti_table_set(rt, live[2], live[6], live[3]);
     oti_thread* watcher = as_thread(oti_car(oti_car(live[1])))->thread;
-    if (made && watcher &&
-        oti_grow(rt, (void**)&watcher->mailbox, &watcher->mailbox_capacity,
-                 watcher->mailbox_count + 1, sizeof(ot_value))) {
-      watcher->mailbox[watcher->mailbox_count++] = live[2];
-      if (watcher->mail_waiting) wake(rt, watcher, OT_TRUE);
-    }
+    if (made && watcher && mailbox_push(rt, watcher, &live[2]) && watcher->mail_waiting)
+      wake(rt, watcher, OT_TRUE);
   }
   oti_roots_pop(&rt->heap, &roots);
   oti_clear_error(rt);
@@ -1024,7 +1074,7 @@ static ot_value spawn_builtin(ot_state* rt, size_t first, size_t count) {
   oti_thread* t = calloc(1, sizeof(*t));
   if (!t) return oti_fail(rt, "out of host memory");
   t->object = t->entry = t->args = t->wake_value = t->kill_reason = t->watchdog = t->queue_object =
-      OT_NIL;
+      t->mailbox = OT_NIL;
   t->watchers = OT_EMPTY;
   t->resume = R_BEGIN;
   if (!oti_native_stack_new(rt, &t->exec.native)) {
@@ -1461,10 +1511,7 @@ static ot_value send_builtin(ot_state* rt, size_t first, size_t count) {
   if (!v) return 0;
   oti_thread* t = as_thread(v)->thread;
   if (!t) return OT_FALSE;
-  if (!oti_grow(rt, (void**)&t->mailbox, &t->mailbox_capacity, t->mailbox_count + 1,
-                sizeof(ot_value)))
-    return 0;
-  t->mailbox[t->mailbox_count++] = rt->stack[first + 1];
+  if (!mailbox_push(rt, t, &rt->stack[first + 1])) return 0;
   if (t->mail_waiting) wake(rt, t, OT_TRUE);
   return OT_TRUE;
 }
@@ -1480,7 +1527,7 @@ static ot_value mailbox_next_builtin(ot_state* rt, size_t first, size_t count) {
   oti_threads* ts = rt->threads;
   oti_thread* me = ts->current;
   retried(rt, NULL);
-  if (me->cursor < me->mailbox_count) return me->mailbox[me->cursor++];
+  if (me->cursor < me->mailbox_count) return mail(me)[me->cursor++];
   if (deadline && now(ts) >= deadline) return rt->threads->timeout;
   ot_value result = wait_on(rt, NULL, OT_NIL, deadline);
   if (result == OTI_PARKED) me->mail_waiting = true;
@@ -1496,9 +1543,7 @@ static ot_value mailbox_take_builtin(ot_state* rt, size_t first, size_t count) {
   oti_thread* me = rt->threads->current;
   if (me->cursor) {
     size_t at = me->cursor - 1;
-    memmove(me->mailbox + at, me->mailbox + at + 1,
-            (me->mailbox_count - at - 1) * sizeof(ot_value));
-    me->mailbox_count--;
+    mailbox_remove(me, at);
     for (oti_interruption* saved = me->interruptions; saved; saved = saved->previous) {
       if (saved->cursor && at < saved->cursor) {
         if (at == saved->cursor - 1) saved->cursor = 0;

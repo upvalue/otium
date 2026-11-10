@@ -100,6 +100,20 @@
 (check ":when guards" 5 (receive (n :when (> n 3) n)))
 (check "the guarded-out message stays" 1 (receive (n n)))
 
+;; Taking messages from the front, the back and either side of the middle
+;; keeps the rest in order, including across the mailbox growing.
+(dotimes (i 20) (send (self) i))
+(def (take-if wanted) (receive (n :when (= n wanted) n)))
+(check "take from the back half" 15 (take-if 15))
+(check "take from the front half" 3 (take-if 3))
+(check "take the first" 0 (take-if 0))
+(check "take the last" 19 (take-if 19))
+(dotimes (i 20) (send (self) (+ 100 i)))
+(check "the rest stay in order"
+       (append '(1 2 4 5 6 7 8 9 10 11 12 13 14 16 17 18) (for ((i :range 100 120) (out :collect i)) => out))
+       (for ((_ :range 36) (out :collect (receive (n n)))) => out))
+(check "mailbox drained" #t (mailbox-empty?))
+
 ;; --- Live reload: an actor looping through its global picks up new code.
 
 (def (version-loop)

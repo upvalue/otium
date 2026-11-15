@@ -600,7 +600,7 @@ static Glyph* add_glyph(Renderer* r, TTF_Font* font, Uint32 index, int w, int h,
     SDL_SetError("UI glyph cache is full");
     return NULL;
   }
-  int x, y;
+  int x = 0, y = 0;
   if (!atlas_slot(r, pw, ph, &x, &y)) return NULL;
   Glyph* g = &r->glyphs[r->glyph_count++];
   *g = (Glyph){font, index, x, y, w, h};

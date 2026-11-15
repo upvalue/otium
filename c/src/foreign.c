@@ -76,12 +76,15 @@ typedef struct {
 
 OTI_LAYOUT(oti_function_obj, 4, binding);
 
+/* description is private to the runtime. detached is the copy Otium code
+ * reads, made on first use, or false. */
 typedef struct {
   oti_object_header header;
   ot_value description;
+  ot_value detached;
 } oti_foreign_layout_obj;
 
-OTI_FIELDS_ONLY(oti_foreign_layout_obj, 1);
+OTI_FIELDS_ONLY(oti_foreign_layout_obj, 2);
 
 typedef struct {
   oti_object_header header;
@@ -1011,15 +1014,24 @@ static ot_value foreign_layout(ot_state* rt, size_t first, size_t count, bool da
   ot_value input = rt->stack[first];
   if (data) {
     if (!oti_kind(input, K_FOREIGN_LAYOUT)) return OT_FALSE;
+    if (foreign_layout_obj(input)->detached != OT_FALSE) return foreign_layout_obj(input)->detached;
     input = foreign_layout_obj(input)->description;
   }
   size_t budget = 65536;
   ot_value description = layout_copy(rt, input, 0, &budget);
-  if (!description || data) return description;
+  if (!description) return 0;
+  if (data) {
+    /* The copy allocated, so the layout may have moved. */
+    foreign_layout_obj(rt->stack[first])->detached = description;
+    return description;
+  }
   oti_roots roots;
   oti_roots_push(&rt->heap, &roots, &description, 1);
-  ot_value result = oti_alloc(rt, K_FOREIGN_LAYOUT, 1, 0);
-  if (result) foreign_layout_obj(result)->description = description;
+  ot_value result = oti_alloc(rt, K_FOREIGN_LAYOUT, 2, 0);
+  if (result) {
+    foreign_layout_obj(result)->description = description;
+    foreign_layout_obj(result)->detached = OT_FALSE;
+  }
   oti_roots_pop(&rt->heap, &roots);
   return result;
 }
@@ -1487,9 +1499,10 @@ ot_value oti_foreign_call(ot_state* rt, size_t callable, size_t first, size_t co
     type = oti_intern(rt, K_SYMBOL, oti_foreign_scalars[expected].name,
                       strlen(oti_foreign_scalars[expected].name));
   else if (expected == AGGREGATE) {
-    type = oti_alloc(rt, K_FOREIGN_LAYOUT, 1, 0);
+    type = oti_alloc(rt, K_FOREIGN_LAYOUT, 2, 0);
     if (type) {
       function = rt->stack[callable];
+      foreign_layout_obj(type)->detached = OT_FALSE;
       foreign_layout_obj(type)->description =
           argument == SIZE_MAX ? function_obj(function)->result
                                : list_item(function_obj(function)->arguments, argument);

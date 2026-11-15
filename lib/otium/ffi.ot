@@ -97,7 +97,7 @@
 (def- (%describe t op &optional (argument #f))
   (cond
     ((symbol? t) (or (%scalar-description t) (%fail-at op (%signature-error op) "unknown scalar type" argument #f)))
-    ((%layout-data t) (%layout-data t))
+    ((%layout-data t))
     ((and (list? t) (= (length t) 3) (eq? (car t) 'array))
      (let ((element (%memory (cadr t) op argument))
            (count (%count op (caddr t) argument)))

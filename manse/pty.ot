@@ -4,14 +4,11 @@
 ;; controlling side, resize, and reap. The far end can instead be Otium code
 ;; on a green thread; see manse.program. Spawning, resizing and terminal modes
 ;; go through manse/native/pty.c. Output is read on a thread in
-;; manse/native/reader.c and taken here in batches. macOS constants only.
+;; manse/native/reader.c and taken here in batches. Platform constants come
+;; from the native library.
 
 (require otium.ffi :as ffi)
 (require otium.process :as process)
-
-(def- O_RDWR 2)
-
-(def- O_NOCTTY 131072)
 
 (def- WNOHANG 1)
 
@@ -23,11 +20,12 @@
                  ((private %ptsname) "ptsname" (int) utf8 #t)
                  ((private %open) "open" (utf8 int) int #t)
                  ((private %close) "close" (int) int #t)
-                 ((private %kill) "kill" (int int) int #t)
-                 ((private %environ) "_NSGetEnviron" () pointer #f))
+                 ((private %kill) "kill" (int int) int #t))
 
 (ffi/defbindings native
                  %load-native!
+                 ((private %open-flags) "manse_pty_open_flags" () int #f)
+                 ((private %environ) "manse_pty_environ" () pointer #f)
                  ((private %waitpid) "manse_pty_waitpid" (int pointer int) int #t)
                  ((private %write) "manse_pty_write" (int pointer size-t) long #t)
                  ((private %spawn) "manse_pty_spawn" (utf8 pointer pointer utf8) int #t)
@@ -51,7 +49,7 @@
       (else (error "OTIUM_BUILD is not set; run Manse through ./otium")))))
 
 (def (load!)
-  (unless libc (%load! '("/usr/lib/libSystem.B.dylib")))
+  (unless libc (%load! '("/usr/lib/libSystem.B.dylib" "libc.so.6")))
   (unless native (%load-native! (native-candidates))))
 
 (def- (check! op result)
@@ -94,7 +92,7 @@
 end's path. :slave holds the far end open until release!, since macOS can't
 resize a PTY whose far end was never opened."
   (load!)
-  (let ((pty {:fd (check! "posix_openpt" (%openpt (+ O_RDWR O_NOCTTY)))})
+  (let ((pty {:fd (check! "posix_openpt" (%openpt (%open-flags)))})
         (success? #f))
     (unwind-protect
       (begin
@@ -105,7 +103,7 @@ resize a PTY whose far end was never opened."
         (let ((reader (%reader-start (pty :fd))))
           (when (ffi/null-pointer? reader) (error "pty: reader failed to start"))
           (put! pty :reader reader))
-        (put! pty :slave (check! "open" (%open (pty :tty) (+ O_RDWR O_NOCTTY))))
+        (put! pty :slave (check! "open" (%open (pty :tty) (%open-flags))))
         (resize! pty cols rows)
         (set! success? #t)
         pty)
@@ -123,7 +121,7 @@ resize a PTY whose far end was never opened."
     (unwind-protect
       (with-strings args
                     (fn (argv)
-                      (put! pty :pid (check! "spawn" (%spawn path argv (ffi/ref (%environ) 'pointer 0) (pty :tty))))))
+                      (put! pty :pid (check! "spawn" (%spawn path argv (%environ) (pty :tty))))))
       (release! pty)
       (unless (pty :pid) (close! pty)))
     pty))

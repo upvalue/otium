@@ -98,7 +98,19 @@
 (def (thread-of b)
   (((b :pty) :program) :thread))
 
-(check "a writer waits while nothing reads" :waiting (thread/status (thread-of flood)))
+;; The writer's status once it has filled the PTY, waiting up to a second. On
+;; Linux a full PTY can poll writable while writes still fail, so the writer
+;; backs off on a timer and is briefly runnable each time it retries.
+(def (waits? t)
+  (let loop ((tries 0))
+    (cond
+      ((eq? (thread/status t) :waiting) :waiting)
+      ((< tries 1000)
+       (thread/sleep 0.001)
+       (loop (+ tries 1)))
+      (else (thread/status t)))))
+
+(check "a writer waits while nothing reads" :waiting (waits? (thread-of flood)))
 
 (def flooded 0)
 

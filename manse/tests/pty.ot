@@ -6,7 +6,7 @@
 
 (ffi/defbindings libc %load-libc! (%usleep "usleep" (u32) int #f))
 
-(%load-libc! "/usr/lib/libSystem.B.dylib")
+(%load-libc! (list "/usr/lib/libSystem.B.dylib" "libc.so.6"))
 
 (def term (g/new 80 24))
 

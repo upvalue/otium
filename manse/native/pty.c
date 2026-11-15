@@ -5,6 +5,8 @@
 // file action for a controlling terminal. ioctl is variadic, which the FFI
 // cannot call yet. Everything else about PTYs lives in manse/pty.ot.
 
+// NSIG, cfmakeraw, ECHOKE and ECHOCTL are BSD names glibc hides in strict C.
+#define _DEFAULT_SOURCE
 #include <errno.h>
 #include <fcntl.h>
 #include <signal.h>
@@ -12,6 +14,15 @@
 #include <sys/wait.h>
 #include <termios.h>
 #include <unistd.h>
+
+extern char** environ;
+
+// Platform values the FFI side would otherwise hard-code: the flags for opening
+// either end of a PTY, and the process environment (macOS has no environ symbol
+// for dlsym, only _NSGetEnviron; Linux has no _NSGetEnviron).
+int manse_pty_open_flags(void) { return O_RDWR | O_NOCTTY; }
+
+char** manse_pty_environ(void) { return environ; }
 
 // Fork, give the child tty_path as its controlling terminal and standard
 // streams, and exec path. Returns the child's pid, or -errno if fork fails.

@@ -77,7 +77,8 @@ if native_enabled
     command: boot_command, env: {'OTIUM_OPT': 'none'}, build_by_default: true)
 endif
 
-# The optional UI bridge: SDL_GPU rendering, SDL_ttf text and Yoga layout.
+# The optional UI bridge: SDL_GPU rendering (native/ui/gpu-sdl.c), SDL_ttf text
+# and Yoga layout.
 sdl3 = dependency('sdl3', version: '>= 3.4.12', required: get_option('ui'))
 sdl3_ttf = dependency('sdl3-ttf', version: '>= 3.2.2', required: get_option('ui'))
 glslc = find_program('glslc', required: get_option('ui'))
@@ -103,7 +104,8 @@ if ui
   endforeach
   ui_args = ['-DOTUI_FONT_DIR="@0@"'.format(source_root / 'native/ui/fonts')]
   ui_library = shared_library('otium-ui',
-    'native/ui/renderer.c', 'native/ui/text.c', 'native/ui/layout.cpp', shaders,
+    'native/ui/renderer.c', 'native/ui/gpu-sdl.c', 'native/ui/text.c', 'native/ui/layout.cpp',
+    shaders,
     c_args: ui_args + ['--embed-dir=' + build_root], cpp_args: ui_args,
     dependencies: [sdl3, sdl3_ttf, yoga, svg, libm], override_options: native_options)
   ui_events = shared_library('otium-ui-test-events', 'tests/ui/events.c',

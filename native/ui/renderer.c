@@ -1,24 +1,14 @@
+// The UI renderer's backend-neutral half: window events, the draw list, paint
+// caches and the coverage atlas. Pixels come from a backend; see renderer.h.
 #include <SDL3/SDL.h>
 #include <math.h>
-#include <limits.h>
 #include <stdint.h>
 #include <stddef.h>
 #include <stdlib.h>
 #include <string.h>
-static const char rect_msl[] = {
-#embed "shaders/rect.metal" suffix(, 0)
-};
-static const unsigned char rect_vert[] = {
-#embed "rect.vert.spv"
-};
-static const unsigned char rect_frag[] = {
-#embed "rect.frag.spv"
-};
+#include "renderer.h"
 #include "text.h"
 #include <plutosvg.h>
-#define ATLAS_SIZE 2048
-// Glyphs and SVGs are tinted masks, so the atlas holds coverage alone.
-#define ATLAS_BYTES (ATLAS_SIZE * ATLAS_SIZE)
 
 // A glyph from a font, or with no font a box-drawing sprite: index is its
 // codepoint and w, h the cell it fills.
@@ -36,10 +26,6 @@ typedef struct Image {
   float width, height, scale;
   int x, y, w, h;
 } Image;
-
-typedef struct {
-  float rect[4], color[4], shape[4], clip[4], uv[4];
-} Rect;
 
 // Recorded draw instances for one widget, replayed at a new position. Origin
 // is the widget's position when recorded; scale must match on replay.
@@ -61,13 +47,8 @@ typedef struct Renderer {
   QueuedEvent *events, *events_tail;
   char* pending_text;
   SDL_Window* window;
-  SDL_GPUDevice* device;
-  SDL_GPUGraphicsPipeline* pipeline;
-  SDL_GPUTexture* target;  // Owned only in offscreen mode; SDL owns the swapchain.
+  Gpu* gpu;
   bool offscreen;
-  SDL_GPUTexture* atlas;
-  SDL_GPUSampler* sampler;
-  SDL_GPUTransferBuffer* atlas_upload;
   Uint8* atlas_pixels;
   Image* images;
   int image_count;
@@ -75,8 +56,6 @@ typedef struct Renderer {
   int glyph_slots[GLYPH_SLOTS];  // Glyph index + 1, by hash; 0 is empty.
   int glyph_count, atlas_x, atlas_y, atlas_row;
   bool atlas_dirty;
-  SDL_GPUBuffer* buffer;
-  SDL_GPUTransferBuffer* upload;
   Rect* rects;
   Uint32 count, capacity, width, height;
   Cache* caches;
@@ -93,7 +72,6 @@ typedef struct Renderer {
   bool text_input;
   bool event_repeat;
   SDL_FColor clear;
-  bool claimed;
 } Renderer;
 
 static Renderer* renderers;
@@ -245,8 +223,7 @@ const char* otui_clipboard_get(Renderer* r) {
 
 bool otui_clipboard_set(const char* text) { return SDL_SetClipboardText(text); }
 
-// Tear down a complete or partially initialized renderer. Wait once here; normal
-// frames and resize operations rely on SDL to defer GPU resource destruction.
+// Tear down a complete or partially initialized renderer.
 void otui_gpu_free(Renderer* r) {
   if (!r) return;
   Renderer** link = &renderers;
@@ -262,18 +239,7 @@ void otui_gpu_free(Renderer* r) {
   if (r->text_input) SDL_StopTextInput(r->window);
   SDL_free(r->event_text);
   SDL_free(r->clipboard);
-  if (r->device) {
-    SDL_WaitForGPUIdle(r->device);
-    if (r->buffer) SDL_ReleaseGPUBuffer(r->device, r->buffer);
-    if (r->upload) SDL_ReleaseGPUTransferBuffer(r->device, r->upload);
-    if (r->pipeline) SDL_ReleaseGPUGraphicsPipeline(r->device, r->pipeline);
-    if (r->atlas) SDL_ReleaseGPUTexture(r->device, r->atlas);
-    if (r->sampler) SDL_ReleaseGPUSampler(r->device, r->sampler);
-    if (r->atlas_upload) SDL_ReleaseGPUTransferBuffer(r->device, r->atlas_upload);
-    if (r->target) SDL_ReleaseGPUTexture(r->device, r->target);
-    if (r->claimed) SDL_ReleaseWindowFromGPUDevice(r->device, r->window);
-    SDL_DestroyGPUDevice(r->device);
-  }
+  gpu_free(r->gpu);
   while (r->images) {
     Image* next = r->images->next;
     SDL_free(r->images->path);
@@ -290,28 +256,9 @@ void otui_gpu_free(Renderer* r) {
   if (!live_renderers && !otui_live_nodes()) otui_text_clear();
 }
 
-// Load the same rectangle/glyph shader from Metal source or embedded SPIR-V.
-static SDL_GPUShader* shader(SDL_GPUDevice* device, bool vertex) {
-  bool metal = (SDL_GetGPUShaderFormats(device) & SDL_GPU_SHADERFORMAT_MSL) != 0;
-  SDL_GPUShaderCreateInfo info = {
-      .code_size = metal    ? strlen(rect_msl)
-                   : vertex ? sizeof(rect_vert)
-                            : sizeof(rect_frag),
-      .code = metal    ? (const Uint8*)rect_msl
-              : vertex ? rect_vert
-                       : rect_frag,
-      .entrypoint = metal ? (vertex ? "vertex_main" : "fragment_main") : "main",
-      .format = metal ? SDL_GPU_SHADERFORMAT_MSL : SDL_GPU_SHADERFORMAT_SPIRV,
-      .stage = vertex ? SDL_GPU_SHADERSTAGE_VERTEX : SDL_GPU_SHADERSTAGE_FRAGMENT,
-      .num_samplers = vertex ? 0 : 1,
-      .num_uniform_buffers = vertex ? 1 : 0,
-  };
-  return SDL_CreateGPUShader(device, &info);
-}
-
-// Direct mode only updates logical geometry and text density: SDL resizes the
-// swapchain. Offscreen mode replaces its texture before releasing the old one,
-// so a failed allocation leaves the previous dimensions and target intact.
+// Direct mode only updates logical geometry and text density: the window
+// system resizes the swapchain. Offscreen mode replaces the backend's target;
+// a failure leaves the previous dimensions intact.
 bool otui_gpu_resize(Renderer* r, int width, int height, float scale) {
   if (!r->offscreen && scale != 0)
     return SDL_SetError(
@@ -324,22 +271,7 @@ bool otui_gpu_resize(Renderer* r, int width, int height, float scale) {
   if (physical_width > UINT32_MAX || physical_height > UINT32_MAX)
     return SDL_SetError("UI dimensions exceed SDL's texture dimension representation");
   Uint32 w = (Uint32)physical_width, h = (Uint32)physical_height;
-  if (r->offscreen && (w != r->width || h != r->height || !r->target)) {
-    SDL_GPUTextureCreateInfo texture = {
-        .type = SDL_GPU_TEXTURETYPE_2D,
-        .format = SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM,
-        .usage = SDL_GPU_TEXTUREUSAGE_COLOR_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER,
-        .width = w,
-        .height = h,
-        .layer_count_or_depth = 1,
-        .num_levels = 1,
-    };
-    SDL_GPUTexture* target = SDL_CreateGPUTexture(r->device, &texture);
-    if (!target) return false;
-    // SDL defers destruction until submitted frames have finished using it.
-    if (r->target) SDL_ReleaseGPUTexture(r->device, r->target);
-    r->target = target;
-  }
+  if (!gpu_resize(r->gpu, w, h)) return false;
   r->width = w;
   r->height = h;
   r->logical_width = width;
@@ -348,9 +280,7 @@ bool otui_gpu_resize(Renderer* r, int width, int height, float scale) {
   return true;
 }
 
-// Choose the target mode once. The pipeline must match either the window's
-// swapchain format or our RGBA offscreen format. The atlas and instance buffers
-// are shared by both paths and survive window resizing.
+// Choose the target mode once; the backend builds its pipeline for it.
 void* otui_gpu_new(SDL_Window* window, int width, int height, float scale, const char* driver,
                    bool offscreen) {
   if (!window) {
@@ -365,75 +295,14 @@ void* otui_gpu_new(SDL_Window* window, int width, int height, float scale, const
   ++live_renderers;
   r->window = window;
   r->offscreen = offscreen;
-  r->device = SDL_CreateGPUDevice(SDL_GPU_SHADERFORMAT_MSL | SDL_GPU_SHADERFORMAT_SPIRV, true,
-                                  driver[0] ? driver : NULL);
-  if (!r->device) goto failed;
-  if (!SDL_ClaimWindowForGPUDevice(r->device, window)) goto failed;
-  r->claimed = true;
+  r->gpu = gpu_new(window, driver, offscreen);
+  if (!r->gpu) goto failed;
   if (!otui_gpu_resize(r, width, height, scale)) goto failed;
-  SDL_GPUShader *vs = shader(r->device, true), *fs = shader(r->device, false);
-  if (!vs || !fs) {
-    if (vs) SDL_ReleaseGPUShader(r->device, vs);
-    if (fs) SDL_ReleaseGPUShader(r->device, fs);
-    SDL_SetError("Could not compile UI shaders; see the SDL log");
+  r->atlas_pixels = calloc(ATLAS_BYTES, 1);
+  if (!r->atlas_pixels) {
+    SDL_OutOfMemory();
     goto failed;
   }
-  SDL_GPUVertexBufferDescription vb = {
-      .slot = 0,
-      .pitch = sizeof(Rect),
-      .input_rate = SDL_GPU_VERTEXINPUTRATE_INSTANCE,
-  };
-  SDL_GPUVertexAttribute attrs[5];
-  for (Uint32 i = 0; i < 5; ++i)
-    attrs[i] = (SDL_GPUVertexAttribute){.location = i,
-                                        .buffer_slot = 0,
-                                        .format = SDL_GPU_VERTEXELEMENTFORMAT_FLOAT4,
-                                        .offset = i * 16};
-  SDL_GPUColorTargetDescription color = {
-      .format = offscreen ? SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM
-                          : SDL_GetGPUSwapchainTextureFormat(r->device, window),
-      .blend_state = {.enable_blend = true,
-                      .src_color_blendfactor = SDL_GPU_BLENDFACTOR_ONE,
-                      .dst_color_blendfactor = SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA,
-                      .color_blend_op = SDL_GPU_BLENDOP_ADD,
-                      .src_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ONE,
-                      .dst_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA,
-                      .alpha_blend_op = SDL_GPU_BLENDOP_ADD},
-  };
-  SDL_GPUGraphicsPipelineCreateInfo pipeline = {
-      .vertex_shader = vs,
-      .fragment_shader = fs,
-      .vertex_input_state = {.vertex_buffer_descriptions = &vb,
-                             .num_vertex_buffers = 1,
-                             .vertex_attributes = attrs,
-                             .num_vertex_attributes = 5},
-      .primitive_type = SDL_GPU_PRIMITIVETYPE_TRIANGLELIST,
-      .target_info = {.color_target_descriptions = &color, .num_color_targets = 1},
-  };
-  r->pipeline = SDL_CreateGPUGraphicsPipeline(r->device, &pipeline);
-  SDL_ReleaseGPUShader(r->device, vs);
-  SDL_ReleaseGPUShader(r->device, fs);
-  if (!r->pipeline) goto failed;
-  SDL_GPUTextureCreateInfo texture = {
-      .type = SDL_GPU_TEXTURETYPE_2D,
-      .format = SDL_GPU_TEXTUREFORMAT_R8_UNORM,
-      .usage = SDL_GPU_TEXTUREUSAGE_SAMPLER,
-      .width = ATLAS_SIZE,
-      .height = ATLAS_SIZE,
-      .layer_count_or_depth = 1,
-      .num_levels = 1,
-  };
-  r->atlas = SDL_CreateGPUTexture(r->device, &texture);
-  SDL_GPUSamplerCreateInfo sampler = {.min_filter = SDL_GPU_FILTER_LINEAR,
-                                      .mag_filter = SDL_GPU_FILTER_LINEAR,
-                                      .address_mode_u = SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE,
-                                      .address_mode_v = SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE};
-  r->sampler = SDL_CreateGPUSampler(r->device, &sampler);
-  SDL_GPUTransferBufferCreateInfo atlas_upload = {.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD,
-                                                  .size = ATLAS_BYTES};
-  r->atlas_upload = SDL_CreateGPUTransferBuffer(r->device, &atlas_upload);
-  r->atlas_pixels = calloc(ATLAS_BYTES, 1);
-  if (!r->atlas || !r->sampler || !r->atlas_upload || !r->atlas_pixels) goto failed;
   r->atlas_dirty = true;
   r->next = renderers;
   renderers = r;
@@ -451,7 +320,7 @@ float otui_gpu_scale(Renderer* r) { return r->scale; }
 
 bool otui_gpu_offscreen(Renderer* r) { return r->offscreen; }
 
-const char* otui_gpu_driver(Renderer* r) { return SDL_GetGPUDeviceDriver(r->device); }
+const char* otui_gpu_driver(Renderer* r) { return gpu_driver(r->gpu); }
 
 static SDL_FColor rgba(Uint32 c) {
   return (SDL_FColor){(c >> 24) / 255.0f, ((c >> 16) & 255) / 255.0f, ((c >> 8) & 255) / 255.0f,
@@ -477,7 +346,7 @@ void otui_gpu_clear(Renderer* r, Uint32 color) {
   }
 }
 
-// Ensure room for need instances in both the CPU list and the GPU buffers.
+// Ensure room for need instances in both the CPU list and the backend.
 static bool reserve(Renderer* r, Uint32 need) {
   if (need <= r->capacity) return true;
   if (need > 65536) return SDL_SetError("UI primitive limit reached");
@@ -486,20 +355,7 @@ static bool reserve(Renderer* r, Uint32 need) {
   Rect* rects = realloc(r->rects, capacity * sizeof(Rect));
   if (!rects) return SDL_OutOfMemory();
   r->rects = rects;
-  SDL_GPUBufferCreateInfo b = {.usage = SDL_GPU_BUFFERUSAGE_VERTEX,
-                               .size = capacity * sizeof(Rect)};
-  SDL_GPUTransferBufferCreateInfo t = {.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD, .size = b.size};
-  SDL_GPUBuffer* buffer = SDL_CreateGPUBuffer(r->device, &b);
-  SDL_GPUTransferBuffer* upload = SDL_CreateGPUTransferBuffer(r->device, &t);
-  if (!buffer || !upload) {
-    if (buffer) SDL_ReleaseGPUBuffer(r->device, buffer);
-    if (upload) SDL_ReleaseGPUTransferBuffer(r->device, upload);
-    return false;
-  }
-  if (r->buffer) SDL_ReleaseGPUBuffer(r->device, r->buffer);
-  if (r->upload) SDL_ReleaseGPUTransferBuffer(r->device, r->upload);
-  r->buffer = buffer;
-  r->upload = upload;
+  if (!gpu_reserve(r->gpu, capacity)) return false;
   r->capacity = capacity;
   return true;
 }
@@ -579,22 +435,21 @@ int otui_gpu_cache_draw(Renderer* r, int id, float x, float y, float cx, float c
 
 int otui_gpu_cache_count(Renderer* r) { return r->cache_count; }
 
-// Bytes this renderer holds, by kind, for memory reports. The atlas is kept
-// three times: CPU pixels, GPU texture and upload buffer. The instance list is
-// too. Swapchain images belong to SDL; kind 5 is the size of one.
+// Bytes this renderer holds, by kind, for memory reports: the CPU copies of the
+// atlas and instance list plus whatever the backend keeps. Swapchain images
+// belong to the window system; kind 5 is the size of one.
 long long otui_gpu_memory(Renderer* r, int kind) {
-  long long atlas = ATLAS_BYTES;
   long long image = (long long)r->width * r->height * 4;
   switch (kind) {
-    case 0: return atlas * 3;
-    case 1: return (long long)r->capacity * sizeof(Rect) * 3;
+    case 0: return ATLAS_BYTES + gpu_memory(r->gpu, 0);
+    case 1: return (long long)r->capacity * sizeof(Rect) + gpu_memory(r->gpu, 1);
     case 2: {
       long long bytes = (long long)r->cache_capacity * sizeof(Cache);
       for (int i = 0; i < r->cache_count; ++i)
         bytes += (long long)r->caches[i].count * sizeof(Rect);
       return bytes;
     }
-    case 3: return r->offscreen ? image : 0;
+    case 3: return gpu_memory(r->gpu, 3);
     case 4: return (long long)sizeof(Renderer);
     case 5: return image;
     default: return -1;
@@ -938,167 +793,30 @@ failed:
 
 int otui_gpu_count(Renderer* r) { return (int)r->count; }
 
-// Copy the CPU-side draw list and any new glyphs into this frame's GPU commands.
-// Do all fallible mapping before acquiring a swapchain: SDL forbids cancelling
-// a command buffer once it owns a presentable image.
-static bool upload_frame(Renderer* r, SDL_GPUCommandBuffer* cmd) {
-  if (r->count) {
-    void* data = SDL_MapGPUTransferBuffer(r->device, r->upload, true);
-    if (!data) return false;
-    memcpy(data, r->rects, r->count * sizeof(Rect));
-    SDL_UnmapGPUTransferBuffer(r->device, r->upload);
-    SDL_GPUCopyPass* copy = SDL_BeginGPUCopyPass(cmd);
-    SDL_GPUTransferBufferLocation src = {.transfer_buffer = r->upload};
-    SDL_GPUBufferRegion dst = {.buffer = r->buffer, .size = r->count * sizeof(Rect)};
-    SDL_UploadToGPUBuffer(copy, &src, &dst, true);
-    SDL_EndGPUCopyPass(copy);
-  }
-  if (r->atlas_dirty) {
-    void* data = SDL_MapGPUTransferBuffer(r->device, r->atlas_upload, true);
-    if (!data) return false;
-    memcpy(data, r->atlas_pixels, ATLAS_BYTES);
-    SDL_UnmapGPUTransferBuffer(r->device, r->atlas_upload);
-    SDL_GPUCopyPass* copy = SDL_BeginGPUCopyPass(cmd);
-    SDL_GPUTextureTransferInfo src = {.transfer_buffer = r->atlas_upload};
-    SDL_GPUTextureRegion dst = {.texture = r->atlas, .w = ATLAS_SIZE, .h = ATLAS_SIZE, .d = 1};
-    SDL_UploadToGPUTexture(copy, &src, &dst, false);
-    SDL_EndGPUCopyPass(copy);
-  }
-  return true;
-}
-
-// Rectangles and glyphs use one instanced draw. Shader coordinates stay logical;
-// the render pass maps them to the actual target's physical pixel dimensions.
-static void draw_frame(Renderer* r, SDL_GPUCommandBuffer* cmd, SDL_GPUTexture* image) {
-  SDL_GPUColorTargetInfo target = {.texture = image,
-                                   .clear_color = r->clear,
-                                   .load_op = SDL_GPU_LOADOP_CLEAR,
-                                   .store_op = SDL_GPU_STOREOP_STORE,
-                                   .cycle = r->offscreen};
-  SDL_GPURenderPass* pass = SDL_BeginGPURenderPass(cmd, &target, 1, NULL);
-  if (r->count) {
-    SDL_BindGPUGraphicsPipeline(pass, r->pipeline);
-    SDL_GPUTextureSamplerBinding atlas = {.texture = r->atlas, .sampler = r->sampler};
-    SDL_BindGPUFragmentSamplers(pass, 0, &atlas, 1);
-    SDL_GPUBufferBinding binding = {.buffer = r->buffer};
-    SDL_BindGPUVertexBuffers(pass, 0, &binding, 1);
-    float viewport[4] = {r->logical_width, r->logical_height, 0, 0};
-    SDL_PushGPUVertexUniformData(cmd, 0, viewport, sizeof(viewport));
-    SDL_DrawGPUPrimitives(pass, 6, r->count, 0, 0);
-  }
-  SDL_EndGPURenderPass(pass);
-}
-
-// Readback waits for this frame to finish before accessing its pixels. The caller
-// owns the download buffer; the surface borrows its mapped bytes until saved.
-static bool save_capture(Renderer* r, SDL_GPUCommandBuffer* cmd, SDL_GPUTransferBuffer* download,
-                         const char* path) {
-  SDL_GPUFence* fence = SDL_SubmitGPUCommandBufferAndAcquireFence(cmd);
-  if (!fence) return false;
-  r->atlas_dirty = false;
-  bool ok = SDL_WaitForGPUFences(r->device, true, &fence, 1);
-  SDL_ReleaseGPUFence(r->device, fence);
-  if (!ok) return false;
-  void* pixels = SDL_MapGPUTransferBuffer(r->device, download, false);
-  if (!pixels) return false;
+bool otui_save_pixels(const char* path, void* pixels, int width, int height, bool bgra) {
   SDL_Surface* surface = SDL_CreateSurfaceFrom(
-      (int)r->width, (int)r->height,
-      (!r->offscreen && (SDL_GetGPUSwapchainTextureFormat(r->device, r->window) ==
-                             SDL_GPU_TEXTUREFORMAT_B8G8R8A8_UNORM ||
-                         SDL_GetGPUSwapchainTextureFormat(r->device, r->window) ==
-                             SDL_GPU_TEXTUREFORMAT_B8G8R8A8_UNORM_SRGB))
-          ? SDL_PIXELFORMAT_BGRA32
-          : SDL_PIXELFORMAT_RGBA32,
-      pixels, (int)(r->width * 4));
+      width, height, bgra ? SDL_PIXELFORMAT_BGRA32 : SDL_PIXELFORMAT_RGBA32, pixels, width * 4);
   const char* suffix = strrchr(path, '.');
-  ok = surface && (suffix && SDL_strcasecmp(suffix, ".png") == 0 ? SDL_SavePNG(surface, path)
-                                                                 : SDL_SaveBMP(surface, path));
+  bool ok = surface && (suffix && SDL_strcasecmp(suffix, ".png") == 0 ? SDL_SavePNG(surface, path)
+                                                                      : SDL_SaveBMP(surface, path));
   if (surface) SDL_DestroySurface(surface);
-  SDL_UnmapGPUTransferBuffer(r->device, download);
   return ok;
 }
 
-// Direct frames draw into SDL's current swapchain with no intermediate image or
-// blit. A minimized/hidden window may have no swapchain image; submit uploads and
-// skip drawing in that case. Offscreen frames can still draw and capture, then
-// blit to the window if it is visible. Capture memory exists only for this call.
+// Draw and present the recorded list, saving it to capture when that is not
+// empty. The atlas stays dirty until the backend has submitted it.
 bool otui_gpu_frame(Renderer* r, const char* capture) {
-  SDL_GPUTransferBuffer* download = NULL;
-  SDL_GPUTexture* temporary = NULL;
-  if (capture[0]) {
-    // SDL transfer sizes are Uint32, and SDL surface pitch/dimensions are int.
-    // Check these API representations before multiplication or narrowing.
-    if (r->width > INT_MAX / 4 || r->height > INT_MAX || r->width > UINT32_MAX / 4 / r->height)
-      return SDL_SetError("Capture exceeds SDL's transfer buffer or surface representation");
-    SDL_GPUTransferBufferCreateInfo info = {
-        .usage = SDL_GPU_TRANSFERBUFFERUSAGE_DOWNLOAD,
-        .size = r->width * r->height * 4,
-    };
-    download = SDL_CreateGPUTransferBuffer(r->device, &info);
-    if (!download) return false;
-    if (!r->offscreen) {
-      SDL_GPUTextureFormat format = SDL_GetGPUSwapchainTextureFormat(r->device, r->window);
-      if (format != SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM &&
-          format != SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM_SRGB &&
-          format != SDL_GPU_TEXTUREFORMAT_B8G8R8A8_UNORM &&
-          format != SDL_GPU_TEXTUREFORMAT_B8G8R8A8_UNORM_SRGB) {
-        SDL_SetError("Capture requires an 8-bit RGBA or BGRA swapchain");
-        goto failed;
-      }
-      SDL_GPUTextureCreateInfo texture = {
-          .type = SDL_GPU_TEXTURETYPE_2D,
-          .format = format,
-          .usage = SDL_GPU_TEXTUREUSAGE_COLOR_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER,
-          .width = r->width,
-          .height = r->height,
-          .layer_count_or_depth = 1,
-          .num_levels = 1,
-      };
-      temporary = SDL_CreateGPUTexture(r->device, &texture);
-      if (!temporary) goto failed;
-    }
-  }
-  SDL_GPUCommandBuffer* cmd = SDL_AcquireGPUCommandBuffer(r->device);
-  if (!cmd) goto failed;
-  if (!upload_frame(r, cmd)) {
-    SDL_CancelGPUCommandBuffer(cmd);
-    goto failed;
-  }
-  SDL_GPUTexture* swapchain = NULL;
-  Uint32 width, height;
-  if (!SDL_WaitAndAcquireGPUSwapchainTexture(cmd, r->window, &swapchain, &width, &height)) {
-    SDL_CancelGPUCommandBuffer(cmd);
-    goto failed;
-  }
-  SDL_GPUTexture* image = temporary ? temporary : r->offscreen ? r->target : swapchain;
-  if (image) draw_frame(r, cmd, image);
-  if (download) {
-    SDL_GPUCopyPass* copy = SDL_BeginGPUCopyPass(cmd);
-    SDL_GPUTextureRegion src = {.texture = image, .w = r->width, .h = r->height, .d = 1};
-    SDL_GPUTextureTransferInfo dst = {.transfer_buffer = download};
-    SDL_DownloadFromGPUTexture(copy, &src, &dst);
-    SDL_EndGPUCopyPass(copy);
-  }
-  if ((r->offscreen || temporary) && swapchain) {
-    SDL_GPUBlitInfo blit = {
-        .source = {.texture = image, .w = r->width, .h = r->height},
-        .destination = {.texture = swapchain, .w = width, .h = height},
-        .load_op = SDL_GPU_LOADOP_DONT_CARE,
-        .filter = SDL_GPU_FILTER_LINEAR,
-    };
-    SDL_BlitGPUTexture(cmd, &blit);
-  }
-  if (download) {
-    bool ok = save_capture(r, cmd, download, capture);
-    SDL_ReleaseGPUTransferBuffer(r->device, download);
-    if (temporary) SDL_ReleaseGPUTexture(r->device, temporary);
-    return ok;
-  }
-  bool ok = SDL_SubmitGPUCommandBuffer(cmd);
-  if (ok) r->atlas_dirty = false;
+  GpuFrame frame = {
+      .rects = r->rects,
+      .count = r->count,
+      .atlas = r->atlas_pixels,
+      .atlas_dirty = r->atlas_dirty,
+      .clear = r->clear,
+      .logical_width = r->logical_width,
+      .logical_height = r->logical_height,
+  };
+  bool submitted = false;
+  bool ok = gpu_frame(r->gpu, &frame, capture, &submitted);
+  if (submitted) r->atlas_dirty = false;
   return ok;
-failed:
-  if (temporary) SDL_ReleaseGPUTexture(r->device, temporary);
-  if (download) SDL_ReleaseGPUTransferBuffer(r->device, download);
-  return false;
 }

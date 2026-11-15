@@ -15,6 +15,11 @@ run *args: build
 test *args: build
     cd .. && OTIUM_BUILD={{justfile_directory()}}/build PYTHONPATH=tools:. tests/run "$@"
 
-# Serve the browser page at http://localhost:8000
+# Copy the browser REPL into a directory of static files for the site
+dist dir="dist": build
+    mkdir -p {{dir}}
+    cp build/index.html build/worker.js build/otium-web.js build/otium-web.wasm {{dir}}
+
+# Serve the browser REPL at http://localhost:8000
 serve port="8000": build
     python3 -m http.server {{port}} --directory build

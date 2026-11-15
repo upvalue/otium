@@ -3,70 +3,184 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Otium</title>
+<title>Otium REPL</title>
 <style>
-  :root { color-scheme: light dark; --fg: #1d1f21; --bg: #fafafa; --muted: #6a6f75; --line: #d6d8db; --err: #b3261e; }
-  @media (prefers-color-scheme: dark) { :root { --fg: #e4e6e8; --bg: #17191b; --muted: #9aa0a6; --line: #34383c; --err: #f2867f; } }
-  body { margin: 0; padding: 16px; background: var(--bg); color: var(--fg); font: 14px/1.4 system-ui, sans-serif; }
-  main { max-width: 960px; margin: 0 auto; display: grid; gap: 12px; }
-  textarea, pre { box-sizing: border-box; width: 100%; margin: 0; padding: 10px; border: 1px solid var(--line);
-    border-radius: 6px; background: transparent; color: inherit; font: 13px/1.45 ui-monospace, Menlo, monospace; }
-  textarea { height: 45vh; resize: vertical; }
-  pre { min-height: 8em; white-space: pre-wrap; }
-  .stderr { color: var(--err); }
-  .bar { display: flex; gap: 8px; align-items: center; }
-  #status { color: var(--muted); }
+  :root {
+    color-scheme: light dark;
+    --fg: #1d1f21; --bg: #fafafa; --muted: #6a6f75; --line: #d6d8db; --err: #b3261e; --accent: #2f6f4f;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --fg: #e4e6e8; --bg: #17191b; --muted: #9aa0a6; --line: #34383c; --err: #f2867f; --accent: #8fc9a8;
+    }
+  }
+  :root[data-theme="dark"] {
+    --fg: #e4e6e8; --bg: #17191b; --muted: #9aa0a6; --line: #34383c; --err: #f2867f; --accent: #8fc9a8;
+  }
+  html, body { height: 100%; }
+  body { margin: 0; background: var(--bg); color: var(--fg);
+    font: 14px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  main { box-sizing: border-box; height: 100%; display: flex; flex-direction: column; padding: 12px 16px; }
+  #scroll { flex: 1; overflow-y: auto; cursor: text; }
+  #transcript { white-space: pre-wrap; overflow-wrap: anywhere; }
+  #transcript .input { color: var(--muted); }
+  #transcript .input:not(:first-child) { margin-top: 4px; }
+  #transcript .stderr { color: var(--err); }
+  #transcript .note { color: var(--muted); font-style: italic; }
+  .entry { display: flex; gap: 1ch; align-items: flex-start; padding-top: 4px; }
+  .prompt { color: var(--accent); user-select: none; }
+  textarea { flex: 1; min-width: 0; margin: 0; padding: 0; border: 0; outline: 0; resize: none;
+    background: transparent; color: inherit; font: inherit; overflow: hidden; }
+  .bar { display: flex; gap: 12px; align-items: center; padding-top: 8px; margin-top: 8px;
+    border-top: 1px solid var(--line); color: var(--muted); font-size: 12px; }
+  .bar span { flex: 1; }
+  /* iOS zooms into inputs smaller than 16px when they take focus. */
+  @media (max-width: 600px) { textarea { font-size: 16px; } }
+  button { font: inherit; color: inherit; background: none; border: 1px solid var(--line);
+    border-radius: 4px; padding: 2px 8px; cursor: pointer; }
+  button:disabled { opacity: 0.5; cursor: default; }
 </style>
 </head>
 <body>
 <main>
-  <textarea id="source" spellcheck="false">(def (fib n)
-  (if (< n 2) n (+ (fib (- n 1)) (fib (- n 2)))))
-
-(println "fib 25 =" (fib 25))
-(println (map (fn (x) (* x x)) (range 10)))</textarea>
-  <div class="bar">
-    <button id="run">Run</button>
-    <button id="stop" disabled>Stop</button>
-    <span id="status"></span>
+  <div id="scroll">
+    <div id="transcript" aria-live="polite"></div>
+    <div class="entry">
+      <span class="prompt" id="prompt">&gt;</span>
+      <textarea id="input" rows="1" spellcheck="false" autocapitalize="off" autocomplete="off"
+        aria-label="Otium input" disabled></textarea>
+    </div>
   </div>
-  <pre id="output"></pre>
+  <div class="bar">
+    <span id="status">Loading…</span>
+    <button id="stop" disabled title="Stop the running entry; this restarts the runtime">Stop</button>
+    <button id="clear" title="Clear the transcript (Ctrl+L)">Clear</button>
+  </div>
 </main>
 <script type="module">
 const $ = (id) => document.getElementById(id);
-let worker = null, started = 0;
+const input = $('input'), transcript = $('transcript'), scroll = $('scroll');
+const history = [];
+let worker = null, busy = false, historyAt = 0, started = 0;
 
-function finish(message) {
-  worker?.terminate();
-  worker = null;
-  $('run').disabled = false;
-  $('stop').disabled = true;
-  $('status').textContent = message;
+function append(text, kind) {
+  const atBottom = scroll.scrollHeight - scroll.scrollTop - scroll.clientHeight < 4;
+  const last = transcript.lastElementChild;
+  if (last && last.className === kind) last.textContent += text;
+  else {
+    const span = document.createElement('span');
+    span.className = kind;
+    span.textContent = text;
+    transcript.append(span);
+  }
+  if (atBottom) scroll.scrollTop = scroll.scrollHeight;
 }
 
-$('run').onclick = () => {
-  $('output').textContent = '';
-  $('run').disabled = true;
-  $('stop').disabled = false;
-  $('status').textContent = 'Running…';
-  started = performance.now();
+function fit() {
+  input.style.height = 'auto';
+  input.style.height = input.scrollHeight + 'px';
+  scroll.scrollTop = scroll.scrollHeight;
+}
+
+function setBusy(value, status) {
+  busy = value;
+  input.readOnly = value;
+  $('stop').disabled = !value;
+  $('status').textContent = status;
+}
+
+function boot(note) {
+  worker?.terminate();
+  if (note) append(note + '\n', 'note');
+  setBusy(true, 'Loading…');
+  input.disabled = true;
+  const loading = performance.now();
   worker = new Worker('worker.js', { type: 'module' });
   worker.onmessage = ({ data }) => {
-    if (data.text) {
-      const span = document.createElement('span');
-      span.className = data.stream;
-      span.textContent = data.text;
-      $('output').append(span);
+    if (data.text) append(data.text, data.stream);
+    if ('ready' in data) {
+      input.disabled = !data.ready;
+      setBusy(false, data.ready ? `Ready in ${Math.round(performance.now() - loading)} ms`
+                                : 'The runtime failed to start');
+      input.focus();
     }
-    if ('exit' in data) finish(`Exited with ${data.exit} after ${Math.round(performance.now() - started)} ms`);
+    if (data.status) finished(data.status);
   };
-  worker.onerror = (event) => finish(`Worker failed: ${event.message}`);
-  worker.postMessage({ source: $('source').value });
+  worker.onerror = (event) => {
+    append(`worker failed: ${event.message}\n`, 'stderr');
+    setBusy(false, 'Stopped');
+  };
+}
+
+function echo(text) {
+  const div = document.createElement('div');
+  div.className = 'input';
+  div.textContent = text.replace(/^/gm, (_, at) => at ? '  ' : '> ');
+  transcript.append(div);
+  scroll.scrollTop = scroll.scrollHeight;
+  return div;
+}
+
+let echoed = null;
+function submit() {
+  if (busy || input.disabled) return;
+  if (!input.value.trim()) return;
+  echoed = echo(input.value);
+  started = performance.now();
+  setBusy(true, 'Running…');
+  worker.postMessage({ source: input.value });
+}
+
+function finished(status) {
+  if (status === 'incomplete') {
+    // Nothing ran: keep editing the unfinished form on a new line.
+    echoed.remove();
+    setBusy(false, '');
+    $('prompt').textContent = '…';
+    input.value += '\n';
+    input.setSelectionRange(input.value.length, input.value.length);
+    fit();
+    return;
+  }
+  if (history.at(-1) !== input.value) history.push(input.value);
+  historyAt = history.length;
+  input.value = '';
+  $('prompt').textContent = '>';
+  fit();
+  if (status === 'exited' || status === 'crashed') boot(`${status}; restarting with a fresh runtime`);
+  else setBusy(false, `${status === 'failed' ? 'Failed' : 'Done'} in ${Math.round(performance.now() - started)} ms`);
+}
+
+input.addEventListener('input', fit);
+input.addEventListener('keydown', (event) => {
+  if (event.key === 'Enter' && !event.shiftKey) {
+    event.preventDefault();
+    submit();
+  } else if (event.key === 'l' && event.ctrlKey) {
+    event.preventDefault();
+    transcript.textContent = '';
+  } else if ((event.key === 'ArrowUp' || event.key === 'ArrowDown') && history.length) {
+    const before = input.value.slice(0, input.selectionStart);
+    const onFirst = !before.includes('\n'), onLast = !input.value.slice(input.selectionEnd).includes('\n');
+    if (event.key === 'ArrowUp' ? !onFirst : !onLast) return;
+    event.preventDefault();
+    historyAt = Math.max(0, Math.min(history.length, historyAt + (event.key === 'ArrowUp' ? -1 : 1)));
+    input.value = history[historyAt] ?? '';
+    input.setSelectionRange(input.value.length, input.value.length);
+    fit();
+  }
+});
+$('stop').onclick = () => {
+  input.value = '';
+  $('prompt').textContent = '>';
+  fit();
+  boot('stopped; definitions from before are gone');
 };
-$('stop').onclick = () => finish('Stopped');
-$('source').onkeydown = (event) => {
-  if (event.key === 'Enter' && (event.metaKey || event.ctrlKey) && !$('run').disabled) $('run').click();
-};
+// Clicking the transcript focuses the input, unless it selects text to copy.
+scroll.addEventListener('click', () => { if (!getSelection().toString()) input.focus(); });
+$('clear').onclick = () => { transcript.textContent = ''; input.focus(); };
+
+boot();
 </script>
 </body>
 </html>

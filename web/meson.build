@@ -36,10 +36,6 @@ helpers = static_library('otium-helpers', '../native/utf8/utf8.c', '../native/de
   '../native/line/line-edit.c', '../native/vendor/bestline/bestline.c',
   include_directories: include_directories('../native', '../native/vendor/bestline'),
   override_options: ['warning_level=0', 'werror=false'])
-entry_sources = files(runtime_dir / 'src/runtime.c', runtime_dir / 'src/main.c')
-
-link_base = ['-sALLOW_MEMORY_GROWTH=1', '-sSTACK_SIZE=8MB', '-sEXIT_RUNTIME=1']
-
 # For Node, with the host's files: the test harness runs this through the
 # otium launcher beside it, with the library read from the source tree.
 paths = {
@@ -51,23 +47,25 @@ node_args = []
 foreach name, path : paths
   node_args += '-D@0@="@1@"'.format(name, fs.as_posix(path))
 endforeach
-executable('otium', entry_sources,
+executable('otium', files(runtime_dir / 'src/runtime.c', runtime_dir / 'src/main.c'),
   c_args: node_args, include_directories: runtime_include, implicit_include_directories: false,
-  link_with: [common, helpers], link_args: link_base + ['-sNODERAWFS=1'])
+  link_with: [common, helpers], link_args: ['-sALLOW_MEMORY_GROWTH=1', '-sSTACK_SIZE=8MB', '-sEXIT_RUNTIME=1', '-sNODERAWFS=1'])
 custom_target('launcher', input: 'otium.in', output: 'otium',
   command: ['install', '-m', '755', '@INPUT@', '@OUTPUT@'], build_by_default: true)
 
-# For the browser, run in a worker: the library is embedded under /otium.
+# For the browser REPL, run in a worker: repl.c replaces main.c and keeps one
+# runtime alive between entries. The library is embedded under /otium.
 library_files = run_command('find', root / 'lib', '-type', 'f', check: true).stdout().strip().split('\n')
 web_args = ['-DOTIUM_LIBRARY_DIR="/otium/lib"', '-DOTIUM_BOOTSTRAP_FILE="/otium/primitives.ot"',
   '-DOTIUM_DEV_FILE="/otium/dev.ot"']
-executable('otium-web', entry_sources,
+executable('otium-web', files(runtime_dir / 'src/runtime.c', 'repl.c'),
   c_args: web_args, include_directories: runtime_include, implicit_include_directories: false,
   link_with: [common, helpers],
   link_depends: library_files + files('../c/src/primitives.ot', '../c/src/dev.ot'),
-  link_args: link_base + [
+  link_args: ['-sALLOW_MEMORY_GROWTH=1', '-sSTACK_SIZE=8MB', '--no-entry',
     '-sMODULARIZE=1', '-sEXPORT_ES6=1', '-sENVIRONMENT=worker',
-    '-sEXPORTED_RUNTIME_METHODS=FS',
+    '-sEXPORTED_FUNCTIONS=_otium_start,_otium_eval',
+    '-sEXPORTED_RUNTIME_METHODS=FS,ccall',
     '--embed-file', root / 'lib@/otium/lib',
     '--embed-file', root / 'c/src/primitives.ot@/otium/primitives.ot',
     '--embed-file', root / 'c/src/dev.ot@/otium/dev.ot'])

@@ -172,7 +172,9 @@ static void pause_for(uint64_t ns) {
   nanosleep(&pause, NULL);
 }
 
-/* A deadline seconds from now, or 0 for none (nil or #f). */
+/* A deadline seconds from now, or 0 for none (nil or #f). now() is never 0,
+ * so zero seconds is a deadline that has already passed: the wait doesn't
+ * park. */
 static bool deadline_after(ot_state* rt, ot_value seconds, uint64_t* deadline) {
   double s;
   if (seconds == OT_NIL || seconds == OT_FALSE) {
@@ -182,7 +184,7 @@ static bool deadline_after(ot_state* rt, ot_value seconds, uint64_t* deadline) {
   if (!oti_number(rt, seconds, &s) || s != s) return oti_error(rt, "expected a number of seconds");
   if (s < 0) s = 0;
   if (s > 1e9) s = 1e9;
-  *deadline = now(rt->threads) + (uint64_t)(s * 1e9) + 1;
+  *deadline = now(rt->threads) + (uint64_t)(s * 1e9 + 0.5);
   return true;
 }
 

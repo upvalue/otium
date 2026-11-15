@@ -1490,14 +1490,14 @@ void oti_thread_io_wake(ot_state* rt, ot_value queue) {
   while (q && q->head) wake(rt, q->head, OT_TRUE);
 }
 
-ot_value oti_thread_io_wait(ot_state* rt, ot_value queue, int fd, bool writing) {
+ot_value oti_thread_io_wait(ot_state* rt, ot_value queue, int fd, bool writing, uint64_t delay_ns) {
   oti_thread* me = rt->threads->current;
   if (!oti_grow(rt, (void**)&me->fds, &me->fd_capacity, 1, sizeof(struct pollfd))) return 0;
   me->fds[0] = (struct pollfd){.fd = fd, .events = writing ? POLLOUT : POLLIN};
   me->fd_count = fd >= 0 ? 1 : 0;
   oti_waitq* q = waitq_arg(rt, queue);
   if (!q) return 0;
-  ot_value result = wait_on(rt, q, queue, 0);
+  ot_value result = wait_on(rt, q, queue, delay_ns ? now(rt->threads) + delay_ns : 0);
   if (result == OTI_PARKED && fd >= 0) {
     me->fd_waiting = true;
     rt->threads->fd_waiters++;
@@ -1754,11 +1754,12 @@ void oti_thread_io_wake(ot_state* rt, ot_value queue) {
   (void)queue;
 }
 
-ot_value oti_thread_io_wait(ot_state* rt, ot_value queue, int fd, bool writing) {
+ot_value oti_thread_io_wait(ot_state* rt, ot_value queue, int fd, bool writing, uint64_t delay_ns) {
   (void)rt;
   (void)queue;
   (void)fd;
   (void)writing;
+  (void)delay_ns;
   return 0;
 }
 

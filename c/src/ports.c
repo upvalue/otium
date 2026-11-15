@@ -19,6 +19,8 @@ typedef struct {
   ot_value buffer, transfer, flush, close, name, waitq, writer;
   size_t position, length, capacity, offset;
   unsigned kind;
+  /* Writes in a row that failed although the fd polled ready; see park_on_fd. */
+  unsigned stalls;
   bool input, closed, eof, busy, poll_reads, may_block, socket;
   /* The most one write takes once the fd is ready, and how many bytes the
    * last readiness check still covers. */
@@ -64,6 +66,14 @@ static int fd_open(void* userdata, const char* path, unsigned flags, intptr_t* h
   if (fd < 0) return errno;
   struct stat st;
   int error = fstat(fd, &st) ? errno : S_ISDIR(st.st_mode) ? EISDIR : 0;
+  /* A terminal can report itself writable with less room than a write needs
+   * (Linux does, after output processing), so a blocking write could stall
+   * every thread. This description is ours alone, so make it non-blocking;
+   * transfer() parks on EAGAIN. */
+  if (!error && S_ISCHR(st.st_mode) && isatty(fd)) {
+    int fl = fcntl(fd, F_GETFL);
+    if (fl < 0 || fcntl(fd, F_SETFL, fl | O_NONBLOCK) < 0) error = errno;
+  }
   if (error) {
     close(fd);
     return error;
@@ -254,9 +264,10 @@ static void host_error(ot_state* rt, ot_value* port, const char* op, int error) 
 }
 
 #ifndef OTIUM_FREESTANDING
-/* Park the calling thread until the port's fd is ready; the call retries. A
- * writer parked partway through owns the port's output until it finishes. */
-static long park_on_fd(ot_state* rt, ot_value* port, bool writing) {
+/* Park the calling thread until the port's fd is ready, or with stalled for a
+ * moment instead; the call retries. A writer parked partway through owns the
+ * port's output until it finishes. */
+static long park_on_fd(ot_state* rt, ot_value* port, bool writing, bool stalled) {
   if (port_object(*port)->waitq == OT_NIL) {
     ot_value queue = oti_thread_make_waitq(rt);
     if (!queue) return -1;
@@ -264,7 +275,16 @@ static long park_on_fd(ot_state* rt, ot_value* port, bool writing) {
   }
   if (writing && port_object(*port)->writer == OT_NIL)
     port_object(*port)->writer = oti_thread_current(rt);
-  oti_thread_io_wait(rt, port_object(*port)->waitq, (int)port_object(*port)->handle, writing);
+  /* A Linux terminal can poll ready while a write still fails for want of
+   * buffer space, so waiting on the fd would spin. Back off instead, from 1 ms
+   * doubling to 32 ms, until a transfer succeeds. */
+  if (stalled) {
+    unsigned stalls = port_object(*port)->stalls++;
+    uint64_t delay = 1000000u << (stalls < 5 ? stalls : 5);
+    oti_thread_io_wait(rt, port_object(*port)->waitq, -1, writing, delay);
+  } else {
+    oti_thread_io_wait(rt, port_object(*port)->waitq, (int)port_object(*port)->handle, writing, 0);
+  }
   return -1;
 }
 
@@ -297,7 +317,7 @@ static long transfer(ot_state* rt, ot_value* port, bool writing, size_t start, s
       /* Try first: MSG_DONTWAIT leaves the shared file flags alone. */
       long n = socket_transfer(rt, port, writing, start, length);
       if (n == LONG_MIN) return -1;
-      if (n == -EAGAIN) return park_on_fd(rt, port, writing);
+      if (n == -EAGAIN) return park_on_fd(rt, port, writing, false);
       if (n == -EINTR) continue;
       if (n < 0) {
         host_error(rt, port, writing ? "write" : "read", n < -INT_MAX ? EIO : (int)-n);
@@ -320,7 +340,7 @@ static long transfer(ot_state* rt, ot_value* port, bool writing, size_t start, s
         host_error(rt, port, writing ? "write" : "read", errno);
         return -1;
       }
-      if (polled <= 0) return park_on_fd(rt, port, writing);
+      if (polled <= 0) return park_on_fd(rt, port, writing, false);
       if (writing) port_object(*port)->write_room = port_object(*port)->write_chunk;
       ready = true;
     }
@@ -344,7 +364,15 @@ static long transfer(ot_state* rt, ot_value* port, bool writing, size_t start, s
     long n = writing ? p->host.write(p->userdata, p->handle, bytes, length)
                      : p->host.read(p->userdata, p->handle, bytes, length);
     if (!host_end(rt, *port)) return -1;
-    if ((n == -EAGAIN || n == -EWOULDBLOCK) && can_wait(rt)) continue;
+    if (n == -EAGAIN || n == -EWOULDBLOCK) {
+      if (can_wait(rt)) return park_on_fd(rt, port, writing, true);
+#ifndef OTIUM_FREESTANDING
+      /* A non-blocking descriptor where this thread can't park: wait here. */
+      struct pollfd fd = {.fd = (int)port_object(*port)->handle,
+                          .events = writing ? POLLOUT : POLLIN};
+      if (poll(&fd, 1, -1) >= 0 || errno == EINTR) continue;
+#endif
+    }
     if (n == -EINTR) {
       if (!interrupt_poll(rt)) return -1;
       continue;
@@ -357,10 +385,9 @@ static long transfer(ot_state* rt, ot_value* port, bool writing, size_t start, s
       oti_error(rt, writing ? "invalid host write count" : "invalid host read count");
       return -1;
     }
-    if (writing) {
-      p = port_object(*port);
-      p->write_room = p->write_room > (size_t)n ? p->write_room - (size_t)n : 0;
-    }
+    p = port_object(*port);
+    p->stalls = 0;
+    if (writing) p->write_room = p->write_room > (size_t)n ? p->write_room - (size_t)n : 0;
     return n;
   }
 }
@@ -372,7 +399,7 @@ static bool write_lock(ot_state* rt, ot_value* port) {
   oti_port_obj* p = port_object(*port);
   if (p->writer == OT_NIL || p->writer == oti_thread_current(rt)) return true;
   if (!can_wait(rt)) return oti_error(rt, "output port is owned by another thread");
-  oti_thread_io_wait(rt, p->waitq, -1, false);
+  oti_thread_io_wait(rt, p->waitq, -1, false, 0);
   return false;
 }
 

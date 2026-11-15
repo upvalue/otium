@@ -1166,7 +1166,9 @@ void oti_ports_abandon(ot_state* rt, ot_value owner);
 bool oti_thread_parked(ot_state* rt);
 void oti_thread_io_retry(ot_state* rt);
 ot_value oti_thread_make_waitq(ot_state* rt);
-ot_value oti_thread_io_wait(ot_state* rt, ot_value queue, int fd, bool writing);
+/* Park on queue until fd is ready, or with fd -1 until woken. A nonzero
+ * delay_ns also ends the wait after that long. */
+ot_value oti_thread_io_wait(ot_state* rt, ot_value queue, int fd, bool writing, uint64_t delay_ns);
 void oti_thread_io_wake(ot_state* rt, ot_value queue);
 /* A poll found the stack limit tripped while threads exist: yield when it's
  * time to. False when the thread must unwind. */

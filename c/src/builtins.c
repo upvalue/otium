@@ -185,7 +185,8 @@ static ot_value arithmetic(ot_state* rt, unsigned id, size_t first, size_t count
         case B_SUB: real -= operand; break;
         case B_MUL: real *= operand; break;
         case B_DIV:
-          if (operand == 0) {
+          /* Dividing by integer zero is an error; by 0.0 it follows IEEE. */
+          if (ot_is_int(v) && operand == 0) {
             oti_error(rt, "division by zero");
             return 0;
           }

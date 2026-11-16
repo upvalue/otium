@@ -332,6 +332,14 @@ static oti_ast* atom(oti_reader* r, size_t start) {
     syntax_error(r, start, "E0008", "empty keyword");
     return NULL;
   }
+  /* The printed forms of the non-finite floats read back. */
+  if (n == 6 && (*s == '+' || *s == '-') &&
+      (!memcmp(s + 1, "inf.0", 5) || !memcmp(s + 1, "nan.0", 5))) {
+    oti_ast* a = node(r, AST_FLOAT, start);
+    if (!a) return NULL;
+    a->as.real = s[1] == 'n' ? NAN : *s == '-' ? -INFINITY : INFINITY;
+    return a;
+  }
   size_t sign = (*s == '+' || *s == '-');
   bool numeric =
       sign < n && (isdigit((unsigned char)s[sign]) ||

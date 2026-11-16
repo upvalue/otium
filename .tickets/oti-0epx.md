@@ -1,7 +1,7 @@
 ---
 id: oti-0epx
 status: open
-deps: [oti-ap6a]
+deps: [oti-ap6a, oti-d5d0]
 links: []
 created: 2026-11-15T23:08:16Z
 type: task

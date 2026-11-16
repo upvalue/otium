@@ -94,7 +94,7 @@ A character literal is `#\` followed by one character, which is taken even
 when it is a delimiter (`#\(`, `#\ `), or by a name: `#\space`,
 `#\newline`, `#\tab`, `#\return`, `#\nul`, or `#\x` and hex digits for a
 Unicode scalar value (`#\x41`). Names are case-sensitive. An unknown name, a
-surrogate or a value above `#x10FFFF` is a read error.
+surrogate or a value above `0x10FFFF` is a read error.
 
 ### 1.5 Quote sugar
 
@@ -143,7 +143,7 @@ symbol.
 | `array` | `[1 2]` | yes | growable vector |
 | `table` | `{:a 1}` | yes | insertion-ordered map, arbitrary keys |
 | `buffer` | `#<buffer "…">` | yes | mutable string builder |
-| `function` | `#<fn name>` | -- | closures and host natives are indistinguishable |
+| `function` | `#<function name>` | -- | `#<function>` when anonymous; closures and host natives print alike |
 | `macro` | `#<macro name>` | -- | |
 | `param` | `#<param name>` | -- | dynamically-scoped cell (section 9) |
 | `restart` | `#<restart name>` | -- | active recovery point (8.5); identity compare |
@@ -184,8 +184,7 @@ returns `nil` (`copy`). And where absence cannot mean anything --
 
 Tables remember the order their keys were first inserted, and every
 order-observing operation uses it: printing, `keys`, `values`, and the
-iteration behind `merge`, `map-vals`, `group-by`, and `frequencies`. The
-fine print:
+iteration behind `merge`. The fine print:
 
 - Updating an existing key keeps its original position.
 - Deleting a key and inserting it again moves it to the end; the
@@ -289,10 +288,8 @@ O(total length). **Buffers** exist to make repeated appending cheap:
 **Equality:** `eq?` is O(1). `equal?` is O(size of the smaller value), descending
 through pairs and arrays and stopping at other mutable values.
 
-**Library functions** over sequences (`map`, `filter`, `reduce`,
-`group-by`, `frequencies`, …) are O(n) in elements visited, times the
-cost of their callbacks; `group-by` and `frequencies` add expected-O(1)
-table operations per element. `sort` and `sort-by` are O(n log n) and
+**Library functions** over sequences (`map`, `filter`, `reduce`, …) are
+O(n) in elements visited, times the cost of their callbacks. `sort` and `sort-by` are O(n log n) and
 stable. `put`, `dissoc`, and `update` copy: O(n) plus the operation.
 `contains?` on a sequence is O(n); on a string, naive substring search
 (O(n·m)) is permitted.
@@ -361,6 +358,9 @@ Callable values:
   keyword as key.
 - **Params** -- `(p)` returns the param's current dynamic value
   (section 9). Calling one with arguments is an error.
+- **Records** -- `(r :field)` reads a field ([records](records.md)).
+- **Class instances and generic functions** -- `(obj :slot)` reads a
+  slot; a generic function dispatches ([classes](classes.md)).
 
 Applying anything else is an error.
 
@@ -460,6 +460,12 @@ surfaced by `describe`.
 if none exists, to `name`'s var (resolved as in 3.1, including qualified
 names). Assigning an unbound name is an error. Returns the value.
 
+`(set! (obj key) expr)` assigns through a one-argument call target: it
+expands to `(set-applied! obj key expr)`, which writes a table key, an
+array index, or a record field or instance slot, and returns the value.
+Any other call shape is an error. See
+[classes](classes.md#assigning-through-a-call).
+
 ---
 
 ## 5. Special forms
@@ -533,6 +539,12 @@ it is written (6.2).
 `(unwind-protect …)`/`(defer …)`** -- section 8.
 
 **`(defparam …)` / `(with-params …)`** -- section 9.
+
+**`(symbol-macrolet …)`** -- 6.1.
+
+**`(defclass …)`, `(defabstract …)`, `(defgeneric …)`, `(defmethod …)`,
+`(with-slots …)`, `(reset-class! …)`, `(reset-generic! …)`** --
+[classes](classes.md).
 
 ---
 
@@ -648,8 +660,8 @@ the same template with each symbol rewritten:
   made with `gensym` each time the template is evaluated. Every `name#`
   in one template is the same symbol. `name#` inside a nested template is
   an error.
-- These stay as written: special-form names; `when`, `unless`, `else`,
-  `catch`, `&`, `_`, `array` and `table`; symbols inside a `quote`d form
+- These stay as written: special-form names (section 5); `when`,
+  `unless`, `else`, `catch`, `&`, `&optional`, `_`, `array` and `table`; symbols inside a `quote`d form
   in the template; and the specs of an `ns` or `require` form.
 
 Unquoted expressions are code, expanded normally. A nested quasiquote or
@@ -714,20 +726,26 @@ finishes, so a switch cannot leak out of nested code.
 ### 7.3 `require`
 
 `(require spec…)` where each spec is a symbol `full.name` or a list
-`(full.name option…)` with options:
+`(full.name option…)`. A single spec may also be written flat, without
+its own parentheses: `(require full.name :as alias :refer (a b))`. The
+options are:
 
 - `:as alias` -- register `alias → full.name` in the current namespace's
   alias map. An alias spelled like the name of another existing namespace
   is an error.
 - `:refer (a b)` -- copy the named public vars into the current
   namespace's refer map. Referring a missing or private var is an error.
-- `:reload` -- discard any loaded copy of the namespace and re-load it.
+- `:reload` -- evaluate the file again even if the namespace is loaded.
+  It is evaluated into the existing namespace: definitions the file no
+  longer contains stay, `defonce` vars keep their values, and forms that
+  ran before an error keep their effect.
 
 Quoting of specs and names is tolerated and ignored. If the namespace is
 not yet loaded, it is located on the **load path**: the name with `.`
 replaced by `/` plus the extension `.ot`, searched across the host's
 configured load-path directories; the file is evaluated with the current
-namespace set to the target. A file that is already mid-load (circular
+namespace set to the target. If the file has an `ns` form it must name
+the required namespace; a different name is an error. A file that is already mid-load (circular
 require) is an error, as is a name not found on the path.
 
 ### 7.4 Privacy
@@ -958,6 +976,8 @@ to float.
 | `(modulo a b)` → int | Modulus, sign of the divisor. |
 | `(abs n)` → num | Absolute value. |
 | `(min n n…)` / `(max n n…)` → num | Extremum (numeric comparison). |
+| `(clamp n low high)` → num | `n` limited to the inclusive range `[low, high]`. |
+| `(gcd i…)` / `(lcm i…)` → int | Greatest common divisor / least common multiple; `(gcd)` is `0`, `(lcm)` is `1`. |
 | `(floor n)` `(ceiling n)` `(round n)` `(truncate n)` → int | Round a float to int (identity on ints); result outside int range errors. `round` rounds half away from zero; `truncate` rounds toward zero. |
 | `(sqrt n)` `(exp n)` `(log n)` → float | Standard floating-point functions. Domain and range results follow the host math library. |
 | `(sin n)` `(cos n)` `(tan n)` `(asin n)` `(acos n)` → float | Standard trigonometric functions using radians. |
@@ -1006,7 +1026,7 @@ table, string, buffer; other types error.
 | `(cons a d)` → pair | |
 | `(car p)` / `(cdr p)` | Head/tail of a **pair**; strict, `(car '())` is an error. |
 | `(set-car! p v)` / `(set-cdr! p v)` → p | Mutate a pair; the result may be cyclic. Mutating a pair frozen as a table key is an error. |
-| `(caar p)` `(cadr p)` `(cddr p)` … `(cadddr p)` | Compositions, up to three levels plus `cadddr`. |
+| `(caar p)` `(cadr p)` … `(cdddr p)`, `(cadddr p)` | All `c[ad]r` compositions of two and three levels, plus `cadddr`. |
 | `(list-ref l k)` / `(list-tail l k)` | Element at, or tail after, index `k`; out of range is an error. |
 | `(memq x l)` / `(member x l)` | First tail whose car is `eq?` / `equal?` to `x`, or `nil`. |
 | `(assq k al)` / `(assoc k al)` | First pair in an alist whose car is `eq?` / `equal?` to `k`, or `nil`. |
@@ -1045,8 +1065,10 @@ or is cyclic.
 | `(contains? coll x)` → bool | Key presence in a table, element (`equal?`) in a sequence, substring in a string; `nil` is `#f`. |
 | `(sort seq)` | Ascending, kind-preserving; orderable classes per 2.5. |
 | `(sort-by keyfn seq)` | Sort by derived keys (same class rules); stable. |
-| `(group-by keyfn seq)` → table | Key → array of elements, in first-seen key order. |
-| `(frequencies seq)` → table | Element → count. |
+| `(find-index pred seq)` | Index of the first element where `pred` is truthy, or `nil`. |
+| `(insert-at seq i x)` / `(remove-at seq i)` | Kind-preserving copy with `x` inserted before index `i`, or with the element at `i` removed. |
+
+`group-by` and `frequencies` are in `otium.extra` (10.13).
 
 ### 10.5 Tables and arrays
 
@@ -1089,11 +1111,15 @@ All positions are in characters (code points).
 | `(string-trim s)` → string | Strip surrounding whitespace. |
 | `(string-contains? s sub)` `(string-starts-with? s p)` `(string-ends-with? s p)` → bool | Literal tests. |
 | `(string-replace s from to)` → string | Every literal occurrence. |
+| `(string-index s part [start])` | Character index of the first `part` at or after `start`, or `nil`. An empty `part` matches at `start`. |
+| `(string-repeat s n)` → string | `s` repeated `n` times; `0` gives `""`. |
+| `(string=? s s…)` `(string<? a b)` `(string<=? s s…)` `(string>? s s…)` `(string>=? s s…)` → bool | Lexicographic comparison. |
 | `(string->number s)` | Int or float per 1.3 (surrounding whitespace ok), else `nil`. |
 | `(number->string n)` → string | Display form. |
 | `(string->symbol s)` / `(symbol->string sym)` | |
 | `(symbol x)` / `(keyword x)` | Coerce a string/symbol/keyword. |
 | `(name x)` → string | The name of a symbol, keyword, or string. |
+| `(keyword->string k)` → string | A keyword's name without the colon. |
 | `(buffer [x])` → buffer | Mutable string builder, optionally seeded with `x`'s display form. |
 | `(buffer-push! b x…)` → b | Append display forms. |
 | `(buffer->string b)` → string | Freeze; the buffer remains usable. |
@@ -1103,7 +1129,7 @@ Characters:
 | form | behavior |
 |---|---|
 | `(char->integer c)` → int | The code point. |
-| `(integer->char n)` → char | Errors on surrogates, negative values and values above `#x10FFFF`. |
+| `(integer->char n)` → char | Errors on surrogates, negative values and values above `0x10FFFF`. |
 | `(char=? c c…)` `(char<? …)` `(char<=? …)` `(char>? …)` `(char>=? …)` → bool | Compare code points. |
 | `(char-upcase c)` / `(char-downcase c)` → char | May be ASCII-only (Appendix A). |
 | `(char-alphabetic? c)` `(char-numeric? c)` `(char-whitespace? c)` → bool | May be ASCII-only (Appendix A). |
@@ -1142,12 +1168,12 @@ system clock for civil time:
 |---|---|
 | `(apply f a… seq)` | Call `f` with leading args followed by the sequence's elements. |
 | `(identity x)` | |
-| `(partial f a…)` → fn | Prepends `a…` to the call's arguments. |
-| `(comp f…)` → fn | Right-to-left composition; `(comp)` is `identity`. |
 | `(eval form)` | Macroexpand and evaluate a value as code in the current namespace (no lexical scope). |
 | `(read-string s)` → value | Read exactly one form; empty or trailing input errors. |
 | `(macroexpand-1 form)` → value | If `form` is a macro call (per the head rule of section 6), call the macro once and return the result; otherwise return `form` unchanged. |
 | `(macroexpand form)` → value | `macroexpand-1` repeated until the head is no longer a macro call. Neither function descends into subforms. |
+| `(macroexpand-all form)` → value | Expand every macro call in `form`, including subforms, as the evaluator does before compiling. |
+| `(call-with-cleanup body cleanup)` | Function form of `unwind-protect` (8.7): calls `body` with no arguments, then `cleanup` with the exit outcome: `nil` on return or restart transfer, the condition on error, `:quit` on exit or interrupt. |
 | `(gensym [prefix])` → symbol | Section 6. |
 
 ### 10.10 Conditions
@@ -1175,10 +1201,10 @@ Params are made and bound by the special forms `defparam` and
 |---|---|
 | `(when test body…)` | `body` as `begin` when truthy, else `nil`. |
 | `(unless test body…)` | Inverse. |
-| `(defn name params body…)` | `(def (name . params) body…)`. |
-| `(-> x forms…)` | Thread-first: insert `x` as the first argument of each form (bare symbols call as `(form x)`). |
-| `(->> x forms…)` | Thread-last. |
 | `(dotimes (i n) body…)` | `i` from 0 below `n`. |
+| `(for [name] (clause…) [=> final] body…)` | Lockstep loop over drivers (`(x :in seq)`, `(k v :in table)`, `(i :range [start] end [step])`, `(x := init next)`) and accumulators (`:collect`, `:collect-array`, `:sum`, each with optional `:when`). With a name, the loop continues only when the body calls `(name)` in tail position; `(name :done)` steps once more and returns `final`. |
+
+`dotimes` and `for` are defined in `otium.loop` and re-exported by core.
 
 ---
 
@@ -1186,6 +1212,23 @@ Params are made and bound by the special forms `defparam` and
 expression once and compares it with unevaluated literal datums using `equal?`.
 The first matching clause runs and returns its last expression. Without a match,
 the result is `nil`. An optional `else` must be last. Use `match` for destructuring.
+
+### 10.13 `otium.extra`
+
+These helpers are not part of core; load them with
+`(require otium.extra :as extra)`.
+
+| form | behavior |
+|---|---|
+| `(-> x forms…)` | Thread-first: insert `x` as the first argument of each form (bare symbols call as `(form x)`). |
+| `(->> x forms…)` | Thread-last. |
+| `(partial f a…)` → fn | Prepends `a…` to the call's arguments. |
+| `(comp f…)` → fn | Right-to-left composition; `(comp)` is `identity`. |
+| `(group-by keyfn seq)` → table | Key → array of elements, in first-seen key order. |
+| `(frequencies seq)` → table | Element → count. |
+
+Both table builders iterate in insertion order (2.3) and are O(n) with
+expected-O(1) table operations per element.
 
 
 ## Appendix A: implementation limits and latitude
@@ -1202,7 +1245,7 @@ the result is `nil`. An optional `else` must be last. Use `match` for destructur
 - **Interrupt granularity** (3.6) is implementation-defined but must be
   bounded.
 - **Table iteration order** is insertion order everywhere (printing,
-  `keys`, `values`, `merge`, `group-by`, …).
+  `keys`, `values`, `merge`, …).
 - Unicode case mapping and character classification may be
   ASCII-conservative, but lengths, indexing, and `substring` must be
   code-point correct.

@@ -1310,6 +1310,8 @@ static ot_value result_builtin(ot_state* rt, size_t first, size_t count) {
   return v ? as_thread(v)->result : 0;
 }
 
+ot_value oti_thread_name(ot_value thread) { return as_thread(thread)->name; }
+
 static ot_value name_builtin(ot_state* rt, size_t first, size_t count) {
   if (!oti_check_arity(rt, "%thread-name", count, 1, 1)) return 0;
   ot_value v = thread_value(rt, rt->stack[first], "thread");
@@ -1722,6 +1724,11 @@ bool oti_thread_foreground(ot_state* rt) {
 
 ot_value oti_thread_current(ot_state* rt) {
   (void)rt;
+  return OT_NIL;
+}
+
+ot_value oti_thread_name(ot_value thread) {
+  (void)thread;
   return OT_NIL;
 }
 

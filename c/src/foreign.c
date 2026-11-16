@@ -3,6 +3,7 @@
 #include "foreign_types.h"
 #include <dlfcn.h>
 #include <float.h>
+#include <inttypes.h>
 #include <limits.h>
 #include <math.h>
 #include <pthread.h>
@@ -250,6 +251,23 @@ static ot_value library_object(ot_state* rt, oti_library* library, ot_value name
   }
   oti_roots_pop(&rt->heap, &roots);
   return value;
+}
+
+void oti_foreign_repr(FILE* out, ot_value v) {
+  if (oti_kind(v, K_FOREIGN_FUNCTION)) {
+    fputs("#<function ", out);
+    ot_print(NULL, out, function_obj(v)->symbol);
+    fputc('>', out);
+  } else if (oti_kind(v, K_FOREIGN_LIBRARY)) {
+    fputs("#<foreign-library ", out);
+    ot_write(NULL, out, library_obj(v)->name);
+    fputc('>', out);
+  } else if (oti_kind(v, K_POINTER)) {
+    const oti_pointer* p = &pointer_obj(v)->pointer;
+    fprintf(out, "#<foreign-pointer 0x%" PRIxPTR, p->address);
+    if (p->bounded) fprintf(out, " %zu", p->length);
+    fputc('>', out);
+  } else fputs("#<foreign-layout>", out);
 }
 
 void oti_foreign_stats(const ot_state* rt, ot_stats* stats) {
@@ -1597,6 +1615,11 @@ void oti_foreign_destroy(ot_state* rt) { (void)rt; }
 void oti_foreign_collect(ot_state* rt) { (void)rt; }
 
 void oti_foreign_weak(ot_state* rt) { (void)rt; }
+
+void oti_foreign_repr(FILE* out, ot_value v) {
+  (void)v;
+  fputs("#<foreign>", out);
+}
 
 void oti_foreign_stats(const ot_state* rt, ot_stats* stats) {
   (void)rt;

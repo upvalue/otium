@@ -23,6 +23,15 @@ int oti_builtin_index(const char* name) {
   return -1;
 }
 
+/* The first name builtin id is bound under, with its namespace prefix, or
+ * NULL. Only for printing: it searches the tables. */
+const char* oti_builtin_name(unsigned id) {
+  for (size_t m = 0; m < BUILTIN_MODULES; m++)
+    for (const oti_builtin_def* d = builtin_modules[m]; d->run; d++)
+      if (d->id == id && d->name) return d->name;
+  return NULL;
+}
+
 oti_builtin_fn oti_builtin_run[B_COUNT];
 
 /* Fill oti_builtin_run, the first time a state is created. Every id must be
@@ -165,7 +174,7 @@ static ot_value arithmetic(ot_state* rt, unsigned id, size_t first, size_t count
       next = ot_to_int((bits << 1) | 1);
       integer = next;
     } else {
-      double operand;
+      double operand = 0;
       if (!oti_number(rt, v, &operand)) return 0;
       if (exact) {
         exact = false;

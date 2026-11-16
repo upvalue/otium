@@ -1463,7 +1463,46 @@ void ot_gc_stress(ot_state* rt, bool enabled) {
   oti_heap_set_ready(&rt->heap, rt->heap.used);
 }
 
-static void print_value(FILE* out, ot_value v, unsigned depth) {
+/* Writes n bytes of text as a string literal. */
+static void print_string_literal(FILE* out, const unsigned char* s, size_t n) {
+  fputc('"', out);
+  for (size_t i = 0; i < n; i++) {
+    switch (s[i]) {
+      case '"': fputs("\\\"", out); break;
+      case '\\': fputs("\\\\", out); break;
+      case '\n': fputs("\\n", out); break;
+      case '\r': fputs("\\r", out); break;
+      case '\t': fputs("\\t", out); break;
+      case 0: fputs("\\0", out); break;
+      case 27: fputs("\\e", out); break;
+      default:
+        if (s[i] < 32 || s[i] == 127) fprintf(out, "\\x%x;", s[i]);
+        else fputc(s[i], out);
+    }
+  }
+  fputc('"', out);
+}
+
+/* The bytes of a buffer shown before its printed form is cut short. */
+#define PRINT_BUFFER_LIMIT 40
+
+/* #<kind name>, or #<kind> when there is no name. */
+static void print_named(FILE* out, const char* kind, const char* name) {
+  if (name) fprintf(out, "#<%s %s>", kind, name);
+  else fprintf(out, "#<%s>", kind);
+}
+
+/* A builtin's name without its namespace prefix: otium.ffi/malloc prints as
+ * malloc. The division builtin is named "/" itself. */
+static const char* builtin_print_name(unsigned id) {
+  const char* name = oti_builtin_name(id);
+  const char* slash = name ? strrchr(name, '/') : NULL;
+  return slash && slash != name && slash[1] ? slash + 1 : name;
+}
+
+/* rt is NULL when printing from a place that has no state, which only prints
+ * names; closures and natives then print without theirs. */
+static void print_value(ot_state* rt, FILE* out, ot_value v, unsigned depth) {
   if (depth > 100) {
     fputs("...", out);
     return;
@@ -1477,11 +1516,7 @@ static void print_value(FILE* out, ot_value v, unsigned depth) {
   else if (v == OT_TRUE) fputs("#t", out);
   else if (v == OT_EMPTY) fputs("()", out);
   else if (v == OT_EOF) fputs("#<eof>", out);
-  else if (oti_kind(v, K_PARAM)) {
-    fputs("#<param ", out);
-    print_value(out, oti_as_param(v)->name, depth + 1);
-    fputc('>', out);
-  } else if ((v & 255) == TAG_CHAR) {
+  else if ((v & 255) == TAG_CHAR) {
     uint32_t cp = (uint32_t)(v >> 8);
     char bytes[4];
     if (!depth) {
@@ -1498,105 +1533,156 @@ static void print_value(FILE* out, ot_value v, unsigned depth) {
       size_t n = oti_utf8_encode(cp, bytes);
       fwrite(bytes, 1, n, out);
     }
-  } else if ((v & 255) == TAG_BUILTIN) fputs("#<builtin>", out);
-  else if (oti_kind(v, K_FLOAT)) {
-    char buffer[64];
-    oti_format_float(oti_as_float(v)->value, buffer, sizeof(buffer));
-    fputs(buffer, out);
-  } else if (oti_kind(v, K_STRING) || oti_kind(v, K_SYMBOL) || oti_kind(v, K_KEYWORD)) {
-    size_t n = oti_bytes_length(v);
-    const unsigned char* s = oti_bytes_data(v);
-    if (oti_kind(v, K_STRING) && depth) {
-      fputc('"', out);
-      for (size_t i = 0; i < n; i++) {
-        switch (s[i]) {
-          case '"': fputs("\\\"", out); break;
-          case '\\': fputs("\\\\", out); break;
-          case '\n': fputs("\\n", out); break;
-          case '\r': fputs("\\r", out); break;
-          case '\t': fputs("\\t", out); break;
-          case 0: fputs("\\0", out); break;
-          case 27: fputs("\\e", out); break;
-          default:
-            if (s[i] < 32 || s[i] == 127) fprintf(out, "\\x%x;", s[i]);
-            else fputc(s[i], out);
+  } else if ((v & 255) == TAG_BUILTIN) print_named(out, "function", builtin_print_name((unsigned)(v >> 8)));
+  else if (!value_is_ptr(v)) fprintf(out, "#<unknown %#" PRIxPTR ">", (uintptr_t)v);
+  else switch (object_kind(v)) {
+      case K_FLOAT: {
+        char buffer[64];
+        oti_format_float(oti_as_float(v)->value, buffer, sizeof(buffer));
+        fputs(buffer, out);
+        break;
+      }
+      case K_STRING:
+      case K_SYMBOL:
+      case K_KEYWORD:
+        if (oti_kind(v, K_STRING) && depth) print_string_literal(out, oti_bytes_data(v), oti_bytes_length(v));
+        else fwrite(oti_bytes_data(v), 1, oti_bytes_length(v), out);
+        break;
+      case K_BUFFER: {
+        oti_buffer_obj* b = oti_as_buffer(v);
+        const unsigned char* bytes = b->length ? oti_as_buffer_data(b->data)->bytes : NULL;
+        size_t n = b->length;
+        bool cut = n > PRINT_BUFFER_LIMIT;
+        if (cut) {
+          /* Back up to the start of a character. */
+          n = PRINT_BUFFER_LIMIT;
+          while (n && (bytes[n] & 0xc0) == 0x80) n--;
         }
+        fputs("#<buffer ", out);
+        print_string_literal(out, bytes, n);
+        fputs(cut ? "...>" : ">", out);
+        break;
       }
-      fputc('"', out);
-    } else fwrite(s, 1, n, out);
-  } else if (oti_kind(v, K_RECORD) || oti_kind(v, K_RECORD_TYPE)) {
-    bool descriptor = oti_kind(v, K_RECORD_TYPE);
-    fputs(descriptor ? "#<record-type " : "#<record ", out);
-    print_value(out, oti_as_record_type(descriptor ? v : oti_as_record(v)->type)->name, depth + 1);
-    fputc('>', out);
-  } else if (oti_kind(v, K_INSTANCE)) {
-    fputs("#<", out);
-    print_value(out, oti_as_class(oti_as_instance(v)->type)->name, depth + 1);
-    fputc('>', out);
-  } else if (oti_kind(v, K_PORT)) {
-    oti_port_repr(out, v);
-  } else if (oti_kind(v, K_RESTART)) {
-    fputs("#<restart ", out);
-    print_value(out, oti_as_restart(v)->name, depth + 1);
-    fputc('>', out);
-  } else if (oti_kind(v, K_BYTEVECTOR)) {
-    fputs("#u8(", out);
-    for (size_t i = 0; i < oti_bytes_length(v); i++) {
-      if (i) fputc(' ', out);
-      fprintf(out, "%u", oti_bytes_data(v)[i]);
-    }
-    fputc(')', out);
-  } else if (oti_kind(v, K_ARRAY)) {
-    oti_array_obj* info = oti_as_array(v);
-    ot_value* items = info->length ? oti_as_array_data(info->data)->items : NULL;
-    fputc('[', out);
-    for (size_t i = 0; i < info->length; i++) {
-      if (i) fputc(' ', out);
-      print_value(out, items[i], depth + 1);
-    }
-    fputc(']', out);
-  } else if (oti_kind(v, K_TABLE)) {
-    oti_table_obj* info = oti_as_table(v);
-    ot_value* entries = info->used ? oti_as_table_data(info->data)->entries : NULL;
-    fputc('{', out);
-    size_t printed = 0;
-    for (size_t i = 0; i < info->used; i++)
-      if (entries[2 * i + 1] != OT_NIL) {
-        if (printed++) fputc(' ', out);
-        print_value(out, entries[2 * i], depth + 1);
-        fputc(' ', out);
-        print_value(out, entries[2 * i + 1], depth + 1);
+      case K_PARAM:
+        fputs("#<param ", out);
+        print_value(rt, out, oti_as_param(v)->name, depth + 1);
+        fputc('>', out);
+        break;
+      case K_RECORD:
+      case K_RECORD_TYPE: {
+        bool descriptor = oti_kind(v, K_RECORD_TYPE);
+        fputs(descriptor ? "#<record-type " : "#<record ", out);
+        print_value(rt, out, oti_as_record_type(descriptor ? v : oti_as_record(v)->type)->name, depth + 1);
+        fputc('>', out);
+        break;
       }
-    fputc('}', out);
-  } else if (oti_kind(v, K_PAIR)) {
-    fputc('(', out);
-    unsigned count = 0;
-    while (oti_kind(v, K_PAIR) && count++ < 1000) {
-      if (count > 1) fputc(' ', out);
-      print_value(out, oti_car(v), depth + 1);
-      v = oti_cdr(v);
+      case K_INSTANCE:
+        fputs("#<", out);
+        print_value(rt, out, oti_as_class(oti_as_instance(v)->type)->name, depth + 1);
+        fputc('>', out);
+        break;
+      case K_CLASS:
+        fputs("#<class ", out);
+        print_value(rt, out, oti_as_class(v)->name, depth + 1);
+        fputc('>', out);
+        break;
+      case K_PORT: oti_port_repr(out, v); break;
+      case K_RESTART:
+        fputs("#<restart ", out);
+        print_value(rt, out, oti_as_restart(v)->name, depth + 1);
+        fputc('>', out);
+        break;
+      case K_BYTEVECTOR:
+        fputs("#u8(", out);
+        for (size_t i = 0; i < oti_bytes_length(v); i++) {
+          if (i) fputc(' ', out);
+          fprintf(out, "%u", oti_bytes_data(v)[i]);
+        }
+        fputc(')', out);
+        break;
+      case K_ARRAY: {
+        oti_array_obj* info = oti_as_array(v);
+        ot_value* items = info->length ? oti_as_array_data(info->data)->items : NULL;
+        fputc('[', out);
+        for (size_t i = 0; i < info->length; i++) {
+          if (i) fputc(' ', out);
+          print_value(rt, out, items[i], depth + 1);
+        }
+        fputc(']', out);
+        break;
+      }
+      case K_TABLE: {
+        oti_table_obj* info = oti_as_table(v);
+        ot_value* entries = info->used ? oti_as_table_data(info->data)->entries : NULL;
+        fputc('{', out);
+        size_t printed = 0;
+        for (size_t i = 0; i < info->used; i++)
+          if (entries[2 * i + 1] != OT_NIL) {
+            if (printed++) fputc(' ', out);
+            print_value(rt, out, entries[2 * i], depth + 1);
+            fputc(' ', out);
+            print_value(rt, out, entries[2 * i + 1], depth + 1);
+          }
+        fputc('}', out);
+        break;
+      }
+      case K_PAIR: {
+        fputc('(', out);
+        unsigned count = 0;
+        while (oti_kind(v, K_PAIR) && count++ < 1000) {
+          if (count > 1) fputc(' ', out);
+          print_value(rt, out, oti_car(v), depth + 1);
+          v = oti_cdr(v);
+        }
+        if (v != OT_EMPTY) {
+          fputs(" . ", out);
+          print_value(rt, out, v, depth + 1);
+        }
+        fputc(')', out);
+        break;
+      }
+      case K_CLOSURE: {
+        const oti_function* fn = rt ? oti_closure_fn(rt, v) : NULL;
+        print_named(out, "function", fn ? fn->name : NULL);
+        break;
+      }
+      case K_MACRO: {
+        ot_value expander = oti_as_macro(v)->expander;
+        const oti_function* fn =
+            rt && oti_kind(expander, K_CLOSURE) ? oti_closure_fn(rt, expander) : NULL;
+        print_named(out, "macro", fn ? fn->name : NULL);
+        break;
+      }
+      case K_GENERIC:
+        fputs("#<function ", out);
+        print_value(rt, out, oti_as_generic(v)->name, depth + 1);
+        fputc('>', out);
+        break;
+      case K_NATIVE: print_named(out, "function", rt ? oti_native_name(rt, v) : NULL); break;
+      case K_FOREIGN_FUNCTION:
+      case K_FOREIGN_LIBRARY:
+      case K_FOREIGN_LAYOUT:
+      case K_POINTER: oti_foreign_repr(out, v); break;
+      case K_HOST_OBJECT: fprintf(out, "#<%s>", oti_host_object_name(v)); break;
+      case K_THREAD: {
+        ot_value name = oti_thread_name(v);
+        fputs("#<thread", out);
+        if (name != OT_NIL) {
+          fputc(' ', out);
+          print_value(rt, out, name, depth + 1);
+        }
+        fputc('>', out);
+        break;
+      }
+      case K_WAITQ: fputs("#<wait-queue>", out); break;
+      case K_METHOD: fputs("#<method>", out); break;
+      case K_NEXT: fputs("#<next-method>", out); break;
+      case K_BOX: fputs("#<box>", out); break;
+      case K_LAYOUT: fputs("#<layout>", out); break;
+      default: fprintf(out, "#<object %u>", (unsigned)object_kind(v)); break;
     }
-    if (v != OT_EMPTY) {
-      fputs(" . ", out);
-      print_value(out, v, depth + 1);
-    }
-    fputc(')', out);
-  } else if (oti_kind(v, K_CLASS)) fputs("#<descriptor>", out);
-  else if (oti_kind(v, K_POINTER)) fputs("#<foreign-pointer>", out);
-  else if (oti_kind(v, K_FOREIGN_LAYOUT)) fputs("#<foreign-layout>", out);
-  else if (oti_kind(v, K_FOREIGN_LIBRARY)) fputs("#<foreign-library>", out);
-  else if (oti_kind(v, K_HOST_OBJECT)) fprintf(out, "#<%s>", oti_host_object_name(v));
-  else if (oti_kind(v, K_THREAD)) fputs("#<thread>", out);
-  else if (oti_kind(v, K_WAITQ)) fputs("#<wait-queue>", out);
-  else fputs("#<function>", out);
 }
 
-void ot_print(ot_state* rt, FILE* out, ot_value value) {
-  (void)rt;
-  print_value(out, value, 0);
-}
+void ot_print(ot_state* rt, FILE* out, ot_value value) { print_value(rt, out, value, 0); }
 
-void ot_write(ot_state* rt, FILE* out, ot_value value) {
-  (void)rt;
-  print_value(out, value, 1);
-}
+void ot_write(ot_state* rt, FILE* out, ot_value value) { print_value(rt, out, value, 1); }

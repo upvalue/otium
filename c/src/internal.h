@@ -1054,6 +1054,7 @@ void oti_modules_destroy(ot_state* rt);
 ot_value oti_native_call(ot_state* rt, ot_value native, size_t first, size_t count);
 bool oti_native_namespace(const ot_state* rt, uint32_t space);
 const char* oti_host_object_name(ot_value v);
+const char* oti_native_name(const ot_state* rt, ot_value native);
 void oti_natives_destroy(ot_state* rt);
 uint32_t oti_binding_global(ot_state* rt, uint32_t space, const char* name, size_t length,
                             bool create);
@@ -1265,6 +1266,9 @@ ot_value oti_io_error(ot_state* rt, const char* reason);
 ot_value oti_bytes_new(ot_state* rt, size_t n);
 size_t oti_utf8_scalar(const unsigned char* s, size_t p, size_t end);
 void oti_port_repr(FILE* out, ot_value port);
+void oti_foreign_repr(FILE* out, ot_value v);
+ot_value oti_thread_name(ot_value thread);
+const char* oti_builtin_name(unsigned id);
 ot_value oti_read_source(ot_state* rt, const char* source, size_t length);
 ot_value oti_tokens(ot_state* rt, size_t first, size_t count);
 void oti_ports_destroy(ot_state* rt);

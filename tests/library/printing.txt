@@ -6,3 +6,9 @@ plain a b symbol
 ["x"]
 "a b" ["x"] ("x")
 ["\0\e\t\r\n" "é🙂"]
+#<function named-fn> #<function bound-fn> #<function>
+#<function car> #<function +> #<function /> #<function paint>
+#<macro twice> #<class Widget> #<Widget> #<record-type user/Point> #<record user/Point>
+#<buffer "hello"> #<buffer "012345678901234567890123456789012345678"...>
+#<thread :main> #<thread worker>
+[#<function named-fn>] {:f #<function car>}

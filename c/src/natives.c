@@ -8,6 +8,8 @@ typedef struct {
   ot_native_fn function;
   void* userdata;
   size_t min_args, max_args;
+  /* The global it was defined as, whose name it prints with. */
+  uint32_t global;
 } oti_native;
 
 struct oti_native_state {
@@ -101,7 +103,7 @@ bool ot_define_natives(ot_state* rt, const char* space, const ot_native* natives
       break;
     }
     ((oti_native_obj*)object)->index = (uint32_t)n->count;
-    n->items[n->count++] = (oti_native){d->function, d->userdata, d->min_args, d->max_args};
+    n->items[n->count++] = (oti_native){d->function, d->userdata, d->min_args, d->max_args, global};
     oti_set_global(rt, global, object);
   }
   rt->current_namespace = saved;
@@ -169,6 +171,10 @@ ot_value ot_make_host_object(ot_state* rt, const ot_host_type* type, const void*
 void* ot_host_object_data(ot_value v, const ot_host_type* type) {
   if (!oti_kind(v, K_HOST_OBJECT) || ((oti_host_obj*)v)->type != type) return NULL;
   return ((oti_host_obj*)v)->data;
+}
+
+const char* oti_native_name(const ot_state* rt, ot_value native) {
+  return rt->global_info[rt->natives->items[((oti_native_obj*)native)->index].global].name;
 }
 
 const char* oti_host_object_name(ot_value v) {

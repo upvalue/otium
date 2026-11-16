@@ -674,6 +674,11 @@
             (cond
               ((eq? head 'quote) nil)
               ((eq? head 'quasiquote) (walk-quasi walk scope (second x) 1 #f))
+              ;; {...} and [...] read as these calls, so a local of either name
+              ;; turns literals into calls of the local.
+              ((and (member head '(table array)) (local? scope (symbol->string head)))
+               (let ((name (symbol->string head))) (finding! walk "shadowed-literal" name (get (walk :seen) name 0)))
+               (walk-all walk scope x))
               ((eq? head 'fn) (walk-body walk (walk-parameters walk scope (second x)) (cdr (cdr x))))
               ((eq? head 'let)
                (if (symbol? (second x))

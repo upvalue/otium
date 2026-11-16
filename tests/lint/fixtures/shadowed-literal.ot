@@ -1,0 +1,7 @@
+(def (lookup table key) (get table key {})) ;~ L0205
+(def (wrap x array) [x]) ;~ L0205
+(def (fine entries key) (get entries key {:default #t}))
+
+(lookup {:a 1} :a)
+(wrap 1 list)
+(fine {} :a)

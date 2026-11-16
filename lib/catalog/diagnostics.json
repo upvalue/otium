@@ -423,6 +423,16 @@
     "example": "(def (first xs) (car xs))",
     "fixed": "(def (head xs) (car xs))"
   },
+  "L0205": {
+    "name": "shadowed-literal",
+    "group": "suspicious",
+    "level": "warn",
+    "title": "local binding hides the table or array constructor",
+    "message": "a local `{name}` is in scope, so `{name}` calls, including the literals that read as them, reach the local instead of the constructor",
+    "explanation": "The reader turns `{:a 1}` into `(table :a 1)` and `[1 2]` into `(array 1 2)`. Inside the scope of a parameter or `let` named `table` or `array`, those calls reach the local, so a literal that looks like data calls whatever the local holds. Rename the local.",
+    "example": "(def (lookup table key) (get table key {}))",
+    "fixed": "(def (lookup entries key) (get entries key {}))"
+  },
   "L0301": {
     "name": "missed-unquote",
     "group": "correctness",

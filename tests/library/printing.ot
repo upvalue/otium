@@ -25,3 +25,5 @@
 (newline)
 (println (thread/self) (thread/spawn-named 'worker (fn () nil)))
 (println [named-fn] {:f car})
+; Displayed on its own a buffer is its text; inside a collection it's opaque.
+(println short (str short "!") [short])

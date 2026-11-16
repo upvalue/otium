@@ -12,3 +12,4 @@ plain a b symbol
 #<buffer "hello"> #<buffer "012345678901234567890123456789012345678"...>
 #<thread :main> #<thread worker>
 [#<function named-fn>] {:f #<function car>}
+hello hello! [#<buffer "hello">]

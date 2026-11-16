@@ -1569,6 +1569,11 @@ static void print_value(ot_state* rt, FILE* out, ot_value v, unsigned depth) {
         oti_buffer_obj* b = oti_as_buffer(v);
         const unsigned char* bytes = b->length ? oti_as_buffer_data(b->data)->bytes : NULL;
         size_t n = b->length;
+        /* Displayed on its own, a buffer is its text, like a string. */
+        if (!depth) {
+          if (n) fwrite(bytes, 1, n, out);
+          break;
+        }
         bool cut = n > PRINT_BUFFER_LIMIT;
         if (cut) {
           /* Back up to the start of a character. */

@@ -130,18 +130,6 @@ Includes runtime builtins, special forms, and the Otium prelude."
 
 ;; --- macros -----------------------------------------------------------------
 
-(defmacro when (test . body)
-  "(when test body ...)\nEvaluate body when test is truthy; otherwise return nil."
-  `(if ,test
-       (begin ,@body)
-       nil))
-
-(defmacro unless (test . body)
-  "(unless test body ...)\nEvaluate body when test is falsy; otherwise return nil."
-  `(if ,test
-       nil
-       (begin ,@body)))
-
 (def- (case-clauses value clauses)
   (if (null? clauses)
       '()

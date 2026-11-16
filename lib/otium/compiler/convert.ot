@@ -195,7 +195,7 @@
 ;; compiler.c; primitives only where nothing does.
 (def- special-forms
   (let ((t {}))
-    (for ((name :in '(quote quasiquote unquote unquote-splicing if cond when unless begin fn let set!
+    (for ((name :in '(quote quasiquote unquote unquote-splicing if cond begin fn let set!
                       def def- while and or try unwind-protect defer %call-with-cleanup
                       restart-case handler-bind with-params defparam defclass defabstract
                       reset-class! defgeneric reset-generic! defmethod defonce syntax-quote defmacro
@@ -226,14 +226,6 @@
     ((unquote unquote-splicing) (fail "unquote outside quasiquote" form off))
     ((if) (if-form form args site off))
     ((cond) (cond-form form args site off))
-    ((when unless)
-     (if (null? args)
-         (fail "conditional body needs a condition" form off)
-         (let ((test (expression (car args) (non-tail site) off))
-               (body (body-forms (cdr args) (with-site site :definitions #f) off)))
-           (if (eq? head 'when)
-               [:if off test body (literal nil off)]
-               [:if off test (literal nil off) body]))))
     ((begin) (body-forms args (with-site site :definitions (site-definitions site)) off))
     ((fn)
      (if (null? args)

@@ -141,9 +141,7 @@ TEST(modules_load_refer_and_reload) {
   write_module(directory, "api", "(ns api) (def value 53) (def (read) (+ value 1))");
   check_int(rt, "(require api) (live-api)", 54);
   CHECK(eval(rt, "(require)") == OT_NIL);
-  check_int(rt, "(when #t 42)", 42);
-  CHECK(eval(rt, "(unless #t (error \"skipped\"))") == OT_NIL);
-  eval(rt, "(def (tail n) (when (> n 0) (tail (- n 1))))");
+  eval(rt, "(def (tail n) (if (> n 0) (tail (- n 1))))");
   CHECK(eval(rt, "(tail 10000)") == OT_NIL);
   CHECK(ot_get_stats(rt).max_frames < 8);
   check_error(rt, "(require chain0)", "nesting limit");

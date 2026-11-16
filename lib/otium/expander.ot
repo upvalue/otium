@@ -223,13 +223,6 @@
     (cond
       ((not (symbol? head)) (exp-exprs form scope form))
       ((exp-bound? head scope) (cons (exp-symbol head scope) (exp-exprs (cdr form) scope form)))
-      ((or (eq? head 'when) (eq? head 'unless))
-       (exp-shape! form 2 #f)
-       (let ((test (exp-expr (car (cdr form)) scope))
-             (body (exp-sequence 'begin (cdr (cdr form)) scope form)))
-         (if (eq? head 'when)
-             (list 'if test body exp-nil-form)
-             (list 'if test exp-nil-form body))))
       ((exp-core? head) (exp-core form scope))
       (else (exp-exprs form scope form)))))
 
@@ -533,8 +526,7 @@
 ;; require specs, core form names and the words core forms use as markers
 ;; stay bare.
 (def- exp-sq-bare
-  '(when unless
-     else
+  '(else
      catch
      &
      &optional

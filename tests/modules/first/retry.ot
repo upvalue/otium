@@ -5,7 +5,7 @@
 
 (set! attempts (+ attempts 1))
 
-(when (= attempts 1) (error "first load fails"))
+(if (= attempts 1) (error "first load fails"))
 
 (defonce state #f)
 

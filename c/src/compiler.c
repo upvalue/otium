@@ -1823,18 +1823,6 @@ static bool expression_form(oti_compiler* c, const oti_ast* a, uint32_t dst, boo
     ok = jumps_patch(c, &done) && ok;
     return ok && finish(c, dst, tail);
   }
-  if (oti_ast_symbol(head, "when") || oti_ast_symbol(head, "unless")) {
-    if (!args) return error(c, a, "conditional body needs a condition");
-    oti_jumps skip = {0};
-    if (!branch(c, args, oti_ast_symbol(head, "unless"), &skip) ||
-        !body(c, args->next, dst, tail, false)) {
-      free(skip.items);
-      return false;
-    }
-    size_t done = tail ? SIZE_MAX : emit_bc(c, OP_JUMP, 0, 0);
-    return jumps_patch(c, &skip) && constant_result(c, OT_NIL, dst, tail) &&
-           (tail || patch(c, done));
-  }
   if (oti_ast_symbol(head, "begin")) return body(c, args, dst, tail, definitions);
   if (oti_ast_symbol(head, "fn"))
     return lambda(c, args, args ? args->next : NULL, false, dst, NULL, 0) && finish(c, dst, tail);

@@ -4,6 +4,20 @@
 ;; Boot files fill it as they load; see lib/otium/compiler/known.ot.
 (def %inline-bodies {})
 
+;; when and unless are ordinary macros, defined first so everything after
+;; can use them.
+(defmacro when (test . body)
+  "(when test body ...)\nEvaluate body when test is truthy; otherwise return nil."
+  `(if ,test
+       (begin ,@body)
+       nil))
+
+(defmacro unless (test . body)
+  "(unless test body ...)\nEvaluate body when test is falsy; otherwise return nil."
+  `(if ,test
+       nil
+       (begin ,@body)))
+
 (def (identity value) value)
 (def (inc value) (+ value 1))
 (def (dec value) (- value 1))

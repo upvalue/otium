@@ -6,7 +6,9 @@
 // cannot call yet. Everything else about PTYs lives in manse/pty.ot.
 
 // NSIG, cfmakeraw, ECHOKE and ECHOCTL are BSD names glibc hides in strict C.
+#ifndef _DEFAULT_SOURCE
 #define _DEFAULT_SOURCE
+#endif
 #include <errno.h>
 #include <fcntl.h>
 #include <signal.h>

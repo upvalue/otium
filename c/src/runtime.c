@@ -1544,7 +1544,7 @@ static void print_value(ot_state* rt, FILE* out, ot_value v, unsigned depth) {
     else if (cp == 10) fputs("#\\newline", out);
     else if (cp == 9) fputs("#\\tab", out);
     else if (cp == 13) fputs("#\\return", out);
-    else if (cp < 32 || cp == 127) fprintf(out, "#\\x%x", cp);
+    else if (cp < 32 || (cp >= 127 && cp < 160)) fprintf(out, "#\\x%x", cp);
     else {
       fputs("#\\", out);
       size_t n = oti_utf8_encode(cp, bytes);

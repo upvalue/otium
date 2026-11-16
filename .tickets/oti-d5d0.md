@@ -1,6 +1,6 @@
 ---
 id: oti-d5d0
-status: open
+status: closed
 deps: []
 links: []
 created: 2026-11-16T03:12:02Z
@@ -14,3 +14,9 @@ tags: [gpu]
 
 The FPS demo needs a surface: Wayland or X11 handles from SDL window properties on Linux, a Metal layer from SDL_Metal_CreateView on macOS, then configure, get-current-texture and present. gpu-webgpu.c's make_surface does the same in C.
 
+
+## Notes
+
+**2026-11-16T03:13:52Z**
+
+Done in the commit after c4b4c58: surface, configure-surface!, current-texture, present! in otium.webgpu. Tested: creation and configuration for a hidden window on Linux (X11 via XWayland here). Untested: acquire/present (need a visible window, OTIUM_UI_VISIBLE), Wayland, Metal.

@@ -101,6 +101,15 @@ full-size bitmap of the Dock icon: 40 MB for a 1024-pixel image, 10 MB at 512."
 
 (defonce window-count 0)
 
+(def- (driver options)
+  "The window's :driver option, or OTIUM_UI_DRIVER when that is empty: an
+SDL_GPU device name such as vulkan or metal, or webgpu, optionally followed
+by a colon and a WebGPU backend name."
+  (let ((name (get options :driver "")))
+    (if (equal? name "")
+        (or (process/getenv "OTIUM_UI_DRIVER") "")
+        name)))
+
 (def (open options)
   (let ((first? (null? (ui/windows)))
         (width (get options :width 640))
@@ -137,7 +146,7 @@ full-size bitmap of the Dock icon: 40 MB for a 1024-pixel image, 10 MB at 512."
                                            (if (and headless (= scale 0))
                                                1
                                                scale)
-                                           (get options :driver "")
+                                           (driver options)
                                            (or headless (get options :offscreen #f) (> scale 0)))))
         (present-window! window
                          {:icon (get options :icon "") :foreground (not (or headless (get options :background #f)))})

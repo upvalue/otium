@@ -47,6 +47,7 @@ typedef struct Renderer {
   QueuedEvent *events, *events_tail;
   char* pending_text;
   SDL_Window* window;
+  const GpuBackend* backend;
   Gpu* gpu;
   bool offscreen;
   Uint8* atlas_pixels;
@@ -239,7 +240,7 @@ void otui_gpu_free(Renderer* r) {
   if (r->text_input) SDL_StopTextInput(r->window);
   SDL_free(r->event_text);
   SDL_free(r->clipboard);
-  gpu_free(r->gpu);
+  if (r->gpu) r->backend->free(r->gpu);
   while (r->images) {
     Image* next = r->images->next;
     SDL_free(r->images->path);
@@ -271,7 +272,7 @@ bool otui_gpu_resize(Renderer* r, int width, int height, float scale) {
   if (physical_width > UINT32_MAX || physical_height > UINT32_MAX)
     return SDL_SetError("UI dimensions exceed SDL's texture dimension representation");
   Uint32 w = (Uint32)physical_width, h = (Uint32)physical_height;
-  if (!gpu_resize(r->gpu, w, h)) return false;
+  if (!r->backend->resize(r->gpu, w, h)) return false;
   r->width = w;
   r->height = h;
   r->logical_width = width;
@@ -295,7 +296,19 @@ void* otui_gpu_new(SDL_Window* window, int width, int height, float scale, const
   ++live_renderers;
   r->window = window;
   r->offscreen = offscreen;
-  r->gpu = gpu_new(window, driver, offscreen);
+  // "webgpu", or "webgpu:" and a WebGPU backend name, picks WebGPU; any other
+  // driver is an SDL_GPU device name.
+  r->backend = &gpu_sdl;
+  if (strncmp(driver, "webgpu", 6) == 0 && (!driver[6] || driver[6] == ':')) {
+#ifdef OTUI_WEBGPU
+    r->backend = &gpu_webgpu;
+    driver += driver[6] ? 7 : 6;
+#else
+    SDL_SetError("This build has no WebGPU backend");
+    goto failed;
+#endif
+  }
+  r->gpu = r->backend->create(window, driver, offscreen);
   if (!r->gpu) goto failed;
   if (!otui_gpu_resize(r, width, height, scale)) goto failed;
   r->atlas_pixels = calloc(ATLAS_BYTES, 1);
@@ -320,7 +333,7 @@ float otui_gpu_scale(Renderer* r) { return r->scale; }
 
 bool otui_gpu_offscreen(Renderer* r) { return r->offscreen; }
 
-const char* otui_gpu_driver(Renderer* r) { return gpu_driver(r->gpu); }
+const char* otui_gpu_driver(Renderer* r) { return r->backend->driver(r->gpu); }
 
 static SDL_FColor rgba(Uint32 c) {
   return (SDL_FColor){(c >> 24) / 255.0f, ((c >> 16) & 255) / 255.0f, ((c >> 8) & 255) / 255.0f,
@@ -355,7 +368,7 @@ static bool reserve(Renderer* r, Uint32 need) {
   Rect* rects = realloc(r->rects, capacity * sizeof(Rect));
   if (!rects) return SDL_OutOfMemory();
   r->rects = rects;
-  if (!gpu_reserve(r->gpu, capacity)) return false;
+  if (!r->backend->reserve(r->gpu, capacity)) return false;
   r->capacity = capacity;
   return true;
 }
@@ -441,15 +454,15 @@ int otui_gpu_cache_count(Renderer* r) { return r->cache_count; }
 long long otui_gpu_memory(Renderer* r, int kind) {
   long long image = (long long)r->width * r->height * 4;
   switch (kind) {
-    case 0: return ATLAS_BYTES + gpu_memory(r->gpu, 0);
-    case 1: return (long long)r->capacity * sizeof(Rect) + gpu_memory(r->gpu, 1);
+    case 0: return ATLAS_BYTES + r->backend->memory(r->gpu, 0);
+    case 1: return (long long)r->capacity * sizeof(Rect) + r->backend->memory(r->gpu, 1);
     case 2: {
       long long bytes = (long long)r->cache_capacity * sizeof(Cache);
       for (int i = 0; i < r->cache_count; ++i)
         bytes += (long long)r->caches[i].count * sizeof(Rect);
       return bytes;
     }
-    case 3: return gpu_memory(r->gpu, 3);
+    case 3: return r->backend->memory(r->gpu, 3);
     case 4: return (long long)sizeof(Renderer);
     case 5: return image;
     default: return -1;
@@ -816,7 +829,7 @@ bool otui_gpu_frame(Renderer* r, const char* capture) {
       .logical_height = r->logical_height,
   };
   bool submitted = false;
-  bool ok = gpu_frame(r->gpu, &frame, capture, &submitted);
+  bool ok = r->backend->frame(r->gpu, &frame, capture, &submitted);
   if (submitted) r->atlas_dirty = false;
   return ok;
 }

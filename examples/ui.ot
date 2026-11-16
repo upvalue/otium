@@ -53,7 +53,7 @@
                       (names "--dump-state")
                       (default "")
                       (help "Write JSON layout bounds and resource counts."))
-              (option driver (names "--driver") (default "") (help "SDL_GPU backend, e.g. metal or vulkan."))
+              (option driver (names "--driver") (default "") (help "UI backend: an SDL_GPU device such as metal or vulkan, or webgpu, or webgpu:vulkan and the like."))
               (flag inject-error (names "--inject-error") (help "Exercise cleanup after a paint failure.")))))
 
 (def (module-function module name)

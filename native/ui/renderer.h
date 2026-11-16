@@ -27,22 +27,28 @@ typedef struct {
 
 typedef struct Gpu Gpu;
 
-/* Create a backend drawing to window, either directly or through an
- * offscreen target. driver names a backend-specific device, or is empty. */
-Gpu* gpu_new(SDL_Window* window, const char* driver, bool offscreen);
-void gpu_free(Gpu* gpu);
-const char* gpu_driver(Gpu* gpu);
-/* Set the physical size of the frame. A failure leaves the old size. */
-bool gpu_resize(Gpu* gpu, Uint32 width, Uint32 height);
-/* Make room for capacity instances. A failure leaves the old capacity. */
-bool gpu_reserve(Gpu* gpu, Uint32 capacity);
-/* Draw and present a frame, saving it to capture when that is not empty.
- * submitted is set once the atlas has reached the GPU, even if the frame
- * then fails. */
-bool gpu_frame(Gpu* gpu, const GpuFrame* frame, const char* capture, bool* submitted);
-/* GPU-side bytes, by the kinds of otui_gpu_memory: 0 atlas, 1 instances,
- * 3 offscreen target. Other kinds are 0. */
-long long gpu_memory(Gpu* gpu, int kind);
+/* A backend's operations. create draws to window, directly or through an
+ * offscreen target; driver is backend-specific and may be empty. resize sets
+ * the physical size of the frame and reserve makes room for capacity
+ * instances; a failure of either leaves the old state. frame draws and
+ * presents, saving to capture when that is not empty; submitted is set once
+ * the atlas has reached the GPU, even if the frame then fails. memory gives
+ * GPU-side bytes by the kinds of otui_gpu_memory: 0 atlas, 1 instances,
+ * 3 offscreen target, others 0. */
+typedef struct {
+  Gpu* (*create)(SDL_Window* window, const char* driver, bool offscreen);
+  void (*free)(Gpu* gpu);
+  const char* (*driver)(Gpu* gpu);
+  bool (*resize)(Gpu* gpu, Uint32 width, Uint32 height);
+  bool (*reserve)(Gpu* gpu, Uint32 capacity);
+  bool (*frame)(Gpu* gpu, const GpuFrame* frame, const char* capture, bool* submitted);
+  long long (*memory)(Gpu* gpu, int kind);
+} GpuBackend;
+
+extern const GpuBackend gpu_sdl;
+#ifdef OTUI_WEBGPU
+extern const GpuBackend gpu_webgpu;
+#endif
 
 /* Save 8-bit RGBA or BGRA pixels, tightly packed, as PNG when path ends in
  * .png and BMP otherwise. */

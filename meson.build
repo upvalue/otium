@@ -103,11 +103,31 @@ if ui
       command: [glslc, '@INPUT@', '-o', '@OUTPUT@'])
   endforeach
   ui_args = ['-DOTUI_FONT_DIR="@0@"'.format(source_root / 'native/ui/fonts')]
-  ui_library = shared_library('otium-ui',
-    'native/ui/renderer.c', 'native/ui/gpu-sdl.c', 'native/ui/text.c', 'native/ui/layout.cpp',
-    shaders,
+  ui_sources = ['native/ui/renderer.c', 'native/ui/gpu-sdl.c', 'native/ui/text.c',
+    'native/ui/layout.cpp']
+  ui_deps = [sdl3, sdl3_ttf, yoga, svg, libm]
+  # The WebGPU backend, picked at run time with the webgpu driver. wgpu-native
+  # comes prebuilt, one wrap per platform.
+  wgpu_platforms = {'linux-x86_64': host_machine.system() == 'linux' and host_machine.cpu_family() == 'x86_64',
+    'macos-aarch64': host_machine.system() == 'darwin' and host_machine.cpu_family() == 'aarch64'}
+  wgpu_platform = ''
+  foreach name, matches : wgpu_platforms
+    if matches
+      wgpu_platform = name
+    endif
+  endforeach
+  webgpu = get_option('webgpu').require(wgpu_platform != '',
+    error_message: 'no prebuilt wgpu-native for this platform')
+  wgpu_project = subproject('wgpu-native-' + (wgpu_platform != '' ? wgpu_platform : 'none'),
+    required: webgpu)
+  if wgpu_project.found()
+    ui_sources += 'native/ui/gpu-webgpu.c'
+    ui_deps += wgpu_project.get_variable('wgpu_dep')
+    ui_args += '-DOTUI_WEBGPU'
+  endif
+  ui_library = shared_library('otium-ui', ui_sources, shaders,
     c_args: ui_args + ['--embed-dir=' + build_root], cpp_args: ui_args,
-    dependencies: [sdl3, sdl3_ttf, yoga, svg, libm], override_options: native_options)
+    dependencies: ui_deps, override_options: native_options)
   ui_events = shared_library('otium-ui-test-events', 'tests/ui/events.c',
     c_args: ui_args,
     dependencies: sdl3, override_options: native_options)

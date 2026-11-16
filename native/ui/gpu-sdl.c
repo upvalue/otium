@@ -31,7 +31,7 @@ struct Gpu {
 
 // Tear down a complete or partially initialized backend. Wait once here; normal
 // frames and resize operations rely on SDL to defer GPU resource destruction.
-void gpu_free(Gpu* g) {
+static void gpu_free(Gpu* g) {
   if (!g) return;
   if (g->device) {
     SDL_WaitForGPUIdle(g->device);
@@ -70,7 +70,7 @@ static SDL_GPUShader* shader(SDL_GPUDevice* device, bool vertex) {
 // Direct mode only records the size: SDL resizes the swapchain. Offscreen mode
 // replaces its texture before releasing the old one, so a failed allocation
 // leaves the previous dimensions and target intact.
-bool gpu_resize(Gpu* g, Uint32 w, Uint32 h) {
+static bool gpu_resize(Gpu* g, Uint32 w, Uint32 h) {
   if (g->offscreen && (w != g->width || h != g->height || !g->target)) {
     SDL_GPUTextureCreateInfo texture = {
         .type = SDL_GPU_TEXTURETYPE_2D,
@@ -94,7 +94,7 @@ bool gpu_resize(Gpu* g, Uint32 w, Uint32 h) {
 
 // The pipeline must match either the window's swapchain format or our RGBA
 // offscreen format. The atlas and instance buffers survive window resizing.
-Gpu* gpu_new(SDL_Window* window, const char* driver, bool offscreen) {
+static Gpu* gpu_new(SDL_Window* window, const char* driver, bool offscreen) {
   Gpu* g = calloc(1, sizeof(*g));
   if (!g) {
     SDL_OutOfMemory();
@@ -175,9 +175,9 @@ failed:
   return NULL;
 }
 
-const char* gpu_driver(Gpu* g) { return SDL_GetGPUDeviceDriver(g->device); }
+static const char* gpu_driver(Gpu* g) { return SDL_GetGPUDeviceDriver(g->device); }
 
-bool gpu_reserve(Gpu* g, Uint32 capacity) {
+static bool gpu_reserve(Gpu* g, Uint32 capacity) {
   if (capacity <= g->capacity) return true;
   SDL_GPUBufferCreateInfo b = {.usage = SDL_GPU_BUFFERUSAGE_VERTEX,
                                .size = capacity * sizeof(Rect)};
@@ -199,7 +199,7 @@ bool gpu_reserve(Gpu* g, Uint32 capacity) {
 
 // The atlas is held twice, as a texture and an upload buffer. So are the
 // instances. Swapchain images belong to SDL.
-long long gpu_memory(Gpu* g, int kind) {
+static long long gpu_memory(Gpu* g, int kind) {
   switch (kind) {
     case 0: return (long long)ATLAS_BYTES * 2;
     case 1: return (long long)g->capacity * sizeof(Rect) * 2;
@@ -272,9 +272,9 @@ static bool save_capture(Gpu* g, SDL_GPUCommandBuffer* cmd, SDL_GPUTransferBuffe
   if (!ok) return false;
   void* pixels = SDL_MapGPUTransferBuffer(g->device, download, false);
   if (!pixels) return false;
-  SDL_GPUTextureFormat format =
-      g->offscreen ? SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM
-                   : SDL_GetGPUSwapchainTextureFormat(g->device, g->window);
+  SDL_GPUTextureFormat format = g->offscreen
+                                    ? SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM
+                                    : SDL_GetGPUSwapchainTextureFormat(g->device, g->window);
   ok = otui_save_pixels(path, pixels, (int)g->width, (int)g->height,
                         format == SDL_GPU_TEXTUREFORMAT_B8G8R8A8_UNORM ||
                             format == SDL_GPU_TEXTUREFORMAT_B8G8R8A8_UNORM_SRGB);
@@ -286,7 +286,7 @@ static bool save_capture(Gpu* g, SDL_GPUCommandBuffer* cmd, SDL_GPUTransferBuffe
 // blit. A minimized/hidden window may have no swapchain image; submit uploads and
 // skip drawing in that case. Offscreen frames can still draw and capture, then
 // blit to the window if it is visible. Capture memory exists only for this call.
-bool gpu_frame(Gpu* g, const GpuFrame* f, const char* capture, bool* submitted) {
+static bool gpu_frame(Gpu* g, const GpuFrame* f, const char* capture, bool* submitted) {
   SDL_GPUTransferBuffer* download = NULL;
   SDL_GPUTexture* temporary = NULL;
   *submitted = false;
@@ -367,3 +367,6 @@ failed:
   if (download) SDL_ReleaseGPUTransferBuffer(g->device, download);
   return false;
 }
+
+const GpuBackend gpu_sdl = {gpu_new,     gpu_free,  gpu_driver, gpu_resize,
+                            gpu_reserve, gpu_frame, gpu_memory};

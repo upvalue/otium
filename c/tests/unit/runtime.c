@@ -49,7 +49,7 @@ TEST(core_evaluation) {
   check_int(rt, "(let ((x 0) (inc (fn () (set! x (+ x 1))))) (inc) (inc) x)", 2);
   check_int(
       rt, "(def (counter x) (fn () (set! x (+ x 1)) x)) (def tick (counter 40)) (tick) (tick)", 42);
-  CHECK(eval(rt, "(let ((x 0)) (set! x 42))") == OT_NIL);
+  check_int(rt, "(let ((x 0)) (set! x 42))", 42);
   check_int(rt, "(car (set-car! (cons 1 2) 3))", 3);
   check_int(rt, "(let ((x 17) (outer (fn () (fn () x)))) ((outer)))", 17);
   check_int(rt, "(let ((x 10) (f (fn () x))) (let ((x 20)) (f)))", 10);

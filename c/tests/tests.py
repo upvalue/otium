@@ -246,7 +246,7 @@ def cli_preloads(t):
     cli(t, '--repl', stdin='"unfinished\n', status=1)
     result = cli(t, '--repl', stdin=')\n(/ 1 0)\n42\n', stdout='42\n')
     t.check('unexpected closing' in result.stderr and 'zero' in result.stderr, result)
-    cli(t, '--repl', stdin='(def n 0)\n(set! n 1) (+\n 2 3)\nn\n', stdout='0\nnil\n5\n1\n')
+    cli(t, '--repl', stdin='(def n 0)\n(set! n 1) (+\n 2 3)\nn\n', stdout='0\n1\n5\n1\n')
     result = cli(t, '--repl', stdin="'(a . b c)\n42\n", stdout='42\n')
     t.check('expected closing delimiter' in result.stderr, result)
     cli(t, '--repl', stdin='(read-line)\nhello\n(+ 1 2)\n', stdout='hello\n3\n')

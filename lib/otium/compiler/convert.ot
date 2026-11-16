@@ -420,16 +420,19 @@
           (let ((value (expression (car (cdr args)) (non-tail site) off)))
             (assignment (car args) value site off)))))
 
+;; set! yields the value assigned, read back from the variable.
 (def (assignment sym value site off)
   (let ((var (lookup (site-env site) sym)))
-    (cond ((nil? var) [:gset off (%native-cell sym) value])
+    (cond ((nil? var)
+           (let ((cell (%native-cell sym)))
+             [:seq off [[:gset off cell value] [:gref off cell]]]))
           ((var-loop var)
            (escape! (var-loop var) site)
            [:seq off [value (literal nil off)]])
           (else
            (set-var-assigned! var #t)
            (unless (eq? (var-owner var) (site-fn site)) (capture! (site-fn site) var))
-           [:seq off [[:lset off var value] (literal nil off)]]))))
+           [:seq off [[:lset off var value] [:lref off var #f]]]))))
 
 ;; --- Functions -----------------------------------------------------------
 

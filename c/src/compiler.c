@@ -1837,9 +1837,10 @@ static bool expression_form(oti_compiler* c, const oti_ast* a, uint32_t dst, boo
     uint32_t value = ref.kind == REF_LOCAL && !ref.boxed && primitive(c, args->next)
                          ? ref.index
                          : next_register(c);
-    bool ok = expression(c, args->next, value, false) && assign(c, &ref, value);
+    bool ok = expression(c, args->next, value, false) && assign(c, &ref, value) &&
+              move(c, dst, value);
     release(c, saved);
-    return ok && constant_result(c, OT_NIL, dst, tail);
+    return ok && finish(c, dst, tail);
   }
   if (oti_ast_symbol(head, "def") || oti_ast_symbol(head, "def-")) {
     if (!definitions) return error(c, a, "definition is only allowed at top level or in a body");

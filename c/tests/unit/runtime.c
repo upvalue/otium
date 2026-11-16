@@ -306,7 +306,7 @@ TEST(tables) {
   check_int(rt, "(def table-call {:x 42}) (table-call :x)", 42);
   ot_value key = eval(rt, ":x"), result;
   CHECK(ot_call(rt, "table-call", &key, 1, &result) && ot_to_int(result) == 42);
-  check_error(rt, "(let ((k (cons 1 2))) (get {} k) (set-car! k 9))", "frozen table key");
+  check_int(rt, "(let ((k (cons 1 2))) (get {} k) (set-car! k 9) (car k))", 9);
   check_error(rt, "(let ((k (cons 1 2))) (put! {} k nil) (set-cdr! k 9))", "frozen table key");
   check_error(rt, "(let ((k (list (cons 1 2))) (t {})) (put! t k 42) (set-car! (car k) 9))",
               "frozen table key");

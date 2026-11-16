@@ -99,7 +99,9 @@ ot_value oti_equal(ot_state* rt, ot_value a, ot_value b, bool keys) {
     }
     unsigned kind = object_kind(p.a);
     if (kind == K_FLOAT) {
-      if (oti_as_float(p.a)->value != oti_as_float(p.b)->value) {
+      /* Unlike =, equal? treats every NaN as equal to every other. */
+      double x = oti_as_float(p.a)->value, y = oti_as_float(p.b)->value;
+      if (x != y && !(x != x && y != y)) {
         result = OT_FALSE;
         break;
       }

@@ -1,6 +1,7 @@
 #include "internal.h"
 #include <string.h>
 #include <stdlib.h>
+#include <math.h>
 
 static ot_value* entries(ot_value t) { return oti_as_table_data(oti_as_table(t)->data)->entries; }
 
@@ -34,6 +35,7 @@ static size_t hash(ot_value key, unsigned depth) {
     double d = oti_as_float(key)->value;
     uint64_t bits;
     if (d == 0) d = 0;
+    if (d != d) d = NAN; /* every NaN hashes alike, since equal? matches them */
     memcpy(&bits, &d, sizeof(bits));
     return mix((size_t)bits ^ (size_t)(bits >> 32) ^ K_FLOAT);
   }
@@ -90,7 +92,6 @@ static bool lookup(ot_state* rt, ot_value table, ot_value key, size_t* slot, siz
 }
 
 ot_value oti_table_get(ot_state* rt, ot_value table, ot_value key, ot_value fallback) {
-  if (!freeze_key(rt, key)) return 0;
   if (!oti_as_table(table)->count) return fallback;
   size_t slot, entry;
   if (!lookup(rt, table, key, &slot, &entry)) return 0;

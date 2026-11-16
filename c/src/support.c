@@ -290,7 +290,7 @@ static ot_value support_gensym(ot_state* rt, size_t first, size_t count) {
 static ot_value support_string_symbol(ot_state* rt, size_t first, size_t count) {
   if (!oti_check_arity(rt, "string->symbol", count, 1, 1)) return 0;
   ot_value v = rt->stack[first];
-  if (!oti_kind(v, K_STRING)) return oti_fail(rt, "expected string or symbol");
+  if (!oti_kind(v, K_STRING)) return oti_fail(rt, "expected string; symbol also takes a symbol or keyword");
   size_t n;
   const char* s = oti_text_bytes(v, &n);
   return oti_intern(rt, K_SYMBOL, s, n);

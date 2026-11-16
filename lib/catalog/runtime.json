@@ -134,7 +134,7 @@
   "sqrt": "(sqrt number)\nCompute the square root as a float.",
   "str": "(str value ...)\nConcatenate display representations into a string, with no separators. No arguments gives an empty string.",
   "string->number": "(string->number string)\nParse an integer or float, allowing surrounding whitespace. Invalid numeric text returns nil.",
-  "string->symbol": "(string->symbol name)\nIntern a symbol from a string, symbol, or keyword name.",
+  "string->symbol": "(string->symbol string)\nIntern a symbol named by a string. `symbol` also takes a symbol or keyword.",
   "string-append": "(string-append string ...)\nConcatenate strings; non-string arguments raise an error.",
   "string-contains?": "(string-contains? string text)\nReturn #t if string contains the literal text, otherwise #f.",
   "string-downcase": "(string-downcase string)\nConvert ASCII uppercase letters to lowercase.",

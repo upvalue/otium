@@ -16,7 +16,7 @@ ROOT = Path(__file__).resolve().parents[1]
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--app-name', default='Otium UI')
-    parser.add_argument('--app-id', default='org.otium.ui-demo')
+    parser.add_argument('--app-id', default='sh.otium.ui-demo')
     parser.add_argument('--app-version', default='0.1')
     parser.add_argument('--icon', default='native/ui/assets/otium.png')
     parser.add_argument('--application', default='examples/ui.ot')

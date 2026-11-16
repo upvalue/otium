@@ -21,6 +21,8 @@ def command(*arguments, isolated=True, executable=None):
 def environment(*, stress=False, overrides=None):
     env = dict(os.environ)
     env.setdefault('OTIUM_FFI_LIBRARY', str(BUILD / ('libotium-ffi.' + LIBRARY_EXTENSION)))
+    # Lets a window manager keep test windows out of the way; see ui/window.ot.
+    env.setdefault('OTIUM_UI_APP_ID', 'sh.otium.test')
     if stress:
         env['OTIUM_GC_STRESS'] = '1'
     if overrides:

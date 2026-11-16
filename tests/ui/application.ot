@@ -1,8 +1,13 @@
 (require (otium.ui.window :as window))
 (require (otium.sdl :as sdl))
 (require (otium.ffi :as ffi))
+(require (otium.process :as process))
 
 (def calls [])
+
+;; OTIUM_UI_APP_ID replaces whatever id the application asks for.
+(def (app-id requested)
+  (or (process/getenv "OTIUM_UI_APP_ID") requested))
 
 (def failed? #f)
 
@@ -49,10 +54,12 @@
 (unwind-protect
   (begin
     (window/configure-app! {})
-    (check '((hint "SDL_MAC_BACKGROUND_APP" "0") (metadata "Otium" "" "org.otium.application")) (array-to-list calls))
+    (check `((hint "SDL_MAC_BACKGROUND_APP" "0") (metadata "Otium" "" ,(app-id "sh.otium.application")))
+           (array-to-list calls))
     (set! calls [])
     (window/configure-app! {:name "Example" :version "1" :id "org.example" :background #t})
-    (check '((hint "SDL_MAC_BACKGROUND_APP" "1") (metadata "Example" "1" "org.example")) (array-to-list calls))
+    (check `((hint "SDL_MAC_BACKGROUND_APP" "1") (metadata "Example" "1" ,(app-id "org.example")))
+           (array-to-list calls))
     (set! calls [])
     (window/present-window! 'window {})
     (check '((raise window)) (array-to-list calls))

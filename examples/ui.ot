@@ -40,7 +40,7 @@
                       (default 0)
                       (help "Pixel scale; 0 uses the display density interactively, 1 in headless mode."))
               (option app-name (names "--app-name") (default "Otium UI"))
-              (option app-id (names "--app-id") (default "org.otium.ui-demo"))
+              (option app-id (names "--app-id") (default "sh.otium.ui-demo"))
               (option app-version (names "--app-version") (default "0.1"))
               (option title (names "--title") (default "Otium UI"))
               (option icon

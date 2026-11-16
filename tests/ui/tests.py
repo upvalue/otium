@@ -9,7 +9,9 @@ defaults(suite='native', needs=['ui'])
 
 case('ui icons', 'tests/ui/icons.ot')
 case('ui demand', 'tests/ui/demand.ot')
-case('ui application', 'tests/ui/application.ot', needs=['ffi'])
+case('ui application', 'tests/ui/application.ot', needs=['ffi'], env={'OTIUM_UI_APP_ID': None})
+case('ui application app id', 'tests/ui/application.ot', needs=['ffi'],
+     env={'OTIUM_UI_APP_ID': 'sh.otium.override'})
 case('ui layout', 'tests/ui/layout.ot', paths=['examples'], timeout=90)
 
 # stderr from a machine without a display or GPU backend.
@@ -29,18 +31,23 @@ def pixel(rows, x, y):
     return tuple(rows[y][x*3:x*3+3])
 
 
-def gpu(t, required):
-    """Every capture is kept in ui-test-artifacts/ in the build for inspection."""
+def launcher(t):
     def launch(*options, headless=True):
         command = t.command('-L', ROOT/'examples', '-L', ROOT/'tests', ROOT/'examples/ui.ot', '--',
                             *(['--headless'] if headless else []), *options)
         return subprocess.run(command, cwd=ROOT, env=t.environment(), capture_output=True,
                               text=True, timeout=90)
+    return launch
 
-    def passed(result):
-        assert result.returncode == 0, (result.stdout, result.stderr)
-        assert 'UI-CLEANUP 0 0 0 0' in result.stdout, result.stdout
 
+def passed(result):
+    assert result.returncode == 0, (result.stdout, result.stderr)
+    assert 'UI-CLEANUP 0 0 0 0' in result.stdout, result.stdout
+
+
+def gpu(t, required):
+    """Every capture is kept in ui-test-artifacts/ in the build for inspection."""
+    launch = launcher(t)
     artifacts = BUILD/'ui-test-artifacts'
     artifacts.mkdir(parents=True, exist_ok=True)
     capture, state = artifacts/'ui.bmp', artifacts/'ui.json'
@@ -94,21 +101,10 @@ def gpu(t, required):
         resize_data = json.loads(resized_state.read_text())
         assert (resize_data['width'], resize_data['height']) == (480, 300)
         assert resize_data['remaining_resources'] == [0, 0, 0, 0]
-    direct_state = artifacts/'direct.json'
-    direct = launch('--scene', 'ui.resize', '--script', 'ui.resize',
-                    '--background', '--dump-state', direct_state, headless=False)
-    passed(direct)
-    assert 'UI-RENDER-MODE direct' in direct.stdout, direct.stdout
-    assert 'UI-RESIZE layout, input and identity passed' in direct.stdout
-    assert json.loads(direct_state.read_text())['width'] == 480
-    for headless in (True, False):
-        contract = launch('--script', 'ui.renderer-contract', '--background', headless=headless)
-        passed(contract)
-        assert 'UI-RENDERER target contract passed' in contract.stdout
-        mode = 'offscreen' if headless else 'direct'
-        assert 'UI-RENDER-MODE ' + mode in contract.stdout
-    _, _, direct_rows = runner.bmp_pixels(artifacts/'direct-capture.bmp')
-    assert pixel(direct_rows, 0, 0) == (103, 217, 192)
+    contract = launch('--script', 'ui.renderer-contract', '--background')
+    passed(contract)
+    assert 'UI-RENDERER target contract passed' in contract.stdout
+    assert 'UI-RENDER-MODE offscreen' in contract.stdout
     lw, lh, large_rows = runner.bmp_pixels(artifacts/'large-target.bmp')
     assert (lw, lh) == (5000, 32)
     assert pixel(large_rows, 4999, 31) == (103, 217, 192)
@@ -239,3 +235,28 @@ def gpu(t, required):
 for required, suffix, suite in ((False, '', 'native'), (True, ' required', 'gpu')):
     test('ui gpu' + suffix, suite=suite, needs=['ui'], timeout=300, parallel=False)(
         lambda t, required=required: gpu(t, required))
+
+
+@test('ui gpu direct', suite='gpu', needs=['ui'], timeout=300, parallel=False)
+def direct(t):
+    """Drawing straight to a window needs the window on screen, so this runs
+    only with OTIUM_UI_VISIBLE=1; a window manager may otherwise keep test
+    windows out of sight, and a hidden window draws no frames."""
+    if t.environment().get('OTIUM_UI_VISIBLE') != '1':
+        raise Skip('set OTIUM_UI_VISIBLE=1 to run tests that need a visible window')
+    launch = launcher(t)
+    artifacts = BUILD/'ui-test-artifacts'
+    artifacts.mkdir(parents=True, exist_ok=True)
+    state = artifacts/'direct.json'
+    result = launch('--scene', 'ui.resize', '--script', 'ui.resize',
+                    '--background', '--dump-state', state, headless=False)
+    passed(result)
+    assert 'UI-RENDER-MODE direct' in result.stdout, result.stdout
+    assert 'UI-RESIZE layout, input and identity passed' in result.stdout
+    assert json.loads(state.read_text())['width'] == 480
+    contract = launch('--script', 'ui.renderer-contract', '--background', headless=False)
+    passed(contract)
+    assert 'UI-RENDERER target contract passed' in contract.stdout
+    assert 'UI-RENDER-MODE direct' in contract.stdout
+    _, _, rows = runner.bmp_pixels(artifacts/'direct-capture.bmp')
+    assert pixel(rows, 0, 0) == (103, 217, 192)

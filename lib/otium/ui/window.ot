@@ -9,12 +9,15 @@
 (require (otium.objc :as objc))
 (require (otium.dev :as dev))
 (require (otium.memory :as memory))
+(require (otium.process :as process))
 (require (otium.thread :as thread))
 
 (defonce running? #f)
 
 (def (configure-app! options)
-  "Set process-wide application metadata before initializing SDL video."
+  "Set process-wide application metadata before initializing SDL video.
+OTIUM_UI_APP_ID, when set, replaces the :id option, so a window manager can
+tell windows started by tests or agents from the user's own."
   ;; Cocoa builds its menu during SDL video initialization.
   (sdl/set-hint "SDL_MAC_BACKGROUND_APP"
                 (if (get options :background #f)
@@ -22,7 +25,7 @@
                     "0"))
   (sdl/check (sdl/set-app-metadata (get options :name "Otium")
                                    (get options :version "")
-                                   (get options :id "org.otium.application")))
+                                   (or (process/getenv "OTIUM_UI_APP_ID") (get options :id "sh.otium.application"))))
   ;; Run from an interpreter, macOS would otherwise name the app after it.
   (when (objc/available?)
     (objc/send-as 'void
@@ -113,7 +116,7 @@ full-size bitmap of the Dock icon: 40 MB for a 1024-pixel image, 10 MB at 512."
       (sdl/set-main-ready)
       (configure-app! {:name (get options :app-name "Otium")
                        :version (get options :app-version "")
-                       :id (get options :app-id "org.otium.application")
+                       :id (get options :app-id "sh.otium.application")
                        :background (or headless (get options :background #f))})
       (sdl/check (sdl/init sdl/INIT_VIDEO)))
     (unwind-protect

@@ -509,7 +509,7 @@ the other popup's key switches to that one. The palette sits near the top."
                                   :config (config-path)
                                   :icon (icon-path)
                                   :app-name "Manse"
-                                  :app-id "org.otium.manse"
+                                  :app-id "sh.otium.manse"
                                   :background-color theme/background
                                   :render-on-demand? #t
                                   :poll-ms (settings/options :poll-ms)

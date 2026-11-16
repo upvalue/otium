@@ -91,7 +91,7 @@
    "E0104" {:title "cannot rebind a core form name"
             :type :syntax-error
             :message "{detail}"
-            :explanation "Names of core forms such as `if`, `let`, `fn`, `def` and `quote` cannot be used as variable or parameter names. Choose another name."
+            :explanation "Names of core forms such as `if`, `let`, `fn`, `def` and `quote` cannot be used as variable or parameter names. Top-level definitions cannot replace `array` or `table`, since `[...]` and `{...}` read as calls to them. Choose another name."
             :example "(fn (if) if)"
             :fixed "(fn (condition) condition)"}
    "E0105" {:title "definition not allowed here"

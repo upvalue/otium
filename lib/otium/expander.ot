@@ -632,8 +632,16 @@
                   (car target)
                   target)))
     (if (and top (symbol? name))
-        name
+        (exp-top-name! name form)
         (exp-name! name form))))
+
+;; A name a top-level definition binds. Core form names and qualified names
+;; are allowed there (ffi/set! is reached qualified), but array and table
+;; can't be replaced since [...] and {...} read as calls to them.
+(def- (exp-top-name! name form)
+  (if (or (eq? name 'array) (eq? name 'table))
+      (exp-fail "E0104" "macroexpand: cannot redefine the [...] and {...} constructors" form)
+      name))
 
 (def- (exp-scope-with name scope)
   (if (exp-core? name)
@@ -742,22 +750,25 @@
             ((exp-definition? form) (exp-def form '() #t))
             ((eq? head 'defonce)
              (exp-shape! form 3 4)
-             (let ((name (exp-name! (car (cdr form)) form)))
+             (let ((name (exp-top-name! (exp-name! (car (cdr form)) form) form)))
                (exp-value-definition form name (cdr (cdr form)) (list name))))
             ((eq? head 'defmacro) (exp-defmacro form))
             ((eq? head 'defparam)
              (exp-shape! form 3 4)
-             (let ((name (exp-name! (car (cdr form)) form))) (exp-value-definition form name (cdr (cdr form)) '())))
+             (let ((name (exp-top-name! (exp-name! (car (cdr form)) form) form))) (exp-value-definition form name (cdr (cdr form)) '())))
             ((or (eq? head 'ns) (eq? head 'require)) (exp-module-form form))
             ((eq? head 'defmethod) (exp-method form))
-            ((exp-memq head expander-declarations) form)
+            ((exp-memq head expander-declarations)
+             (if (and (pair? (cdr form)) (symbol? (car (cdr form))))
+                 (exp-top-name! (car (cdr form)) form))
+             form)
             (else (exp-expr form '()))))
         (exp-expr form '()))))
 
 ;; (defmacro name params ["doc"] body...)
 (def- (exp-defmacro form)
   (exp-shape! form 3 #f)
-  (let ((name (exp-name! (car (cdr form)) form))
+  (let ((name (exp-top-name! (exp-name! (car (cdr form)) form) form))
         (r (exp-params (car (cdr (cdr form))) form))
         (rest (cdr (cdr (cdr form)))))
     (cons 'defmacro

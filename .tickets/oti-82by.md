@@ -1,7 +1,7 @@
 ---
 id: oti-82by
 status: open
-deps: [oti-7o2o, oti-ap6a]
+deps: [oti-7o2o, oti-ap6a, oti-6ouw]
 links: []
 created: 2026-11-15T23:08:16Z
 type: task

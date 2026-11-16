@@ -56,10 +56,6 @@ ot_value oti_call_primitive(ot_state* rt, size_t call, size_t argc) {
  * replaces the current frame and keeps its floor. */
 bool oti_enter(ot_state* rt, size_t call, size_t argc, bool tail) {
   ot_value closure = rt->stack[call];
-  if (oti_kind(closure, K_MACRO)) {
-    closure = oti_as_macro(closure)->expander;
-    rt->stack[call] = closure;
-  }
   if (oti_kind(closure, K_GENERIC) || oti_kind(closure, K_NEXT)) {
     if (!oti_generic_prepare(rt, call, &argc)) return false;
     closure = rt->stack[call];

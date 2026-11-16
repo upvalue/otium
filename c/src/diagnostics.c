@@ -154,7 +154,12 @@ static char* written(ot_state* rt, ot_value value) {
 bool oti_callable_error(ot_state* rt, ot_value value) {
   if (oti_failed(rt)) return false;
   char* text = written(rt, value);
-  oti_coded_errorf(rt, "E0302", "%s is not callable", text ? text : "value");
+  if (oti_kind(value, K_MACRO))
+    oti_coded_errorf(rt, "E0302",
+                     "%s is a macro and cannot be called as a function; was the call "
+                     "compiled before the macro was defined?",
+                     text ? text : "macro");
+  else oti_coded_errorf(rt, "E0302", "%s is not callable", text ? text : "value");
   free(text);
   rt->error.slots[OTI_ERROR_VALUE] = value;
   rt->error.has_value = true;

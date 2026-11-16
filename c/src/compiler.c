@@ -603,7 +603,8 @@ static oti_ast* expand_call(oti_compiler* c, const oti_ast* form, uint32_t globa
   ot_value args = datum(c, &arguments);
   c->locate = locate;
   if (!args) return NULL;
-  ot_value result = oti_call_list(rt, oti_global_value(rt, global), args);
+  ot_value macro = oti_global_value(rt, global);
+  ot_value result = oti_call_list(rt, oti_as_macro(macro)->expander, args);
   return result ? syntax_value(c, result, form->offset, 0) : NULL;
 }
 

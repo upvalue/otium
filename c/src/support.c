@@ -86,7 +86,7 @@ static ot_value support_number_string(ot_state* rt, size_t first, size_t count) 
 }
 
 bool oti_procedure(ot_value v) {
-  return oti_kind(v, K_PARAM) || oti_kind(v, K_MACRO) || oti_kind(v, K_NEXT) ||
+  return oti_kind(v, K_PARAM) || oti_kind(v, K_NEXT) ||
          oti_kind(v, K_GENERIC) || oti_kind(v, K_CLOSURE) || oti_kind(v, K_FOREIGN_FUNCTION) ||
          oti_kind(v, K_NATIVE) || (v & 255) == TAG_BUILTIN;
 }
@@ -191,7 +191,9 @@ static ot_value support_expander_invoke_macro(ot_state* rt, size_t first, size_t
     oti_coded_error(rt, "E0111", "macro expansion limit exceeded");
     return 0;
   }
-  return oti_call_list(rt, rt->stack[first], rt->stack[first + 1]);
+  ot_value macro = rt->stack[first];
+  if (!oti_kind(macro, K_MACRO)) return oti_fail(rt, "expander-invoke-macro: expected a macro");
+  return oti_call_list(rt, oti_as_macro(macro)->expander, rt->stack[first + 1]);
 }
 
 static ot_value support_expander_fail(ot_state* rt, size_t first, size_t count) {

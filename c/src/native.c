@@ -2060,10 +2060,6 @@ static W dispatch(ot_state* rt) {
       if (!spread(rt, base, &argc)) oti_native_raise(rt);
       continue;
     }
-    if (oti_kind(f, K_MACRO)) {
-      rt->stack[base] = oti_as_macro(f)->expander;
-      continue;
-    }
     if (oti_kind(f, K_GENERIC) || oti_kind(f, K_NEXT)) {
       if (!oti_generic_prepare(rt, base, &argc)) oti_native_raise(rt);
       continue;

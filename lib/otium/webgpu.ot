@@ -17,6 +17,7 @@ until release! frees it."
 (require (otium.process :as process))
 (require (otium.thread :as thread))
 (require (otium.webgpu.raw :as raw))
+(require (otium.sdl :as sdl))
 
 (def (config-path)
   (let ((build (process/getenv "OTIUM_BUILD")))
@@ -248,3 +249,102 @@ bytevector, waiting for the GPU."
           (raw/buffer-unmap buffer)
           bytes))
       (release! a))))
+
+;; Surfaces
+
+(def (video-driver)
+  (let ((name (sdl/get-current-video-driver)))
+    (if (ffi/null-pointer? name)
+        ""
+        (ffi/read-utf8 name 64))))
+
+(def (surface instance window)
+  "A surface for an SDL window, from its Wayland or X11 window on Linux or a new
+Metal view on macOS: a table whose :surface is the WGPUSurface. Release it
+with release-surface!."
+  (let ((props (sdl/get-window-properties window))
+        (driver (video-driver))
+        (a (arena)))
+    (defer
+      (let ((source (cond
+                      ((equal? driver "wayland")
+                       (list :surface-source-wayland-surface {:display (sdl/get-pointer-property props
+                                                                                                 "SDL.window.wayland.display"
+                                                                                                 ffi/null)
+                                                              :surface (sdl/get-pointer-property props
+                                                                                                 "SDL.window.wayland.surface"
+                                                                                                 ffi/null)}))
+                      ((equal? driver "x11")
+                       (list :surface-source-xlib-window {:display (sdl/get-pointer-property props
+                                                                                             "SDL.window.x11.display"
+                                                                                             ffi/null)
+                                                          :window (sdl/get-number-property props
+                                                                                           "SDL.window.x11.window"
+                                                                                           0)}))
+                      ((equal? driver "cocoa")
+                       (let ((view (sdl/pointer (sdl/metal-create-view window))))
+                         (list :surface-source-metal-layer {:layer (sdl/metal-get-layer view)} view)))
+                      (else (error "WebGPU surfaces need a Wayland, X11 or Cocoa window" driver)))))
+        (let ((s (raw/instance-create-surface instance
+                                              (build :surface-descriptor {:next-in-chain (list (list (car source)
+                                                                                                     (cadr source)))}
+                                                     a))))
+          (when (ffi/null-pointer? s) (error "Could not create a WebGPU surface"))
+          {:surface s
+           :metal-view (if (= (length source) 3)
+                           (caddr source)
+                           nil)}))
+      (release! a))))
+
+(def (release-surface! s)
+  "Release a surface from surface, and its Metal view if it has one."
+  (raw/surface-release (s :surface))
+  (when (s :metal-view) (sdl/metal-destroy-view (s :metal-view))))
+
+(def (surface-formats s adapter)
+  "The texture formats s supports with adapter, as values of raw/texture-format."
+  (let ((caps (ffi/alloc raw/surface-capabilities 1)))
+    (defer
+      (begin
+        (raw/surface-get-capabilities (s :surface) adapter caps)
+        (let ((n (ffi/field-ref caps raw/surface-capabilities '(format-count)))
+              (formats (ffi/field-ref caps raw/surface-capabilities '(formats))))
+          (let ((out (for ((i :range n) (f :collect (ffi/ref formats 'u32 i))) => f)))
+            (raw/surface-capabilities-free-members caps)
+            out)))
+      (ffi/free! caps))))
+
+(def (configure-surface! s device config)
+  "Configure s for device. config is a surface-configuration table without
+:device; :usage defaults to :render-attachment and :present-mode to :fifo."
+  (let ((a (arena)))
+    (defer
+      (raw/surface-configure (s :surface)
+                             (build :surface-configuration (merge {:usage :render-attachment :present-mode :fifo}
+                                                                  config
+                                                                  {:device device})
+                                    a))
+      (release! a))))
+
+(def (current-texture s)
+  "The texture to draw this frame, or nil when the surface has none to give,
+as when the window is hidden or the texture timed out. :outdated and :lost
+mean the surface needs configuring again; they raise."
+  (let ((out (ffi/alloc raw/surface-texture 1)))
+    (defer
+      (begin
+        (raw/surface-get-current-texture (s :surface) out)
+        (let ((status (ffi/field-ref out raw/surface-texture '(status)))
+              (texture (ffi/field-ref out raw/surface-texture '(texture))))
+          (cond
+            ((or (= status (raw/surface-get-current-texture-status :success-optimal))
+                 (= status (raw/surface-get-current-texture-status :success-suboptimal)))
+             texture)
+            ((= status (raw/surface-get-current-texture-status :timeout)) nil)
+            (else (unless (ffi/null-pointer? texture) (raw/texture-release texture))
+                  (error "WebGPU surface texture unavailable" status)))))
+      (ffi/free! out))))
+
+(def (present! s)
+  "Show the texture drawn since current-texture."
+  (raw/surface-present (s :surface)))

@@ -1,0 +1,63 @@
+;; A WebGPU surface for a hidden SDL window: created, compatible with an
+;; adapter, and reporting formats. Nothing is drawn, so nothing is shown.
+(require (otium.ffi :as ffi))
+(require (otium.sdl :as sdl))
+(require (otium.process :as process))
+(require (otium.webgpu :as gpu))
+(require (otium.webgpu.raw :as raw))
+(require otium.test :refer (check report))
+
+(def config (read-string (read-file (str (process/getenv "OTIUM_BUILD") "/ui-config.ot"))))
+
+(sdl/load! (cadr (assq 'sdl config)))
+
+(gpu/load!)
+
+(sdl/check (sdl/init sdl/INIT_VIDEO))
+
+(def window (sdl/pointer (sdl/create-window "webgpu surface" 64 64 sdl/WINDOW_HIDDEN)))
+
+(def instance (raw/create-instance ffi/null))
+
+(def surface (gpu/surface instance window))
+
+(def adapter (gpu/request-adapter instance {:compatible-surface (surface :surface)}))
+
+(def formats (gpu/surface-formats surface adapter))
+
+(check "the surface offers formats" #t (> (length formats) 0))
+
+(check "including an 8-bit RGBA or BGRA one"
+       #t
+       (if (or (memq (raw/texture-format :bgra8-unorm) formats) (memq (raw/texture-format :rgba8-unorm) formats))
+           #t
+           #f))
+
+(def device (gpu/request-device instance adapter))
+
+(def format
+  (if (memq (raw/texture-format :bgra8-unorm) formats)
+      :bgra8-unorm
+      :rgba8-unorm))
+
+(check "the surface configures for the device"
+       nil
+       (begin
+         (gpu/configure-surface! surface device {:format format :width 64 :height 64})
+         (gpu/errors!)))
+
+(raw/surface-unconfigure (surface :surface))
+
+(raw/device-release device)
+
+(raw/adapter-release adapter)
+
+(gpu/release-surface! surface)
+
+(raw/instance-release instance)
+
+(sdl/destroy-window window)
+
+(sdl/quit)
+
+(report "webgpu surface")

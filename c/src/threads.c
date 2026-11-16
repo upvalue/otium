@@ -184,7 +184,14 @@ static bool deadline_after(ot_state* rt, ot_value seconds, uint64_t* deadline) {
   if (!oti_number(rt, seconds, &s) || s != s) return oti_error(rt, "expected a number of seconds");
   if (s < 0) s = 0;
   if (s > 1e9) s = 1e9;
-  *deadline = now(rt->threads) + (uint64_t)(s * 1e9 + 0.5);
+  /* Round up, so a wait never ends before it was asked to. Rounding to the
+   * nearest could put a deadline just short of a time computed from the
+   * clock; a waiter woken there finds it not yet due, asks for less than a
+   * nanosecond, and polls forever under the test scheduler, whose clock only
+   * moves when threads park. Zero seconds stays a deadline already passed. */
+  double ns = s * 1e9;
+  uint64_t whole = (uint64_t)ns;
+  *deadline = now(rt->threads) + whole + ((double)whole < ns ? 1 : 0);
   return true;
 }
 

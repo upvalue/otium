@@ -123,7 +123,7 @@ def repl(t):
     t.check(result.stderr == '', result)
     expect(t, run('(unwind-protect (exit 7) (println "exit-cleanup"))\n'), 7, 'exit-cleanup\n')
     expect(t, run('(println (try (exit 256) (catch (error? e) (condition-message e))))\n(quit)\n'), 0,
-           'exit: expected integer status from 0 to 255\n')
+           'exit status must be an integer from 0 to 255\n')
     expect(t, run('(def hits (array)) (push! hits 1) (+ 1\n 2) (println "hits:" (length hits))\n(quit)\n'),
            0, 'hits: 1\n')
     expect(t, run('(println "a\n   \nb")\n(quit)\n'), 0, 'a\n   \nb\n')

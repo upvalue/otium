@@ -541,7 +541,8 @@ Includes runtime builtins, special forms, and the Otium prelude."
 
 ;; lint: allow(rest-arguments) accepts any number of keys
 (def (dissoc coll . ks)
-  "(dissoc collection key ...)\nReturn a shallow copy without the specified keys."
+  "(dissoc table key ...)\nReturn a shallow copy of a table without the specified keys. nil gives an empty table."
+  (unless (or (nil? coll) (table? coll)) (error "dissoc: expected a table" coll))
   (let ((c (if (nil? coll)
                (table)
                (copy coll))))

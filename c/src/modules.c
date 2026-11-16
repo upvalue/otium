@@ -323,8 +323,13 @@ static bool one_require(ot_state* rt, const oti_ast** cursor) {
     e->owned = true;
     return false;
   }
-  if (refer)
-    for (const oti_ast* name = refer->as.list.first; name; name = name->next) {
+  if (refer) {
+    /* [a b] reads as (array a b). */
+    const oti_ast* names = refer->as.list.first;
+    if (names && names->kind == AST_SYMBOL && names->as.text.size == 5 &&
+        !memcmp(names->as.text.data, "array", 5))
+      names = names->next;
+    for (const oti_ast* name = names; name; name = name->next) {
       if (name->kind != AST_SYMBOL) return oti_error(rt, "require :refer needs symbol names");
       uint32_t target = UINT32_MAX;
       for (size_t i = 0; i < rt->global_count; i++)
@@ -347,6 +352,7 @@ static bool one_require(ot_state* rt, const oti_ast** cursor) {
             "cannot refer missing or private module binding");
       if (!install_import(rt, name, target, false)) return false;
     }
+  }
   if (alias)
     for (size_t i = 0; i < rt->namespace_count; i++)
       if (i != space && strlen(rt->namespaces[i]) == alias->as.text.size &&

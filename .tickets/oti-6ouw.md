@@ -14,3 +14,9 @@ tags: [gpu, ui]
 
 Follow-up to oti-7o2o. Run ui gpu direct (OTIUM_UI_VISIBLE=1) with OTIUM_UI_DRIVER=webgpu on Linux; run the ui and manse suites on macOS arm64 (Metal layer surface is untested); try OTIUM_UI_DRIVER=webgpu:gl.
 
+
+## Notes
+
+**2026-11-16T02:57:27Z**
+
+webgpu:gl fails headless on Linux: 'No suitable graphics adapter found; ... gl not compatible with provided surface'. SDL picked X11 (XWayland) for the window here, so wgpu's GL backend likely needs the Wayland surface or a matching EGL display. Vulkan works.

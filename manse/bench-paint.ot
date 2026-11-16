@@ -4,6 +4,7 @@
 (require manse.apps.terminal)
 (ns manse.apps.terminal)
 (require otium.process :as process)
+(require (otium.ui.gpu :as gpu))
 
 (def width-px (string->number (process/getenv "W")))
 

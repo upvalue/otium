@@ -941,35 +941,24 @@ Includes runtime builtins, special forms, and the Otium prelude."
     ((equal? key (car (car alist))) (car alist))
     (else (assoc key (cdr alist)))))
 
-(def- (heads lists)
-  (if (pair? lists)
-      (cons (car (car lists)) (heads (cdr lists)))
-      '()))
-
-(def- (tails lists)
-  (if (pair? lists)
-      (cons (cdr (car lists)) (tails (cdr lists)))
-      '()))
-
-(def- (any-empty? lists)
-  (and (pair? lists) (or (not (pair? (car lists))) (any-empty? (cdr lists)))))
-
 ;; lint: allow(rest-arguments) folds over any number of parallel lists
-(def (fold-left f init lst & more)
-  "(fold-left procedure initial list ...)\nCombine from the left: (procedure accumulator element ...) for each position."
+(def (fold-left f init seq & more)
+  "(fold-left procedure initial sequence ...)\nCombine from the left: (procedure accumulator element ...) for each position of the lists or arrays. Stop at the shortest input."
   (let loop ((acc init)
-             (lists (cons lst more)))
-    (if (any-empty? lists)
+             (sequences (cons seq more))
+             (i 0))
+    (if (sequence-ended? sequences i)
         acc
-        (loop (apply f acc (heads lists)) (tails lists)))))
+        (loop (apply f acc (sequence-heads sequences i)) (sequence-tails sequences) (+ i 1)))))
 
 ;; lint: allow(rest-arguments) folds over any number of parallel lists
-(def (fold-right f init lst & more)
-  "(fold-right procedure initial list ...)\nCombine from the right: (procedure element ... accumulator) for each position."
-  (let loop ((lists (cons lst more)))
-    (if (any-empty? lists)
+(def (fold-right f init seq & more)
+  "(fold-right procedure initial sequence ...)\nCombine from the right: (procedure element ... accumulator) for each position of the lists or arrays. Stop at the shortest input."
+  (let loop ((sequences (cons seq more))
+             (i 0))
+    (if (sequence-ended? sequences i)
         init
-        (apply f (append (heads lists) (list (loop (tails lists))))))))
+        (apply f (append (sequence-heads sequences i) (list (loop (sequence-tails sequences) (+ i 1))))))))
 
 (def- (sequence-ended? sequences i)
   (and (pair? sequences)

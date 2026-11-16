@@ -48,7 +48,9 @@ sequences of values evaluated in order.
 
 ### 1.1 Whitespace and comments
 
-Any Unicode whitespace separates tokens. `;` begins a comment that runs to
+ASCII whitespace (space, tab, newline, carriage return, form feed and
+vertical tab) separates tokens. Other Unicode spaces, such as U+00A0, are
+atom characters. `;` begins a comment that runs to
 end of line. There is no block comment.
 
 ### 1.2 Delimiters
@@ -62,23 +64,26 @@ never appear inside one. Everything else may appear in a symbol, including
 An atom token is classified in this order:
 
 1. `nil` is the nil value.
-2. `#t`, `#true`, `true` are boolean true; `#f`, `#false`, `false` are
-   boolean false.
+2. `#t` and `#true` are boolean true; `#f` and `#false` are boolean
+   false. `true` and `false` are ordinary symbols.
 3. `#\` starts a character literal (1.4). `#u8(` opens a bytevector
    constructor, read as `(bytevector ...)`. ``#` `` is quote sugar (1.5).
    Other tokens starting with `#` are read errors. The `#` prefix is
    reserved.
 4. `:name` is the keyword `name` (any non-empty run of atom characters).
    A bare `:` is a read error.
-5. A token that *starts numerically* -- optionally signed (`+`/`-`), then a
-   digit, or a `.` followed by at least one more character -- must parse as
-   a number, otherwise it is a read error. `12abc` is an error, not a
-   symbol. The number forms:
+5. `+inf.0`, `-inf.0` and `+nan.0` are the non-finite floats (`-nan.0`
+   also reads as NaN).
+6. A token that *starts numerically* -- optionally signed (`+`/`-`), then a
+   digit, or a `.` followed by a digit -- must parse as a number,
+   otherwise it is a read error. `12abc` is an error, not a symbol; `-.x`
+   is a symbol. A token that starts with `.` and is not a number is a read
+   error. The number forms:
    - decimal integers: `42`, `-7` (width per section 2; a literal outside
      the implementation's int range is a read error)
    - hexadecimal integers: `0xff`
    - floats (IEEE 754 double), including `3.5`, `-.5`, `1e3`
-6. Anything else is a symbol: `foo-bar!`, `+`, `->`, `term/write`, `/`.
+7. Anything else is a symbol: `foo-bar!`, `+`, `->`, `term/write`, `/`.
 
 Symbols containing `/` may be treated as namespace-qualified at resolution
 time (7.3). That is a property of evaluation, not of the reader; the
@@ -133,16 +138,16 @@ symbol.
 | `null` | `()` | -- | the empty list; truthy |
 | `boolean` | `#t` / `#f` | -- | |
 | `int` | `42` | -- | signed, implementation-defined width (≥ 31 bits); overflow wraps (Appendix A) |
-| `float` | `3.5`, `3.0` | -- | IEEE 754 double |
+| `float` | `3.5`, `3.0`, `+inf.0`, `-inf.0`, `+nan.0` | -- | IEEE 754 double |
 | `symbol` | `foo` | -- | |
 | `keyword` | `:foo` | -- | self-evaluating |
-| `char` | `#\a` | -- | one Unicode scalar value; named form for space, newline, tab, return, nul; `#\x7f` for other control chars |
+| `char` | `#\a` | -- | one Unicode scalar value; named form for space, newline, tab, return, nul; `#\x7f` for other C0 and C1 control chars |
 | `string` | `"hi"` | -- | Unicode; indexed and measured by code point |
 | `pair` | `(1 . 2)` | yes | mutable with `set-car!` / `set-cdr!`, which may form cycles |
 | `bytevector` | `#u8(1 2)` | yes | fixed-length byte sequence; literal evaluates a constructor call |
 | `array` | `[1 2]` | yes | growable vector |
 | `table` | `{:a 1}` | yes | insertion-ordered map, arbitrary keys |
-| `buffer` | `#<buffer "…">` | yes | mutable string builder |
+| `buffer` | `#<buffer "…">` | yes | mutable string builder; repr shows the first 40 bytes, display the whole text (2.6) |
 | `function` | `#<function name>` | -- | `#<function>` when anonymous; closures and host natives print alike |
 | `macro` | `#<macro name>` | -- | |
 | `param` | `#<param name>` | -- | dynamically-scoped cell (section 9) |
@@ -202,28 +207,30 @@ Three notions, coarsest to finest:
 
 - **`=`** -- numeric equality across int/float: `(= 1 1.0)` is `#t`.
   Arguments must be numbers.
-- **`equal?`** -- deep structural equality for pairs and immutable data
-  (pairs recursively, strings, symbols, keywords, numbers *of the same
-  type*, chars), identity for arrays, bytevectors, tables, buffers, and functions. Array identity
-  is stable across GC and is unchanged by mutation.
-  Type-strict: `(equal? 1 1.0)` is `#f`, and `nil`, `()`, `#f` are all
-  distinct. For the benefit of table keys, `NaN` equals `NaN` and `0.0`
-  equals `-0.0`.
-- **`eq?`** -- identity: pointer identity for pairs, strings, and all
-  mutable heap objects; same as `equal?` for immediates (numbers,
-  booleans, chars, `nil`, `()`, the EOF object). Symbols and keywords are interned, so `eq?`
-  on equal ones is `#t`. Two equal strings are `eq?` only when they are
+- **`equal?`** -- deep structural equality for pairs, arrays and immutable
+  data (pairs and arrays recursively, strings, symbols, keywords, numbers
+  *of the same type*, chars), identity for bytevectors, tables, buffers,
+  and functions. Type-strict: `(equal? 1 1.0)` is `#f`, `(equal? [1] '(1))`
+  is `#f`, and `nil`, `()`, `#f` are all distinct. For the benefit of table
+  keys, `NaN` equals `NaN` and `0.0` equals `-0.0`.
+- **`eq?`** -- identity: pointer identity for pairs, strings, floats and
+  all mutable heap objects; same as `equal?` for ints, booleans, chars,
+  `nil`, `()` and the EOF object. Floats may be boxed, so `eq?` on two
+  equal floats is unspecified; compare numbers with `=`. Symbols and
+  keywords are interned, so `eq?` on equal ones is `#t`. Two equal strings are `eq?` only when they are
   the same object; whether an implementation ever shares string objects
   (equal literals, say) is unspecified, so compare strings with
   `equal?`.
 
-Table keys compare immutable values and pairs structurally. Mutable keys,
-including arrays, compare by the same identity used by `equal?`, stable across
-GC through a stored id rather than an address. Mutating an array therefore
+Table keys compare immutable values and pairs structurally, as `equal?`
+does. Arrays and other mutable keys compare by identity, unlike `equal?`:
+`(get t [1])` misses a key stored as a different `[1]`. Identity is stable
+across GC through a stored id rather than an address, so mutating an array
 cannot invalidate a stored key's hash.
-Pairs used as table keys, including pairs reachable through them, become
+Pairs stored as table keys, including pairs reachable through them, become
 frozen while still retaining structural equality. Attempting to mutate one
-is an error. This keeps a stored key's structural hash stable.
+is an error. This keeps a stored key's structural hash stable. Looking a
+pair up does not freeze it.
 
 ### 2.5 Ordering
 
@@ -241,10 +248,13 @@ Every value has two renderings:
   where possible. Strings are quoted and escaped; floats always carry a
   decimal point or exponent (`3.0`, not `3`). Finite floats use the
   shortest decimal that reads back to the same IEEE 754 value. Non-finite
-  floats have the canonical representations `nan`, `+inf`, and `-inf`.
+  floats print as `+inf.0`, `-inf.0` and `+nan.0`, which read back (1.3).
+  Opaque values print as `#<kind name>`. Nesting deeper than 100 levels
+  prints as `...`, which does not read back.
 - **display** (used by `display`/`print`/`println`/`str`): identical
   except strings, buffers and chars render as their raw characters at top
-  level. Inside collections they keep their repr.
+  level. A buffer displays its whole text. Inside collections they keep
+  their repr.
 
 ### 2.7 Complexity guarantees
 
@@ -321,7 +331,9 @@ For an unqualified symbol (no interior `/`):
 For a qualified symbol `p/n` (interior `/`, neither side empty; `/` alone
 is unqualified): resolve `p` through the current namespace's alias table,
 falling back to `p` as a literal namespace name, then look up `n` in that
-namespace's own vars. A missing namespace or var is an error; private vars
+namespace's own vars and the vars it refers. There is no fallback to
+`otium.core`: `alias/car` is unbound unless the aliased namespace has or
+refers a `car`. A missing namespace or var is an error; private vars
 can be reached this way (7.4). Qualified symbols never resolve lexically,
 and binding one as a local or parameter is an error.
 
@@ -338,7 +350,9 @@ For a list `(head arg…)`:
 
 1. If `head` is a symbol naming a **special form** (section 5), the
    form's own rule applies. Special forms are recognized by name before
-   any resolution and cannot be shadowed, lexically or by definition.
+   any resolution and cannot be bound lexically. A top-level definition
+   may use a special-form name, but the var can then only be reached
+   qualified: `otium.ffi` defines `set!`, called as `ffi/set!`.
 2. Otherwise `head` is evaluated, then the arguments left to right, and
    the result is applied (3.3).
 
@@ -353,7 +367,9 @@ Callable values:
   sequence in a fresh scope. The last form's value is the result (`nil`
   for an empty body), and the last form is in tail position.
 - **Tables and arrays** -- `(coll key)` / `(coll key default)` behave as
-  `get` (10.5): `nil` on a miss unless `default` is given.
+  `get` (10.5): `nil` on a miss unless `default` is given. An array's key
+  must be an integer: unlike `get`, `([1 2] :a)` is an error, so a
+  misplaced key doesn't pass as a miss.
 - **Keywords** -- `(:k coll)` / `(:k coll default)`: lookup with the
   keyword as key.
 - **Params** -- `(p)` returns the param's current dynamic value
@@ -431,9 +447,14 @@ names the closure; the value form also names a previously anonymous
 closure bound to it. `def-` is identical but marks the var **private**
 (7.4); it is only allowed at top level.
 
+A top-level definition may not be named `array` or `table`, since `[...]`
+and `{...}` read as calls to them (1.7). This covers `def`, `def-`,
+`defonce`, `defmacro`, `defparam` and the class forms.
+
 `(defonce name ["docstring"] expr)` is a top-level `def` that does
 nothing if the current namespace already defines `name`, so reloading a
 file keeps the existing value. `expr` is not evaluated in that case.
+Either way it returns the var's value.
 
 Inside a body -- of `fn`, a function `def`, `let`, named `let`,
 `defmacro`, `defmethod`, a `catch` clause, or a restart clause --
@@ -452,7 +473,8 @@ expression `begin` -- is an error.
 
 A docstring is recognized when the body's first form is a string literal
 followed by at least one more form. It is stored in var metadata and
-surfaced by `describe`.
+surfaced by `describe`. A docstring in a bare `fn` is accepted and
+discarded.
 
 ### 4.2 `set!`
 
@@ -471,7 +493,8 @@ Any other call shape is an error. See
 ## 5. Special forms
 
 Special-form names are reserved: they are recognized syntactically and
-cannot be rebound or shadowed.
+cannot be bound lexically (3.2). `when` and `unless` are ordinary macros
+(10.12), not special forms.
 
 **`(quote x)`** -- `x` unevaluated. Exactly one argument.
 
@@ -520,15 +543,18 @@ the last value; `(or)` is `#f`.
 **`(cond clauses…)`** -- each clause is `(test body…)` or `(else body…)`.
 Tests evaluate in order; the first truthy one's body runs and its last
 value is returned. A one-element clause `(test)` yields the test's value
-itself. `else` is truthy in test position and requires a body. No clause
+itself. `else` requires a body and must be the last clause. No clause
 chosen yields `nil`.
 
 **`(quasiquote x)`** -- template evaluation. `(unquote e)` at depth 1
-evaluates `e`; `(unquote-splicing e)` as a list element at depth 1
 evaluates `e` (which must be a proper list) and splices its elements.
-Nested quasiquotes increment depth, unquotes decrement it, and only
-depth-1 unquotes evaluate. `unquote` / `unquote-splicing` outside
-quasiquote is an error, as is splicing a non-list.
+The last splice in a list is the exception: its value becomes the tail
+as it is, without copying, so it may be any value. `` `(a ,@x) `` with
+`x` bound to `5` is `(a . 5)`, and `` `(,@x) `` is `x` itself. That splice
+is in tail position. Nested quasiquotes increment depth, unquotes
+decrement it, and only depth-1 unquotes evaluate. `unquote` /
+`unquote-splicing` outside quasiquote is an error, as is splicing a
+non-list anywhere but last.
 
 **`(syntax-quote x)`** -- a quasiquote whose template names resolve where
 it is written (6.2).
@@ -660,8 +686,8 @@ the same template with each symbol rewritten:
   made with `gensym` each time the template is evaluated. Every `name#`
   in one template is the same symbol. `name#` inside a nested template is
   an error.
-- These stay as written: special-form names (section 5); `when`,
-  `unless`, `else`, `catch`, `&`, `&optional`, `_`, `array` and `table`; symbols inside a `quote`d form
+- These stay as written: special-form names (section 5); `else`,
+  `catch`, `&`, `&optional`, `_`, `array` and `table`; symbols inside a `quote`d form
   in the template; and the specs of an `ns` or `require` form.
 
 Unquoted expressions are code, expanded normally. A nested quasiquote or
@@ -704,8 +730,11 @@ including refers in other namespaces, so redefinition is instantly
 visible everywhere. Redefining reuses the existing cell.
 
 There is always a **current namespace**; programs start in `user`. The
-core library lives in `otium.core`, and every newly created namespace
-automatically refers all public vars `otium.core` has *at creation time*.
+core library lives in `otium.core`. An unqualified name that a namespace
+neither defines nor refers resolves to the public `otium.core` var of
+that name, looked up when the code is compiled, so core vars defined
+after a namespace was created are visible in it too. Private core vars
+are reachable only qualified.
 
 ### 7.2 `ns` and top-level switching
 
@@ -718,10 +747,11 @@ automatically refers all public vars `otium.core` has *at creation time*.
 `ns` switches the current namespace to `my.name` (creating it if needed)
 and processes clauses; only `:require` clauses exist. Returns `nil`.
 
-A namespace switch performed by a top-level form persists for subsequent
-top-level forms. Anywhere else -- inside nested evaluation or a function
-call -- the current namespace is restored when the enclosing form
-finishes, so a switch cannot leak out of nested code.
+`ns` and `require` are only allowed at top level, as are `defmacro` and
+`defonce`. A namespace switch performed by a top-level form persists for
+subsequent top-level forms. The one way to switch from nested code is
+`eval` of an `ns` form; the current namespace is restored when that
+`eval` returns, so a switch cannot leak out of nested code.
 
 ### 7.3 `require`
 
@@ -740,7 +770,8 @@ options are:
   longer contains stay, `defonce` vars keep their values, and forms that
   ran before an error keep their effect.
 
-Quoting of specs and names is tolerated and ignored. If the namespace is
+A whole spec may be quoted (`(require 'app.tools)`); names inside a spec
+may not. If the namespace is
 not yet loaded, it is located on the **load path**: the name with `.`
 replaced by `/` plus the extension `.ot`, searched across the host's
 configured load-path directories; the file is evaluated with the current
@@ -752,7 +783,7 @@ require) is an error, as is a name not found on the path.
 
 `def-` marks a var private. Private vars resolve normally from their
 own namespace, can be reached from any namespace by qualified reference,
-and are an error to `:refer`. The automatic core refer skips them.
+and are an error to `:refer`. Unqualified lookup of core names skips them (7.1).
 Qualified access is what lets a macro's expansion use its namespace's
 private helpers (6.2).
 
@@ -970,7 +1001,7 @@ to float.
 | `(+ n…)` → num | Sum; `(+)` is `0`. |
 | `(* n…)` → num | Product; `(*)` is `1`. |
 | `(- n n…)` → num | Left fold; `(- n)` negates. |
-| `(/ n n…)` → num | Division; `(/ n)` is `1/n`. Int÷int stays int when exact (`(/ 6 2)` is `3`), else float (`(/ 7 2)` is `3.5`). Int division by zero is an error. |
+| `(/ n n…)` → num | Division; `(/ n)` is `1/n`. Int÷int stays int when exact (`(/ 6 2)` is `3`), else float (`(/ 7 2)` is `3.5`). Dividing by integer zero is an error, even with a float dividend: `(/ 1.0 0)`. Dividing by `0.0` follows IEEE 754: `(/ 1 0.0)` is `+inf.0`, `(/ 0.0 0.0)` is `+nan.0`. |
 | `(quotient a b)` → int | Truncating int division. Ints only; zero divisor errors. |
 | `(remainder a b)` → int | Remainder, sign of the dividend. |
 | `(modulo a b)` → int | Modulus, sign of the divisor. |
@@ -986,7 +1017,7 @@ to float.
 | `(exact n)` / `(inexact n)` → num | Convert an integer-valued finite float to int, or a number to float. |
 | `(exact? n)` `(inexact? n)` `(integer? n)` → bool | Numeric representation and integer-value tests. |
 | `(nan? n)` `(infinite? n)` `(finite? n)` → bool | Floating-point classification. Ints are finite. |
-| `(= n n…)` → bool | Numeric equality chain across int/float. |
+| `(= n…)` → bool | Numeric equality chain across int/float; `(=)` and `(= n)` are `#t`. |
 | `(< …)` `(> …)` `(<= …)` `(>= …)` → bool | Comparison chains; at least two arguments. |
 | `(inc n)` / `(dec n)` → num | `n±1`. |
 | `(zero? n)` `(positive? n)` `(negative? n)` → bool | Sign tests (numeric). |
@@ -1007,7 +1038,9 @@ Type predicates, each `(p x)` → bool: `nil?`, `null?` (empty list),
 `boolean?`, `int?`, `float?`, `number?` (int or float), `symbol?`,
 `keyword?`, `char?`, `string?`, `pair?`, `array?`, `table?`, `buffer?`, `macro?`,
 `eof-object?`,
-`procedure?` (applicable function), `list?` (proper list: `()` or a
+`procedure?` (a function, generic function, param or foreign function;
+`#f` for macros, and for tables, arrays and keywords even though they can
+be applied), `list?` (proper list: `()` or a
 nil-terminated pair chain without cycles).
 
 `(true? x)` / `(false? x)` -- `#t` only for the booleans themselves.
@@ -1030,11 +1063,11 @@ table, string, buffer; other types error.
 | `(list-ref l k)` / `(list-tail l k)` | Element at, or tail after, index `k`; out of range is an error. |
 | `(memq x l)` / `(member x l)` | First tail whose car is `eq?` / `equal?` to `x`, or `nil`. |
 | `(assq k al)` / `(assoc k al)` | First pair in an alist whose car is `eq?` / `equal?` to `k`, or `nil`. |
-| `(fold-left f init l…)` / `(fold-right f init l…)` | Combine across one or more lists, from the left or the right. |
+| `(fold-left f init seq…)` / `(fold-right f init seq…)` | Combine across one or more lists or arrays, from the left or the right; stops at the shortest. |
 | `(exists f l…)` / `(for-all f l…)` | First truthy result, or `nil`; last result if all are truthy, else the first falsy one. |
 | `(list x…)` → list | |
 | `(append list…)` → list | Concatenation; arguments must be proper lists. |
-| `(length coll)` → int | Elements of a list, array, table (entries), string or buffer (characters). Improper lists and other types error. |
+| `(length coll)` → int | Elements of a list, array, table (entries), bytevector, or string or buffer (characters); `(length nil)` is `0`. Improper lists and other types error. |
 | `(reverse seq)` → seq | Kind-preserving. |
 | `(list-to-array list)` → array, `(array-to-list array)` → list | Conversions, strict about input type. |
 
@@ -1054,7 +1087,7 @@ or is cyclic.
 | `(second seq)` / `(third seq)` | `(nth seq 1)` / `(nth seq 2)`. |
 | `(last seq)` | Last element or `nil`. Also accepts strings. |
 | `(nth seq i)` | Element at 0-based `i`, or `nil` out of range. Also accepts strings. |
-| `(count coll)` → int | Like `length` but `nil` counts as 0; accepts sequences, tables, strings, bytevectors. |
+| `(count coll)` → int | Same as `length`. |
 | `(map f seq)` | Kind-preserving; applies `f` to each element in order. |
 | `(filter pred seq)` | Kind-preserving; keeps elements where `pred` is truthy. |
 | `(reduce f init seq)` | Left fold: `(f acc elem)`. |
@@ -1083,7 +1116,7 @@ or is cyclic.
 | `(pop! arr)` | Remove and return the last element, or `nil` when empty. |
 | `(update! coll k f args…)` → coll | `(put! coll k (f (get coll k) args…))`. |
 | `(put coll kvs…)` → copy | `put!` on a shallow copy; `(put nil …)` builds a fresh table. |
-| `(dissoc coll k…)` → copy | Copy without the keys. |
+| `(dissoc t k…)` → copy | Copy of a table without the keys; `nil` gives `{}`. Other types error. |
 | `(update coll k f args…)` → copy | `put` of `(f (get coll k) args…)`. |
 | `(keys t)` / `(values t)` → array | Insertion order; `nil` gives `[]`. |
 | `(merge t…)` → table | New table, left to right; `nil` arguments skipped; live entries in later tables update matching keys. |
@@ -1174,7 +1207,7 @@ system clock for civil time:
 | `(macroexpand form)` → value | `macroexpand-1` repeated until the head is no longer a macro call. Neither function descends into subforms. |
 | `(macroexpand-all form)` → value | Expand every macro call in `form`, including subforms, as the evaluator does before compiling. |
 | `(call-with-cleanup body cleanup)` | Function form of `unwind-protect` (8.7): calls `body` with no arguments, then `cleanup` with the exit outcome: `nil` on return or restart transfer, the condition on error, `:quit` on exit or interrupt. |
-| `(gensym [prefix])` → symbol | Section 6. |
+| `(gensym [prefix])` → symbol | A fresh symbol; `prefix` is a string or symbol, default `g`. Section 6. |
 
 ### 10.10 Conditions
 

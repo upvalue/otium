@@ -604,6 +604,20 @@ uint32_t oti_binding_global(ot_state* rt, uint32_t space, const char* name, size
   return create ? namespace_global(rt, space, name, length) : UINT32_MAX;
 }
 
+/* ns/name: a var of that namespace or one it refers, so a misspelled
+ * qualified name is unbound rather than core's. otium.generic has no vars
+ * of its own and names core's. */
+static uint32_t qualified_global(ot_state* rt, uint32_t space, const char* name, size_t length,
+                                 bool create) {
+  if (!strcmp(rt->namespaces[space], "otium.generic"))
+    return oti_binding_global(rt, space, name, length, create);
+  uint32_t index = find_global(rt, space, name, length);
+  if (index != UINT32_MAX) return index;
+  index = oti_import_global_in(rt, space, name, length);
+  if (index != UINT32_MAX) return index;
+  return create ? namespace_global(rt, space, name, length) : UINT32_MAX;
+}
+
 static uint32_t resolve_global(ot_state* rt, const char* name, size_t length, bool create) {
   uint32_t local = find_global(rt, rt->current_namespace, name, length);
   if (local != UINT32_MAX) return local;
@@ -615,14 +629,17 @@ static uint32_t resolve_global(ot_state* rt, const char* name, size_t length, bo
     size_t prefix = (size_t)(slash - name);
     uint32_t alias = oti_alias_namespace(rt, name, prefix);
     if (alias != UINT32_MAX)
-      return oti_binding_global(rt, alias, slash + 1, length - prefix - 1, create);
+      return qualified_global(rt, alias, slash + 1, length - prefix - 1, create);
     for (size_t i = 0; i < rt->namespace_count; i++)
       if (strlen(rt->namespaces[i]) == prefix && !memcmp(rt->namespaces[i], name, prefix))
-        return oti_binding_global(rt, (uint32_t)i, slash + 1, length - (size_t)(slash - name) - 1,
-                                  create);
+        return qualified_global(rt, (uint32_t)i, slash + 1, length - prefix - 1, create);
   }
+  /* Core's public vars, looked up live so core definitions added later are
+   * seen; its private ones only qualified. */
   uint32_t core = find_global(rt, 0, name, length);
-  if (core != UINT32_MAX && !oti_unbound(oti_global_value(rt, core))) return core;
+  if (core != UINT32_MAX && !oti_unbound(oti_global_value(rt, core)) &&
+      !rt->global_info[core].is_private)
+    return core;
   return create ? oti_global(rt, name, length) : UINT32_MAX;
 }
 

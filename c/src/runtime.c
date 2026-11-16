@@ -1004,8 +1004,9 @@ static bool evaluate_raw_mode(ot_state* rt, const oti_ast* form, ot_value* resul
     }
     uint32_t global = oti_global(rt, name->as.text.data, name->as.text.size);
     if (global == UINT32_MAX) return false;
+    /* Already defined: keep the value and return it. */
     if (rt->global_info[global].defined) {
-      *result = OT_NIL;
+      *result = oti_global_value(rt, global);
       return true;
     }
     replacement = *form;
@@ -1046,10 +1047,6 @@ static bool evaluate_raw_mode(ot_state* rt, const oti_ast* form, ot_value* resul
           return false;
       }
     }
-  }
-  if (once) {
-    if (prepared && *prepared == 1) *prepared = 3;
-    else *result = OT_NIL;
   }
   return true;
 }

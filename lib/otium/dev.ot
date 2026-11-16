@@ -658,5 +658,4 @@
             (cond
               ((= (get prepared 0) 1) ((get prepared 1)))
               ((= (get prepared 0) 2) (evaluate-form space (get prepared 1) native?))
-              ((= (get prepared 0) 3) ((get prepared 1)) nil)
               (else (get prepared 1)))))))

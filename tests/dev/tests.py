@@ -572,7 +572,7 @@ def prepared_top_level_forms(t):
     server = serve(t, watchdog=0)
     c = server.client
     c.send(1, 'eval', code='(defonce once-value 10)')
-    t.check_in(':value "nil"', c.response(1))
+    t.check_in(':value "10"', c.response(1))
     c.send(2, 'eval', code='(defonce once-value 20) once-value')
     t.check_in(':value "10"', c.response(2))
     if not os.environ.get('OTIUM_VM'):

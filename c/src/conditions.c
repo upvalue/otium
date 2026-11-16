@@ -199,6 +199,12 @@ static ot_value condition_of_type_p(ot_state* rt, size_t first, size_t count) {
   ot_value result = 0;
   values[0] = field(rt, rt->stack[first], ":type");
   if (!values[0]) goto done;
+  /* A condition may name its type with a keyword or string, as
+   * define-condition accepts. */
+  if (oti_kind(values[0], K_KEYWORD) || oti_kind(values[0], K_STRING)) {
+    values[0] = symbol(rt, values[0]);
+    if (!values[0]) goto done;
+  }
   values[1] = symbol(rt, rt->stack[first + 1]);
   if (!values[1]) goto done;
   result = OT_FALSE;

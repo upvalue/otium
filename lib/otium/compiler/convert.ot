@@ -370,7 +370,7 @@
             (car value)))))
 
 (def (top-definition form name args value-form site off)
-  (let ((cell (%native-cell-define name)))
+  (let ((cell (%native-cell-define name (offset-of form off))))
     [:gdef off cell
      (if (nil? value-form)
          [:fn off (lambda-form (cdr (car args)) (cdr args) site off name nil)]
@@ -838,7 +838,7 @@
            (when (and (string? (car value)) (pair? (cdr value))) (set! value (cdr value)))
            (if (pair? (cdr value))
                (fail "defparam needs one default" form off)
-               (let ((cell (%native-cell-define (car args))))
+               (let ((cell (%native-cell-define (car args) (offset-of form off))))
                  [:seq off [[:gdef off cell [:make-param off (literal (car args) off)
                                              (expression (car value) (non-tail site) off)]]
                             (literal nil off)]]))))))

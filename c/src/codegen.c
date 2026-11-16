@@ -90,6 +90,15 @@ static ot_value codegen_source_offset(ot_state* rt, size_t first, size_t count) 
   return oti_pair_offset(rt->stack[first], &offset) ? ot_int((intptr_t)offset) : OT_NIL;
 }
 
+/* Locate a compile error at the user's form. The compiler's own frames are
+ * left out of the trace: the error is in the source, not in convert.ot, as
+ * the VM compiler reports it. */
+static void located_in_source(ot_state* rt, ot_value offset) {
+  if (!ot_is_int(offset) || ot_to_int(offset) < 0) return;
+  oti_error_at(rt, (size_t)ot_to_int(offset));
+  if (rt->error.located) rt->error.traced = true;
+}
+
 /* (%compile-error message offset [code]): fail with a compile error located
  * at offset, when it is an integer. code is a diagnostic code string, or the
  * symbol invalid-declaration for a tagged declaration error. */
@@ -107,8 +116,7 @@ static ot_value codegen_compile_error(ot_state* rt, size_t first, size_t count) 
     if (!copy) return 0;
     oti_tagged_error(rt, "declaration", "invalid-declaration", copy, 0, NULL);
     free(copy);
-    if (fresh && ot_is_int(offset) && ot_to_int(offset) >= 0)
-      oti_error_at(rt, (size_t)ot_to_int(offset));
+    if (fresh) located_in_source(rt, offset);
     return 0;
   }
   if (count == 3 && oti_kind(rt->stack[first + 2], K_STRING)) {
@@ -121,20 +129,22 @@ static ot_value codegen_compile_error(ot_state* rt, size_t first, size_t count) 
   }
   if (code[0]) oti_coded_errorf(rt, code, "%.*s", (int)length, text);
   else oti_errorf(rt, "%.*s", (int)length, text);
-  if (ot_is_int(offset) && ot_to_int(offset) >= 0) oti_error_at(rt, (size_t)ot_to_int(offset));
+  located_in_source(rt, offset);
   return 0;
 }
 
 /* The cell a definition of name binds: in the current namespace, an error
  * when an import has the name, as oti_global. */
 static ot_value codegen_cell_define(ot_state* rt, size_t first, size_t count) {
-  if (!oti_check_arity(rt, "%native-cell-define", count, 1, 1)) return 0;
+  if (!oti_check_arity(rt, "%native-cell-define", count, 1, 2)) return 0;
   ot_value name = rt->stack[first];
   if (!oti_kind(name, K_SYMBOL)) return oti_fail(rt, "%native-cell-define expects a symbol");
   size_t length;
   const char* text = oti_text_bytes(name, &length);
   uint32_t cell = oti_global(rt, text, length);
-  return cell == UINT32_MAX ? 0 : ot_int((intptr_t)cell);
+  if (cell != UINT32_MAX) return ot_int((intptr_t)cell);
+  if (count == 2) located_in_source(rt, rt->stack[first + 1]);
+  return 0;
 }
 
 static ot_value codegen_core_cell(ot_state* rt, size_t first, size_t count) {

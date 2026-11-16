@@ -68,7 +68,7 @@ static const char* oti_runtime_documentation(const char* name) {
     {"fn", "(fn parameters body ...)\nCreate a lexical procedure. Parameters may be a proper list, dotted rest list, (a & rest), or a rest symbol."},
     {"for-each", "(for-each procedure sequence)\nCall procedure on each element for side effects, then return nil. Traverses a snapshot; accepts a proper list, array, or nil."},
     {"foreign?", "(foreign? value)\nReturn #t when value is a foreign extension value, otherwise #f."},
-    {"gensym", "(gensym [prefix])\nReturn a fresh symbol using the optional string prefix (default G). Useful for avoiding accidental capture in macros."},
+    {"gensym", "(gensym [prefix])\nReturn a fresh symbol using the optional string or symbol prefix (default g). Useful for avoiding accidental capture in macros."},
     {"get", "(get collection key [default])\nLook up a table key or an array/string index. Missing entries and nil collections return default (nil if omitted). String indexing returns a char."},
     {"handler-bind", "(handler-bind ((predicate handler) ...) body ...)\nEvaluate all bindings left to right under the surrounding handlers, then install signal-site handlers for body. Returning from a handler declines the condition."},
     {"identity", "(identity value)\nReturn value unchanged."},

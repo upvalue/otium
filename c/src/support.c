@@ -274,7 +274,8 @@ static ot_value support_expander_qualify(ot_state* rt, size_t first, size_t coun
 static ot_value support_gensym(ot_state* rt, size_t first, size_t count) {
   if (count > 1) return oti_fail(rt, "gensym expects at most one argument");
   ot_value v = count ? rt->stack[first] : OT_NIL;
-  if (count && !oti_kind(v, K_STRING)) return oti_fail(rt, "gensym expects a string prefix");
+  if (count && !oti_kind(v, K_STRING) && !oti_kind(v, K_SYMBOL))
+    return oti_fail(rt, "gensym expects a string or symbol prefix");
   size_t n = 1;
   const char* prefix = count ? oti_text_bytes(v, &n) : "g";
   uint64_t serial = ++rt->gensym_counter;

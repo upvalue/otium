@@ -1,0 +1,250 @@
+(ns otium.webgpu)
+"WebGPU through webgpu.h. otium.webgpu.raw has every function, struct, enum
+and flag, generated from the headers; this module builds those structs from
+Otium tables and wraps the asynchronous setup calls.
+
+A descriptor is a table keyed by the field names in raw/layouts, with values
+converted by raw/fields: keywords for enums, a keyword or list of keywords
+for flags, strings for labels and code, #t and #f for booleans, tables for
+nested structs and pointers to structs, and lists or arrays for the
+pointer-and-count fields, whose count is set for you. :next-in-chain takes a
+list of (name table) extensions. Fields left out keep the C defaults.
+
+Native memory for a descriptor lives in an arena, an array of allocations,
+until release! frees it."
+
+(require (otium.ffi :as ffi))
+(require (otium.process :as process))
+(require (otium.thread :as thread))
+(require (otium.webgpu.raw :as raw))
+
+(def (config-path)
+  (let ((build (process/getenv "OTIUM_BUILD")))
+    (unless build (error "OTIUM_BUILD is not set; run the program through ./otium"))
+    (str build "/ui-config.ot")))
+
+(def (load! &optional (path nil))
+  "Open wgpu-native and bind it: path, or the library the build recorded."
+  (if path
+      (raw/load! path)
+      (let ((entry (assq 'webgpu (read-string (read-file (config-path))))))
+        (if (and entry (not (equal? (cadr entry) "")))
+            (raw/load! (cadr entry))
+            (error "This build has no wgpu-native; configure it with -Dwebgpu=enabled")))))
+
+;; Arenas
+
+(def (arena)
+  "An empty arena for descriptor memory."
+  [])
+
+(def (keep! arena p)
+  (push! arena p)
+  p)
+
+(def (release! arena)
+  "Free every allocation in arena."
+  (for-each ffi/free! arena)
+  (while (> (length arena) 0) (pop! arena)))
+
+(def (string-view p)
+  "The text of a WGPUStringView at p."
+  (let ((data (ffi/field-ref p raw/string-view '(data)))
+        (n (ffi/field-ref p raw/string-view '(length))))
+    (if (or (ffi/null-pointer? data) (= n 0))
+        ""
+        (ffi/read-utf8-bytes data n))))
+
+;; Building structs
+
+(def (enum-value table value field)
+  (cond
+    ((integer? value) value)
+    ((get table value) (get table value))
+    (else (error "Unknown value for WebGPU field" field value))))
+
+(def (flags-value table value field)
+  (cond
+    ((integer? value) value)
+    ((keyword? value) (enum-value table value field))
+    (else (reduce (fn (bits v) (bitwise-ior bits (enum-value table v field))) 0 value))))
+
+(def (set-defaults! p name offset)
+  (for-each (fn (pair) (ffi/set! p 'u8 (+ offset (car pair)) (cadr pair))) (get raw/defaults name '())))
+
+(def (set-string! p layout path value arena)
+  (let ((bytes (string->utf8 value)))
+    (ffi/field-set! p layout (append path '(data)) (keep! arena (ffi/alloc-utf8 value)))
+    (ffi/field-set! p layout (append path '(length)) (length bytes))))
+
+(def (chain extensions arena)
+  "Link (name table) extensions through their chain.next fields; the first."
+  (reduce (fn (next extension)
+            (let ((p (build (car extension) (cadr extension) arena)))
+              (ffi/field-set! p (get raw/layouts (car extension)) '(chain next) next)
+              p))
+          ffi/null
+          (reverse (if (array? extensions)
+                       (array-to-list extensions)
+                       extensions))))
+
+(def (array-value element items arena)
+  (let ((n (length items)))
+    (if (keyword? element)
+        (let ((layout (get raw/layouts element))
+              (type (list 'array layout (max n 1)))
+              (p (keep! arena (ffi/alloc type 1))))
+          (for ((v :in items) (i :range n))
+            (set-defaults! p element (* i (ffi/sizeof layout)))
+            (fill! p type element v arena (list i)))
+          p)
+        (let ((p (keep! arena (ffi/alloc element (max n 1)))))
+          (for ((v :in items) (i :range n))
+            (ffi/set! p element i v))
+          p))))
+
+(def (field-name key)
+  (string->symbol (keyword->string key)))
+
+(def (fill! p layout name desc arena base)
+  "Write the fields in desc into the name struct found at base within p."
+  (let ((kinds (get raw/fields name {})))
+    (for ((key value :in desc))
+      (let ((path (append base (list (field-name key))))
+            (kind (get kinds key)))
+        (case (and kind (car kind))
+          ((nil) (ffi/field-set! p layout path value))
+          ((:string) (set-string! p layout path value arena))
+          ((:bool)
+           (ffi/field-set! p
+                           layout
+                           path
+                           (if value
+                               1
+                               0)))
+          ((:enum) (ffi/field-set! p layout path (enum-value (cadr kind) value key)))
+          ((:flags) (ffi/field-set! p layout path (flags-value (cadr kind) value key)))
+          ((:struct) (fill! p layout (cadr kind) value arena path))
+          ((:pointer)
+           (ffi/field-set! p
+                           layout
+                           path
+                           (cond
+                             ((eq? key :next-in-chain) (chain value arena))
+                             ((table? value) (build (cadr kind) value arena))
+                             (else value))))
+          ((:array)
+           (ffi/field-set! p layout (append base (list (field-name (caddr kind)))) (length value))
+           (ffi/field-set! p layout path (array-value (cadr kind) value arena))))))))
+
+(def (build name desc arena)
+  "A new name struct (a key of raw/layouts) with C defaults and the fields in
+desc, allocated in arena."
+  (let ((layout (or (get raw/layouts name) (error "Unknown WebGPU struct" name)))
+        (p (keep! arena (ffi/alloc layout 1))))
+    (set-defaults! p name 0)
+    (fill! p layout name desc arena '())
+    p))
+
+;; Asynchronous calls, completed synchronously
+
+(def (callback name proc)
+  "An ffi callback for a raw/callbacks signature."
+  (let ((signature (get raw/callbacks name))) (ffi/callback (car signature) (cadr signature) proc)))
+
+(def (wait! instance done?)
+  "Process instance's events until (done?) or a few seconds pass."
+  (let loop ((i 0))
+    (unless (or (done?) (> i 5000))
+      (raw/instance-process-events instance)
+      (unless (done?) (thread/sleep 0.001))
+      (loop (+ i 1))))
+  (unless (done?) (error "WebGPU request timed out")))
+
+(def (message data n)
+  (if (or (ffi/null-pointer? data) (= n 0))
+      ""
+      (ffi/read-utf8-bytes data n)))
+
+(def (request-adapter instance &optional (options nil))
+  "An adapter for options, a request-adapter-options table such as
+{:compatible-surface s :backend-type :vulkan}."
+  (let ((a (arena))
+        (result nil))
+    (defer
+      (let ((on-done (callback :request-adapter-callback (fn (status adapter data n _userdata1 _userdata2)
+                                                           (set! result
+                                                                 (if (= status (raw/request-adapter-status :success))
+                                                                     adapter
+                                                                     (list :error (message data n))))))))
+        (raw/instance-request-adapter instance
+                                      (build :request-adapter-options (or options {}) a)
+                                      (build :request-adapter-callback-info {:mode :allow-process-events
+                                                                             :callback on-done}
+                                             a))
+        (wait! instance (fn () result))
+        (ffi/free-callback! on-done)
+        (if (pair? result)
+            (error "No WebGPU adapter" (cadr result))
+            result))
+      (release! a))))
+
+(defonce device-errors [])
+
+(def on-device-error
+  (callback :uncaptured-error-callback (fn (_device type data n _userdata1 _userdata2)
+                                         (push! device-errors (list type (message data n))))))
+
+(def (errors!)
+  "Raise the first uncaptured device error since the last call, if any."
+  (when (> (length device-errors) 0)
+    (let ((e (device-errors 0)))
+      (while (> (length device-errors) 0) (pop! device-errors))
+      (error "WebGPU" (cadr e)))))
+
+(def (request-device instance adapter &optional (descriptor nil))
+  "A device from adapter for descriptor, a device-descriptor table. Its
+uncaptured errors are collected for errors!."
+  (let ((a (arena))
+        (result nil))
+    (defer
+      (let ((on-done (callback :request-device-callback (fn (status device data n _userdata1 _userdata2)
+                                                          (set! result
+                                                                (if (= status (raw/request-device-status :success))
+                                                                    device
+                                                                    (list :error (message data n))))))))
+        (raw/adapter-request-device adapter
+                                    (build :device-descriptor (put (or descriptor {})
+                                                                   :uncaptured-error-callback-info {:callback on-device-error})
+                                           a)
+                                    (build :request-device-callback-info {:mode :allow-process-events :callback on-done}
+                                           a))
+        (wait! instance (fn () result))
+        (ffi/free-callback! on-done)
+        (if (pair? result)
+            (error "No WebGPU device" (cadr result))
+            result))
+      (release! a))))
+
+(def (read-buffer instance device buffer offset size)
+  "Map size bytes of a map-read buffer from offset and copy them into a
+bytevector, waiting for the GPU."
+  (let ((a (arena))
+        (status nil))
+    (defer
+      (let ((on-mapped (callback :buffer-map-callback (fn (s _data _n _userdata1 _userdata2) (set! status s)))))
+        (raw/buffer-map-async buffer
+                              (raw/map-mode :read)
+                              offset
+                              size
+                              (build :buffer-map-callback-info {:mode :allow-process-events :callback on-mapped} a))
+        (wait! instance
+               (fn ()
+                 (raw/device-poll device 1 ffi/null)
+                 status))
+        (ffi/free-callback! on-mapped)
+        (unless (= status (raw/map-async-status :success)) (error "WebGPU buffer map failed" status))
+        (let ((bytes (ffi/read-bytes (raw/buffer-get-const-mapped-range buffer offset size) size)))
+          (raw/buffer-unmap buffer)
+          bytes))
+      (release! a))))

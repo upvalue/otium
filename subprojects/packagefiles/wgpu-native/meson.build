@@ -5,3 +5,5 @@ lib_dir = meson.current_source_dir() / 'lib'
 wgpu_dep = declare_dependency(
   include_directories: include_directories('include'),
   link_args: ['-L' + lib_dir, '-lwgpu_native', '-Wl,-rpath,' + lib_dir])
+# The shared library itself, for Otium code that binds webgpu.h directly.
+wgpu_library = lib_dir / (host_machine.system() == 'darwin' ? 'libwgpu_native.dylib' : 'libwgpu_native.so')

@@ -1,0 +1,152 @@
+;; Draw a triangle into an offscreen texture through otium.webgpu, read the
+;; pixels back, and check them. No window, so no surface.
+(require (otium.ffi :as ffi))
+(require (otium.webgpu :as gpu))
+(require (otium.webgpu.raw :as raw))
+(require otium.test :refer (check report))
+
+(gpu/load!)
+
+(def size 64)
+
+;; A triangle over the lower-left half of clip space, in red.
+(def shader-code
+  "
+@vertex fn vs(@builtin(vertex_index) i: u32) -> @builtin(position) vec4f {
+  var corners = array<vec2f, 3>(vec2f(-1.0, -1.0), vec2f(1.0, -1.0), vec2f(-1.0, 1.0));
+  return vec4f(corners[i], 0.0, 1.0);
+}
+@fragment fn fs() -> @location(0) vec4f { return vec4f(1.0, 0.0, 0.0, 1.0); }
+")
+
+(def a (gpu/arena))
+
+(def instance (raw/create-instance ffi/null))
+
+(def adapter (gpu/request-adapter instance))
+
+(def device (gpu/request-device instance adapter {:label "test device"}))
+
+(def queue (raw/device-get-queue device))
+
+(def texture
+  (raw/device-create-texture device
+                             (gpu/build :texture-descriptor {:label "target"
+                                                             :usage '(:render-attachment :copy-src)
+                                                             :dimension :2d
+                                                             :size {:width size :height size :depth-or-array-layers 1}
+                                                             :format :rgba8-unorm}
+                                        a)))
+
+(def view (raw/texture-create-view texture ffi/null))
+
+(def module
+  (raw/device-create-shader-module device
+                                   (gpu/build :shader-module-descriptor {:label "triangle"
+                                                                         :next-in-chain (list (list :shader-source-wgsl {:code shader-code}))}
+                                              a)))
+
+(def pipeline
+  (raw/device-create-render-pipeline device
+                                     (gpu/build :render-pipeline-descriptor {:label "triangle"
+                                                                             :vertex {:module module :entry-point "vs"}
+                                                                             :fragment {:module module
+                                                                                        :entry-point "fs"
+                                                                                        :targets (list {:format :rgba8-unorm
+                                                                                                        :write-mask :all})}}
+                                                a)))
+
+;; Rows of a texture-to-buffer copy are padded to 256 bytes.
+(def stride 256)
+
+(def readback
+  (raw/device-create-buffer device
+                            (gpu/build :buffer-descriptor {:label "readback"
+                                                           :usage '(:map-read :copy-dst)
+                                                           :size (* stride size)}
+                                       a)))
+
+(def encoder (raw/device-create-command-encoder device ffi/null))
+
+(def pass
+  (raw/command-encoder-begin-render-pass encoder
+                                         (gpu/build :render-pass-descriptor {:color-attachments (list {:view view
+                                                                                                       :load-op :clear
+                                                                                                       :store-op :store
+                                                                                                       :clear-value {:r 0.0
+                                                                                                                     :g 0.0
+                                                                                                                     :b 1.0
+                                                                                                                     :a 1.0}})}
+                                                    a)))
+
+(raw/render-pass-encoder-set-pipeline pass pipeline)
+
+(raw/render-pass-encoder-draw pass 3 1 0 0)
+
+(raw/render-pass-encoder-end pass)
+
+(raw/command-encoder-copy-texture-to-buffer encoder
+                                            (gpu/build :texel-copy-texture-info {:texture texture} a)
+                                            (gpu/build :texel-copy-buffer-info {:buffer readback
+                                                                                :layout {:bytes-per-row stride
+                                                                                         :rows-per-image size}}
+                                                       a)
+                                            (gpu/build :extent-3d {:width size :height size :depth-or-array-layers 1}
+                                                       a))
+
+(def commands (raw/command-encoder-finish encoder ffi/null))
+
+(def command-list (ffi/alloc 'pointer 1))
+
+(ffi/set! command-list 'pointer 0 commands)
+
+(raw/queue-submit queue 1 command-list)
+
+(def pixels (gpu/read-buffer instance device readback 0 (* stride size)))
+
+(gpu/errors!)
+
+(def (pixel x y)
+  (let ((at (+ (* y stride) (* x 4))))
+    (list (bytevector-u8-ref pixels at)
+          (bytevector-u8-ref pixels (+ at 1))
+          (bytevector-u8-ref pixels (+ at 2))
+          (bytevector-u8-ref pixels (+ at 3)))))
+
+(check "the triangle covers the lower left" '(255 0 0 255) (pixel 2 (- size 3)))
+
+(check "the clear colour shows at the upper right" '(0 0 255 255) (pixel (- size 3) 2))
+
+(check "no descriptor memory is left once released"
+       0
+       (begin
+         (gpu/release! a)
+         (length a)))
+
+(ffi/free! command-list)
+
+(for-each raw/command-buffer-release (list commands))
+
+(raw/command-encoder-release encoder)
+
+(raw/render-pass-encoder-release pass)
+
+(raw/buffer-release readback)
+
+(raw/render-pipeline-release pipeline)
+
+(raw/shader-module-release module)
+
+(raw/texture-view-release view)
+
+(raw/texture-release texture)
+
+(raw/queue-release queue)
+
+(raw/device-release device)
+
+(raw/adapter-release adapter)
+
+(raw/instance-release instance)
+
+(report "webgpu render")

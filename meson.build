@@ -120,7 +120,9 @@ if ui
     error_message: 'no prebuilt wgpu-native for this platform')
   wgpu_project = subproject('wgpu-native-' + (wgpu_platform != '' ? wgpu_platform : 'none'),
     required: webgpu)
+  wgpu_library = ''
   if wgpu_project.found()
+    wgpu_library = wgpu_project.get_variable('wgpu_library')
     ui_sources += 'native/ui/gpu-webgpu.c'
     ui_deps += wgpu_project.get_variable('wgpu_dep')
     ui_args += '-DOTUI_WEBGPU'
@@ -145,6 +147,7 @@ if ui
   sdl_library = sdl3.get_variable(pkgconfig: 'libdir') / 'libSDL3.' + extension
   configure_file(output: 'ui-config.ot', configuration: {
     'library': build_root / 'libotium-ui.' + extension, 'sdl': sdl_library,
+    'webgpu': wgpu_library,
     'icons': source_root / 'native/ui/icons'},
     input: 'native/ui/ui-config.ot.in')
   configure_file(output: 'ui-test-config.ot', configuration: {

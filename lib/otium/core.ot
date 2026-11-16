@@ -808,6 +808,7 @@ Includes runtime builtins, special forms, and the Otium prelude."
       ((eq? head 'opt) (pat-error "opt is only allowed as a table value" p))
       ((or (eq? head 'unquote) (eq? head 'unquote-splicing)) (pat-error "unquote outside a quasiquote pattern" p))
       ((symbol? head) (pat-class st head args v))
+      ((pat-literal? head) (pat-error "a list pattern is written (list p ...); a list starting with a literal is not a pattern" p))
       (else (pat-error "unsupported pattern" p)))))
 
 (def- (pat-compile st p e)

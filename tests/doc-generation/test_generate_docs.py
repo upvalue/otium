@@ -66,14 +66,14 @@ class GenerationTests(unittest.TestCase):
             with patch.object(generator, 'run_pi', return_value=events('# ✨ Test')) as run:
                 self.assertTrue(generator.generate(spec, '', args))
                 self.assertTrue(generator.generate(spec, '', args))
-                self.assertEqual(run.call_count, 2)
+                self.assertEqual(run.call_count, 1)
                 args.force = True
                 self.assertTrue(generator.generate(spec, '', args))
-                self.assertEqual(run.call_count, 4)
+                self.assertEqual(run.call_count, 2)
                 args.force = False
                 spec.write_text('---\ntitle: Test\nprompt: Write it again\n---\n')
                 self.assertTrue(generator.generate(spec, '', args))
-                self.assertEqual(run.call_count, 6)
+                self.assertEqual(run.call_count, 3)
 
 
 if __name__ == '__main__':

@@ -75,6 +75,12 @@ Rules:
 - Leave out options and alternatives that don't help the reader understand the
   subject or use it.
 - Write plainly. Prefer short sentences and ordinary words over jargon.
+- Before replying, read the humanizer skill at
+  `.agents/skills/humanizer/SKILL.md` and apply it to your draft in file mode:
+  change prose only, never code blocks, inline code, paths, link targets or
+  the first line. Otium terms such as port, condition, restart, param and
+  namespace have exact meanings; keep them. Contrasts with Scheme, Clojure or
+  other Lisps correct beliefs the reader holds, so keep them.
 - Name a repository file only when the reader would open it. Use backticks
   and a path from the repository root, and only name files that exist.
 - Link to a function or other binding in the API reference with
@@ -166,32 +172,6 @@ def doc_index():
     return '\n'.join(f'  - {d.relative_to(ROOT)}: {t}' for d, t in sorted(entries))
 
 
-HUMANIZE = f"""\
-You edit one generated Markdown document for the Otium repository. The user
-message is the draft.
-
-Otium is a small Lisp in the Scheme tradition, with namespaces from Clojure
-and tables from Janet. The document was written from this brief, which says
-who the reader is and what the page is for:
-
-{{brief}}
-
-Apply the humanizer skill below to the draft in file mode: change prose only,
-and keep code blocks, inline code, paths, link targets and the first line
-(`# {MARK} {{title}}`) unchanged. Keep every fact and add none. Otium terms
-such as port, condition, restart, param and namespace have exact meanings;
-keep them. Contrasts with Scheme, Clojure or other Lisps correct beliefs this
-reader holds, so keep them. You may read the repository to check what a
-sentence means before rewording it, but an edit must not change what it says.
-
-Reply with the whole edited document and nothing else: no preamble, no list
-of changes, no code fence around the whole thing.
-
-<humanizer-skill>
-{{skill}}
-</humanizer-skill>
-"""
-SKILL = ROOT / '.agents/skills/humanizer/SKILL.md'
 REFERENCE_DATA = json.loads((DOCS / 'reference.json').read_text())['namespaces']
 REFERENCE = [ns['name'] for ns in REFERENCE_DATA]
 REFERENCE_NAMES = {(ns['name'], e['name']) for ns in REFERENCE_DATA for e in ns['entries']}
@@ -403,20 +383,12 @@ def generate(spec, index, args):
     title = f'# {MARK} {meta["title"]}'
     print(f'generating {rel}', file=sys.stderr)
     try:
-        output = run_pi(command, prompt, args, f'{rel.name} draft')
-        draft = final_reply(output)
+        output = run_pi(command, prompt, args, rel.name)
+        text = final_reply(output)
         print(f'{rel}: read {", ".join(files_read(output)) or "nothing"}', file=sys.stderr)
         print(f'{rel}: ran {examples_run(output)} examples', file=sys.stderr)
-        if draft.splitlines()[:1] != [title]:
-            raise ValueError('draft does not start with the expected document title')
-        # The writer spends its attention on the facts, so a second pass with
-        # only the draft and the humanizer skill does the editing.
-        print(f'{rel}: humanizing', file=sys.stderr)
-        editor = HUMANIZE.format(title=meta['title'], brief=meta['prompt'],
-                                 skill=SKILL.read_text())
-        text = final_reply(run_pi(pi_command(editor, args), draft, args, f'{rel.name} humanize'))
         if text.splitlines()[:1] != [title]:
-            raise ValueError('humanized reply does not start with the expected document title')
+            raise ValueError('reply does not start with the expected document title')
         target.parent.mkdir(parents=True, exist_ok=True)
         with tempfile.NamedTemporaryFile(mode='w', dir=target.parent,
                                          prefix=f'.{target.name}.', delete=False) as output:

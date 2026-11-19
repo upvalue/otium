@@ -1,0 +1,9 @@
+model trials: ok
+large-filled: 70000 0
+large-thinned: 70 0 69000 -69000 nil
+large-order: 69000 :tail
+large-emptied: 0 []
+churn: [19990 19991 19992 19993 19994 19995 19996 19997 19998 19999]
+freeze: (9 2) :v :frozen
+long-prefix: 2000 0
+odd-keys: 6 :nil :false :empty :zero :fzero :str

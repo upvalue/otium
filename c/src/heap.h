@@ -239,6 +239,16 @@ static inline uint32_t object_identity(ot_value object) {
   return identity;
 }
 
+/* Immutable text has no use for an identity, so tables keep a hash of its
+ * bytes in the same bits. Zero until one is stored. */
+static inline uint32_t object_text_hash(ot_value object) {
+  return (((oti_object_header*)object)->kind >> 8) & 0x7fffff;
+}
+
+static inline void object_set_text_hash(ot_value object, uint32_t hash) {
+  ((oti_object_header*)object)->kind |= (hash & 0x7fffff) << 8;
+}
+
 static inline bool object_frozen(ot_value object) {
   return (((oti_object_header*)object)->kind & 0x80000000u) != 0;
 }

@@ -1364,8 +1364,9 @@ typedef struct {
 
 OTI_FIELDS_ONLY(oti_array_data_obj, 0);
 
-/* K_TABLE_DATA: key/value pairs as fields, then the bucket index in the
- * opaque bytes (see oti_table_buckets). */
+/* K_TABLE_DATA: key/value pairs as fields in insertion order, then, for a
+ * table too big to search by scanning, the slot index in the opaque bytes
+ * (see oti_table_index and tables.c). */
 typedef struct {
   oti_object_header header;
   ot_value entries[];
@@ -1382,13 +1383,14 @@ typedef struct {
 
 OTI_LAYOUT(oti_array_obj, 1, length);
 
-/* data is a K_TABLE_DATA object: key/value fields, then the bucket index in
- * its opaque bytes. */
+/* data is a K_TABLE_DATA object of capacity key/value pairs, or nil while
+ * capacity is zero. The first used pairs have been written; count of them are
+ * live, and a deleted pair holds nil twice. revision counts membership
+ * changes, which are also the only time pairs move. */
 typedef struct {
   oti_object_header header;
   ot_value data;
-  size_t count, used, capacity;
-  uint64_t revision;
+  uint32_t count, used, capacity, revision;
 } oti_table_obj;
 
 OTI_LAYOUT(oti_table_obj, 1, count);
@@ -1624,7 +1626,7 @@ static inline oti_table_data_obj* oti_as_table_data(ot_value v) {
   return OTI_CAST(oti_table_data_obj, K_TABLE_DATA, v);
 }
 
-static inline uint32_t* oti_table_buckets(ot_value v) {
+static inline void* oti_table_index(ot_value v) {
   (void)oti_as_table_data(v);
   return object_bytes(v);
 }

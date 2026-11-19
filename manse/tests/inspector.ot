@@ -12,9 +12,11 @@
 
 (def sample-table {})
 
-(dotimes (i 2000)
+;; Deleting compacts a table until it's sparse enough to shrink at its next
+;; insertion, so a big one emptied from the front is left with a long run of holes.
+(dotimes (i 20000)
   (put! sample-table i i))
-(dotimes (i 1900)
+(dotimes (i 19900)
   (put! sample-table i nil))
 
 (def first-page (table-scan sample-table -1 0))
@@ -22,14 +24,14 @@
 (check "sparse scan bounded" 512 (nth first-page 3))
 (check "empty page can continue" #f (nth first-page 2))
 (check "sparse first page empty" '() (nth first-page 4))
-(put! sample-table 1999 23)
+(put! sample-table 19999 23)
 (check "value replacements allowed" #f (fails? (fn () (table-scan sample-table (car first-page) (cadr first-page)))))
-(put! sample-table 3000 1)
+(put! sample-table 30000 1)
 (check "insert invalidates" #t (fails? (fn () (table-scan sample-table (car first-page) (cadr first-page)))))
 
 (def scan (table-scan sample-table -1 0))
 
-(put! sample-table 1999 nil)
+(put! sample-table 19999 nil)
 (check "delete invalidates" #t (fails? (fn () (table-scan sample-table (car scan) (cadr scan)))))
 (check "invalid cursor" #t (fails? (fn () (table-scan sample-table -1 -1))))
 

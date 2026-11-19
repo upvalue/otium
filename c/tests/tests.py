@@ -16,7 +16,8 @@ FIXTURE = 'c/tests/cli-load.ot'
 SECOND = 'c/tests/cli-load-second.ot'
 
 for name in ('01-reader', '02-types', '03-equality', '04-tables', '05-control',
-             '06-closures', '07-macros', '08-conditions', '09-params', '11-multimethods'):
+             '06-closures', '07-macros', '08-conditions', '09-params', '11-multimethods',
+             '12-table-model'):
     case('conformance ' + name, f'c/tests/otium/{name}.ot',
          stdout_file=f'c/tests/otium/expected/{name}.txt')
 

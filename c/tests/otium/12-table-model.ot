@@ -1,0 +1,149 @@
+; Random table operations checked against an association-list model: lookups,
+; length and insertion order, through growth, deletion, rebuilding and copy.
+
+(def seed 12345)
+
+(def (rand n)
+  (set! seed (remainder (+ (* seed 1103515245) 12345) 2147483648))
+  (remainder (quotient seed 65536) n))
+
+; The model: a list of (key . value) in insertion order.
+(def (model-get m k)
+  (cond
+    ((null? m) nil)
+    ((equal? (car (car m)) k) (cdr (car m)))
+    (else (model-get (cdr m) k))))
+
+(def (model-remove m k)
+  (cond
+    ((null? m) '())
+    ((equal? (car (car m)) k) (cdr m))
+    (else (cons (car m) (model-remove (cdr m) k)))))
+
+(def (model-put m k v)
+  (cond
+    ((nil? v) (model-remove m k))
+    ((nil? (model-get m k)) (append m (list (cons k v))))
+    (else (map (fn (e)
+                 (if (equal? (car e) k)
+                     (cons k v)
+                     e))
+               m))))
+
+; Fresh, structurally equal keys each time, so lookups can't lean on identity.
+(def (make-key kind i)
+  (cond
+    ((= kind 0) i)
+    ((= kind 1) (str "key-" i))
+    ((= kind 2) (keyword (str "k" i)))
+    ((= kind 3) (string->symbol (str "s" i)))
+    ((= kind 4) (+ 0.5 i))
+    ((= kind 5) (list i (str "p" i) (list (+ i 1))))
+    (else (* i 1000003))))
+
+(def failures 0)
+
+(def (fail what)
+  (set! failures (+ failures 1))
+  (when (< failures 10) (println "FAIL" what)))
+
+(def (check-same t m universe)
+  (unless (= (length t) (length m)) (fail (list "length" (length t) (length m))))
+  (unless (equal? (array-to-list (keys t)) (map car m)) (fail "key order"))
+  (unless (equal? (array-to-list (values t)) (map cdr m)) (fail "value order"))
+  (for-each (fn (k) (unless (equal? (get t k) (model-get m k)) (fail (list "get" k)))) universe))
+
+(def (run-trial kinds key-range ops delete-bias)
+  (let ((t (table))
+        (m '())
+        (universe '()))
+    (dotimes (kind kinds)
+      (dotimes (i key-range)
+        (set! universe (cons (make-key kind i) universe))))
+    (dotimes (step ops)
+      (let ((k (make-key (rand kinds) (rand key-range)))
+            (v (if (< (rand 100) delete-bias)
+                   nil
+                   (rand 1000))))
+        (put! t k v)
+        (set! m (model-put m k v))
+        (when (= 0 (remainder step 97)) (check-same t m universe))
+        (when (= 0 (remainder step 211))
+          (let ((c (copy t)))
+            (check-same c m universe)
+            (put! c :only-in-copy 1)
+            (when (get t :only-in-copy) (fail "copy shares storage"))))))
+    (check-same t m universe)
+    ; Empty it and fill it again.
+    (for-each (fn (k) (put! t k nil)) universe)
+    (unless (= 0 (length t)) (fail "not empty"))
+    (unless (equal? [] (keys t)) (fail "keys of emptied"))
+    (put! t :again 1)
+    (unless (equal? [:again] (keys t)) (fail "refill"))))
+
+(run-trial 1 6 400 40) ; small, no growth past a handful
+(run-trial 7 3 800 45) ; mixed kinds around the small/indexed boundary
+(run-trial 7 12 3000 30) ; grows, with steady deletion
+(run-trial 2 300 4000 20) ; a few hundred live entries
+(run-trial 3 200 3000 70) ; mostly deletes: compaction and shrinking
+(println "model trials:"
+         (if (= failures 0)
+             "ok"
+             failures))
+
+; Growth to a large table and back down.
+(let ((t (table))
+      (n 70000)
+      (bad 0))
+  (dotimes (i n)
+    (put! t i (- i)))
+  (dotimes (i n)
+    (unless (= (get t i) (- i)) (set! bad (+ bad 1))))
+  (println "large-filled:" (length t) bad)
+  (dotimes (i n)
+    (unless (= 0 (remainder i 1000)) (put! t i nil)))
+  (println "large-thinned:" (length t) (get (keys t) 0) (get (keys t) 69) (get t 69000) (get t 69001))
+  (put! t :tail 1)
+  (println "large-order:" (get (keys t) 69) (get (keys t) 70))
+  (dotimes (i n)
+    (put! t i nil))
+  (put! t :tail nil)
+  (println "large-emptied:" (length t) (keys t)))
+
+; Churn: a sliding window of live keys keeps its order.
+(let ((t (table)))
+  (dotimes (i 20000)
+    (put! t i i)
+    (when (>= i 10) (put! t (- i 10) nil)))
+  (println "churn:" (keys t)))
+
+; A pair key is frozen once stored, and looking one up leaves it alone.
+(let ((t (table))
+      (k (list 1 2))
+      (stored (list 3 4)))
+  (get t k)
+  (set-car! k 9)
+  (put! t stored :v)
+  (println "freeze:"
+           k
+           (get t (list 3 4))
+           (try
+             (begin
+               (set-car! stored 0)
+               :mutated)
+             (catch (error? _) :frozen))))
+
+; Lists that agree in a long prefix are distinct keys.
+(let ((t (table))
+      (prefix (list 0 0 0 0 0 0 0 0 0 0 0 0))
+      (bad 0))
+  (dotimes (i 2000)
+    (put! t (append prefix (list i)) i))
+  (dotimes (i 2000)
+    (unless (= i (get t (append prefix (list i)))) (set! bad (+ bad 1))))
+  (println "long-prefix:" (length t) bad))
+
+; nil, #f, '(), 0, 0.0 and "" are distinct keys; 0.0 and -0.0 are one.
+(let ((t (table)))
+  (put! t nil :nil #f :false '() :empty 0 :zero 0.0 :fzero "" :str)
+  (println "odd-keys:" (length t) (get t nil) (get t #f) (get t '()) (get t 0) (get t -0.0) (get t "")))

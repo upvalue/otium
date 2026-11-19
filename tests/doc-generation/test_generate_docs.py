@@ -32,7 +32,7 @@ class GenerationTests(unittest.TestCase):
     def test_command_keeps_tools_read_only_and_allows_provider_override(self):
         args = argparse.Namespace(provider='other', model='model', thinking='medium')
         command = generator.pi_command('rules', args)
-        self.assertEqual(command[command.index('--tools') + 1], 'read,grep,find,ls')
+        self.assertEqual(command[command.index('--tools') + 1], 'read,grep,find,ls,run_otium')
         self.assertEqual(command[command.index('--provider') + 1], 'other')
         self.assertIn('--no-extensions', command)
         self.assertIn('--no-session', command)
@@ -47,12 +47,10 @@ class GenerationTests(unittest.TestCase):
                                       thinking='medium', dry_run=False, timeout=30,
                                       force=False)
             for reply in ['bad json', events('# ✨ Wrong'), events('# ✨ Test', 'length')]:
-                with patch.object(generator.subprocess, 'run', return_value=argparse.Namespace(
-                        returncode=0, stdout=reply, stderr='')):
+                with patch.object(generator, 'run_pi', return_value=reply):
                     self.assertFalse(generator.generate(spec, '', args))
                     self.assertEqual(target.read_text(), 'original\n')
-            with patch.object(generator.subprocess, 'run', return_value=argparse.Namespace(
-                    returncode=0, stdout=events('# ✨ Test\n\nA document.'), stderr='')):
+            with patch.object(generator, 'run_pi', return_value=events('# ✨ Test\n\nA document.')):
                 self.assertTrue(generator.generate(spec, '', args))
                 self.assertEqual(target.read_text(),
                                  f'# ✨ Test\n\nA document.\n\n{generator.stamp(spec)}\n')
@@ -65,18 +63,17 @@ class GenerationTests(unittest.TestCase):
             args = argparse.Namespace(provider='openai-codex', model='gpt-6-astra',
                                       thinking='medium', dry_run=False, timeout=30,
                                       force=False)
-            reply = argparse.Namespace(returncode=0, stdout=events('# ✨ Test'), stderr='')
-            with patch.object(generator.subprocess, 'run', return_value=reply) as run:
+            with patch.object(generator, 'run_pi', return_value=events('# ✨ Test')) as run:
                 self.assertTrue(generator.generate(spec, '', args))
-                self.assertTrue(generator.generate(spec, '', args))
-                self.assertEqual(run.call_count, 1)
-                args.force = True
                 self.assertTrue(generator.generate(spec, '', args))
                 self.assertEqual(run.call_count, 2)
+                args.force = True
+                self.assertTrue(generator.generate(spec, '', args))
+                self.assertEqual(run.call_count, 4)
                 args.force = False
                 spec.write_text('---\ntitle: Test\nprompt: Write it again\n---\n')
                 self.assertTrue(generator.generate(spec, '', args))
-                self.assertEqual(run.call_count, 3)
+                self.assertEqual(run.call_count, 6)
 
 
 if __name__ == '__main__':

@@ -25,6 +25,8 @@ import tempfile
 import urllib.parse
 import subprocess
 import sys
+import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -323,12 +325,65 @@ def wrap(markdown):
     return '\n'.join(out)
 
 
-def run_pi(command, prompt, args):
-    result = subprocess.run(command, input=prompt, capture_output=True,
-                            text=True, cwd=ROOT, timeout=args.timeout)
-    if result.returncode != 0:
-        raise ValueError(f'Pi exited {result.returncode}: {result.stderr.strip()}')
-    return result.stdout
+LOGS = Path(tempfile.gettempdir()) / 'otium-docs'
+
+
+def describe(event):
+    """A one-line progress note for a Pi event, or None to stay quiet."""
+    kind = event.get('type')
+    if kind == 'tool_execution_start':
+        tool, params = event.get('toolName', '?'), event.get('args') or {}
+        if tool == 'run_otium':
+            lines = [l for l in params.get('code', '').splitlines() if l.strip()]
+            detail = (lines[0][:60] + (' …' if len(lines) > 1 else '')) if lines else ''
+        else:
+            detail = params.get('path') or params.get('pattern') or ''
+        return f'{tool} {detail}'.rstrip()
+    if kind == 'tool_execution_end' and event.get('isError'):
+        return f'{event.get("toolName", "?")} failed'
+    if kind == 'auto_retry_start':
+        return f'retrying: {event.get("errorMessage", "")}'.rstrip(': ')
+    return None
+
+
+def run_pi(command, prompt, args, label='pi'):
+    """Run Pi, printing progress as it goes and logging every event.
+
+    The raw JSON events go to LOGS/<label>.jsonl so a slow run can be
+    followed with tail -f."""
+    LOGS.mkdir(exist_ok=True)
+    log_path = LOGS / f'{label.replace("/", "_").replace(" ", ".")}.jsonl'
+    print(f'{label}: events in {log_path}', file=sys.stderr)
+    started = time.monotonic()
+    with open(log_path, 'w') as log, tempfile.TemporaryFile('w+') as errors:
+        process = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                   stderr=errors, text=True, cwd=ROOT)
+        timer = threading.Timer(args.timeout, process.kill)
+        timer.start()
+        try:
+            process.stdin.write(prompt)
+            process.stdin.close()
+            lines = []
+            for line in process.stdout:
+                lines.append(line)
+                log.write(line)
+                log.flush()
+                try:
+                    note = describe(json.loads(line))
+                except json.JSONDecodeError:
+                    note = None
+                if note:
+                    print(f'{label} {time.monotonic() - started:5.0f}s: {note}', file=sys.stderr)
+            code = process.wait()
+        finally:
+            timer.cancel()
+            process.kill()
+        if time.monotonic() - started >= args.timeout:
+            raise subprocess.TimeoutExpired(command, args.timeout)
+        if code != 0:
+            errors.seek(0)
+            raise ValueError(f'Pi exited {code}: {errors.read().strip()}')
+    return ''.join(lines)
 
 
 def generate(spec, index, args):
@@ -348,7 +403,7 @@ def generate(spec, index, args):
     title = f'# {MARK} {meta["title"]}'
     print(f'generating {rel}', file=sys.stderr)
     try:
-        output = run_pi(command, prompt, args)
+        output = run_pi(command, prompt, args, f'{rel.name} draft')
         draft = final_reply(output)
         print(f'{rel}: read {", ".join(files_read(output)) or "nothing"}', file=sys.stderr)
         print(f'{rel}: ran {examples_run(output)} examples', file=sys.stderr)
@@ -359,7 +414,7 @@ def generate(spec, index, args):
         print(f'{rel}: humanizing', file=sys.stderr)
         editor = HUMANIZE.format(title=meta['title'], brief=meta['prompt'],
                                  skill=SKILL.read_text())
-        text = final_reply(run_pi(pi_command(editor, args), draft, args))
+        text = final_reply(run_pi(pi_command(editor, args), draft, args, f'{rel.name} humanize'))
         if text.splitlines()[:1] != [title]:
             raise ValueError('humanized reply does not start with the expected document title')
         target.parent.mkdir(parents=True, exist_ok=True)

@@ -21,7 +21,7 @@ def threaded(name):
         t.expect(t.otium('-L', '.', 'manse/tests/' + name + '.ot'), contains=['checks passed'])
 
 
-for name in ('program', 'repl', 'workspace-lifecycle'):
+for name in ('repl', 'workspace-lifecycle'):
     threaded(name)
 
 

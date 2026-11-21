@@ -39,9 +39,19 @@
   "Record a square-cornered rectangle at logical coordinates, like rect without a bounds value to allocate."
   (%rect g x y width height 0 color))
 
+(defonce font-files
+  "Font files standing in for the built-in :ui or :mono face. Change with set-font!."
+  {})
+
+(def (set-font! name path)
+  "Draw name (:ui or :mono) with the font file at path, or the built-in face again when path is nil."
+  (unless (memq name '(:ui :mono)) (error "Unknown UI font" name))
+  (put! font-files name path))
+
 (def (font-index font)
   "Resolve :ui, :mono, or a font file path. File registrations last until UI teardown."
   (cond
+    ((font-files font) (font-index (font-files font)))
     ((eq? font :ui) 0)
     ((eq? font :mono) 1)
     ((string? font)

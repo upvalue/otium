@@ -150,10 +150,14 @@ are loaded when needed; requiring this module alone does not open a window."
 
 ;; Focusable button that invokes `on-press` when activated by pointer or
 ;; keyboard. Its children provide the content; padding, font, and style
-;; control its appearance.
+;; control its appearance. `background` and `hover` colors override the
+;; style's fill; a focused button with a `hover` color fills with it instead
+;; of drawing a focus ring.
 (defclass Button
   :is Widget
   (on-press :init nil)
+  (background :init nil)
+  (hover :init nil)
   (width :init -1)
   (height :init -1)
   (grow :init 0)

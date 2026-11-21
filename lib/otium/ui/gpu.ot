@@ -601,25 +601,34 @@ changes; see ui/paint-key."
               (w :wrap))))
 
 (defmethod (ui/paint-key (w ui/Button))
-  (list (w :style) (w :radius)))
+  (list (w :style) (w :radius) (w :background) (w :hover)))
+
+(def- (button-fill w g)
+  (let ((accent? (eq? (w :style) :accent)))
+    (cond
+      ((g :disabled?) (ui/color :disabled))
+      ((g :pressed?)
+       (if accent?
+           (ui/color :accent-pressed)
+           (ui/color :selection)))
+      ((and (w :hover) (or (g :hovered?) (g :focused?))) (w :hover))
+      ((w :background) (w :background))
+      (accent? (ui/color :accent))
+      ((eq? (w :style) :bare) nil)
+      (else (ui/color :surface)))))
 
 (defmethod (ui/paint (w ui/Button) g bounds)
-  (unless (eq? (w :style) :bare)
-    (let ((color (cond
-                   ((g :disabled?) (ui/color :disabled))
-                   ((g :pressed?)
-                    (if (eq? (w :style) :accent)
-                        (ui/color :accent-pressed)
-                        (ui/color :selection)))
-                   ((eq? (w :style) :accent) (ui/color :accent))
-                   (else (ui/color :surface)))))
-      (gfx/rect g
-                bounds
-                (if (g :focused?)
-                    (ui/color :focus)
-                    color)
-                (w :radius))
-      (when (g :focused?) (gfx/rect g (inset bounds 2 2) color (max 0 (- (w :radius) 2)))))))
+  (unless (and (eq? (w :style) :bare) (not (w :background)) (not (w :hover)))
+    (let ((color (button-fill w g))
+          (ring? (and (g :focused?) (not (w :hover)))))
+      (when color
+        (gfx/rect g
+                  bounds
+                  (if ring?
+                      (ui/color :focus)
+                      color)
+                  (w :radius))
+        (when ring? (gfx/rect g (inset bounds 2 2) color (max 0 (- (w :radius) 2))))))))
 
 (defmethod (ui/paint-key (w ui/Scroll))
   (list (w :background) (w :axis) (w :offset) (w :limit)))

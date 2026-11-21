@@ -394,10 +394,10 @@ one the last view asked for, e.g. by a click. Record the focus this view asks fo
 
 (def (status-color status)
   (cond
-    ((eq? status :running) theme/green)
-    ((eq? status :exited) theme/red)
-    ((eq? status :closed) theme/faint)
-    (else theme/muted)))
+    ((eq? status :running) theme/GREEN)
+    ((eq? status :exited) theme/RED)
+    ((eq? status :closed) theme/FAINT)
+    (else theme/MUTED)))
 
 (def (header s entry focused?)
   (let ((info (apps/info (entry :app)))
@@ -405,14 +405,14 @@ one the last view asked for, e.g. by a click. Record the focus this view asks fo
     (ui/row {:height 30 :padding-x 10 :gap 8 :align-items :center}
             (w/dot (status-color (get info :status)) 6)
             (w/text (if focused?
-                        theme/text
-                        theme/muted)
-                    theme/ui-size
+                        theme/TEXT
+                        theme/MUTED)
+                    theme/UI_SIZE
                     (apps/label entry))
             (w/spacer)
             (if label
                 (w/hint-badge label (strip/typed s))
-                (w/text theme/faint 11 (strip/width-label s (entry :id)))))))
+                (w/text theme/FAINT 11 (strip/width-label s (entry :id)))))))
 
 (def (column s entry viewport)
   (let ((id (entry :id))
@@ -433,16 +433,16 @@ one the last view asked for, e.g. by a click. Record the focus this view asks fo
                 :padding-x 1
                 :padding-y 1
                 :radius 6
-                :background theme/background
+                :background theme/BACKGROUND
                 :border (if focused?
-                            theme/accent
-                            theme/border-variant)
+                            theme/ACCENT
+                            theme/BORDER_VARIANT)
                 :on-press (fn ()
                             (strip/focus! s id)
                             (put! workspace :sidebar-focus? #f)
                             (invalidate!))}
                (header s entry focused?)
-               (ui/column {:height 1 :background theme/border-variant})
+               (ui/column {:height 1 :background theme/BORDER_VARIANT})
                body)))
 
 (def (card title children)
@@ -450,11 +450,11 @@ one the last view asked for, e.g. by a click. Record the focus this view asks fo
               :padding 16
               :gap 10
               :radius 8
-              :background theme/panel
-              :border theme/border
+              :background theme/PANEL
+              :border theme/BORDER
               ;; Take clicks so only the backdrop closes the popup.
               :on-press (fn () nil)}
-             (w/text theme/text theme/ui-size title)
+             (w/text theme/TEXT theme/UI_SIZE title)
              children))
 
 (def (help)
@@ -462,7 +462,7 @@ one the last view asked for, e.g. by a click. Record the focus this view asks fo
         (map (fn (b)
                (ui/row {:gap 10 :align-items :center}
                        (ui/row {:width 130} (w/key-cap (get b 1)))
-                       (ui/label {:color theme/muted :size 12 :width 0 :grow 1} (get b 3))))
+                       (ui/label {:color theme/MUTED :size 12 :width 0 :grow 1} (get b 3))))
              bindings)))
 
 (def- (duration seconds)
@@ -487,8 +487,8 @@ one the last view asked for, e.g. by a click. Record the focus this view asks fo
         (heap (info :heap))
         (row (fn (label value)
                (ui/row {:gap 10 :align-items :center}
-                       (ui/label {:color theme/muted :size 12 :width 130} label)
-                       (ui/label {:color theme/text :size 12 :width 0 :grow 1} value)))))
+                       (ui/label {:color theme/MUTED :size 12 :width 130} label)
+                       (ui/label {:color theme/TEXT :size 12 :width 0 :grow 1} value)))))
     (card "System"
           (list (row "Uptime" (duration (info :uptime)))
                 (row "Process memory"
@@ -515,8 +515,8 @@ one the last view asked for, e.g. by a click. Record the focus this view asks fo
                 :padding 8
                 :gap 2
                 :radius 8
-                :background theme/panel
-                :border theme/border
+                :background theme/PANEL
+                :border theme/BORDER
                 :on-press (fn () nil)}
                (ui/text-field {:key :palette-query
                                :focus #t
@@ -530,7 +530,7 @@ one the last view asked for, e.g. by a click. Record the focus this view asks fo
                                             (invalidate!))})
                (ui/column {:height 6})
                (if (null? matches)
-                   (ui/row {:padding 10} (ui/label {:size 13 :color theme/faint} "No matching commands"))
+                   (ui/row {:padding 10} (ui/label {:size 13 :color theme/FAINT} "No matching commands"))
                    (for ((c :in matches)
                          (i :range (length matches))
                          (out :collect (ui/row {:key i
@@ -539,7 +539,7 @@ one the last view asked for, e.g. by a click. Record the focus this view asks fo
                                                 :gap 10
                                                 :radius 4
                                                 :align-items :center
-                                                :background (when (= i selected) theme/selected)
+                                                :background (when (= i selected) theme/SELECTED)
                                                 :on-press (fn ()
                                                             (put! p :selected i)
                                                             (palette-run!))}
@@ -548,8 +548,8 @@ one the last view asked for, e.g. by a click. Record the focus this view asks fo
                                                           :width 0
                                                           :grow 1
                                                           :color (if (= i selected)
-                                                                     theme/text
-                                                                     theme/muted)}
+                                                                     theme/TEXT
+                                                                     theme/MUTED)}
                                                          (c :name))
                                                (when (c :key) (w/key-cap (c :key))))))
                      => out)))))
@@ -561,7 +561,7 @@ the other popup's key switches to that one. The palette sits near the top."
               :overlay #t
               :modal #t
               :align-items :center
-              :background theme/scrim
+              :background theme/SCRIM
               :keymap (case name
                         ((:palette)
                          {"Escape" :close-popup
@@ -609,7 +609,7 @@ the other popup's key switches to that one. The palette sits near the top."
     (adopt-focus! tree)
     (list (ui/row {:key :workspace
                    :grow 1
-                   :background theme/background
+                   :background theme/BACKGROUND
                    :keymap (keymap)
                    :on-action (fn (action) (action! action))}
                   (unless narrow? (sidebar/view (workspace :groups) (workspace :apps) (fn (action) (action! action))))
@@ -617,8 +617,6 @@ the other popup's key switches to that one. The palette sits near the top."
                              (when narrow?
                                (ui/button {:on-press (fn () (action! :sidebar)) :height 32}
                                           ((groups/active (workspace :groups)) :name)))
-                             (when (empty? (strip/ids s))
-                               (ui/button {:on-press (fn () (action! :palette)) :height 48} "Open an app · Cmd+P"))
                              (ui/scroll {:key :strip
                                          :axis :x
                                          :grow 1
@@ -629,7 +627,7 @@ the other popup's key switches to that one. The palette sits near the top."
                                                (column s (find (fn (entry) (equal? (entry :id) id)) entries) viewport))
                                              (strip/ids s)))))
           (when (and narrow? (workspace :drawer?))
-            (ui/row {:key :workspace-drawer :overlay #t :modal #t :background theme/scrim}
+            (ui/row {:key :workspace-drawer :overlay #t :modal #t :background theme/SCRIM}
                     (sidebar/view (workspace :groups) (workspace :apps) (fn (action) (action! action)))
                     (ui/column {:grow 1 :on-press (fn () (action! :sidebar-dismiss))})))
           (when (workspace :popup) (popup (workspace :popup))))))
@@ -671,7 +669,7 @@ the other popup's key switches to that one. The palette sits near the top."
                                   :icon (icon-path)
                                   :app-name "Manse"
                                   :app-id "sh.otium.manse"
-                                  :background-color theme/background
+                                  :background-color theme/BACKGROUND
                                   :render-on-demand? #t
                                   :poll-ms (settings/options :poll-ms)
                                   :background-poll-ms (settings/options :background-poll-ms)

@@ -22,7 +22,7 @@
   (ui/reconcile! (window :tree) ((window :view)))
   (gpu/invalidate-paint! (window :tree))
   (gpu/layout! (window :tree) (window :width) (window :height) (window :scale))
-  (gpu/paint! (window :tree) (window :renderer) (window :width) (window :height) theme/background)
+  (gpu/paint! (window :tree) (window :renderer) (window :width) (window :height) theme/BACKGROUND)
   (native/gpu-frame (window :renderer) ""))
 
 (unwind-protect
@@ -37,7 +37,7 @@
                     :height 800
                     :headless #t
                     :scale 2
-                    :background-color theme/background}))
+                    :background-color theme/BACKGROUND}))
     (put! workspace/workspace :window window)
     (ui/set-view! window (fn () (workspace/view (window :tree))))
     (dotimes (i 5)
@@ -48,7 +48,7 @@
     (println :layout (average (fn () (gpu/layout! (window :tree) 900 800 2))))
     (println :paint (average (fn ()
                                (gpu/invalidate-paint! (window :tree))
-                               (gpu/paint! (window :tree) (window :renderer) 900 800 theme/background)
+                               (gpu/paint! (window :tree) (window :renderer) 900 800 theme/BACKGROUND)
                                (native/gpu-frame (window :renderer) ""))))
     (println :full-frame (average frame!)))
   (when window (ui/close! window))

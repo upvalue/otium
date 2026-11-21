@@ -30,10 +30,10 @@
 
 (def (hint-badge label typed)
   "A Vimium-style label; the typed prefix is dimmed."
-  (ui/row {:background theme/hint :radius 3 :padding-x 5 :padding-y 1}
-          (unless (equal? typed "") (ui/label {:font :mono :size 11 :color theme/hint-typed :wrap #f} typed))
-          (ui/label {:font :mono :size 11 :color theme/hint-text :wrap #f} (substring label (string-length typed)))))
+  (ui/row {:background theme/HINT :radius 3 :padding-x 5 :padding-y 1}
+          (unless (equal? typed "") (ui/label {:font :mono :size 11 :color theme/HINT_TYPED :wrap #f} typed))
+          (ui/label {:font :mono :size 11 :color theme/HINT_TEXT :wrap #f} (substring label (string-length typed)))))
 
 (def (key-cap key)
-  (ui/row {:background theme/surface :radius 3 :padding-x 5 :padding-y 1}
-          (ui/label {:font :mono :size 11 :color theme/muted :wrap #f} key)))
+  (ui/row {:background theme/SURFACE :radius 3 :padding-x 5 :padding-y 1}
+          (ui/label {:font :mono :size 11 :color theme/MUTED :wrap #f} key)))

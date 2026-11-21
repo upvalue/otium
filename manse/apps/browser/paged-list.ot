@@ -51,7 +51,7 @@
                                           :gap 12
                                           :radius 4
                                           :align-items :center
-                                          :background (when selected? theme/selected)
+                                          :background (when selected? theme/SELECTED)
                                           :on-press (fn ()
                                                       (set! (w :selected) index)
                                                       ((w :choose) entry))}
@@ -60,11 +60,11 @@
                                                     :width 0
                                                     :grow 1
                                                     :color (if selected?
-                                                               theme/text
-                                                               theme/muted)}
+                                                               theme/TEXT
+                                                               theme/MUTED)}
                                                    (entry :text))
                                          (when (entry :detail)
-                                           (ui/label {:size 12 :wrap #f :color theme/faint} (entry :detail)))))))
+                                           (ui/label {:size 12 :wrap #f :color theme/FAINT} (entry :detail)))))))
              => out))))
 
 (def (view key rows choose)

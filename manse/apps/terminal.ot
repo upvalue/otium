@@ -41,6 +41,12 @@
       (put! info k v))
     info))
 
+(defmethod (apps/icon (app TerminalApp))
+  ;; Shells run on a pty; REPLs and other in-process programs don't.
+  (if (is-a? ((app :session) :backend) sessions/PtyBackend)
+      :terminal-window
+      :code))
+
 (defmethod (apps/step! (app TerminalApp))
   (let ((session (app :session)))
     (when (sessions/pump! session)

@@ -12,6 +12,9 @@
 
 (defgeneric (finished? app))
 
+;; A Phosphor icon name for the app, shown beside its title.
+(defgeneric (icon app))
+
 (defmethod (step! (app App))
   #f)
 
@@ -20,6 +23,9 @@
 
 (defmethod (finished? (app App))
   #f)
+
+(defmethod (icon (app App))
+  :app-window)
 
 (def (registry)
   {:next-id 1 :entries []})

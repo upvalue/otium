@@ -27,6 +27,9 @@
                :closed
                :running)})
 
+(defmethod (apps/icon (app BrowserApp))
+  :tree-structure)
+
 (defmethod (apps/step! (app BrowserApp))
   (model/step! (app :state)))
 
@@ -57,8 +60,8 @@
              (ui/label {:size 12
                         :wrap #f
                         :color (if (eq? style :accent)
-                                   theme/background
-                                   theme/text)}
+                                   theme/BACKGROUND
+                                   theme/TEXT)}
                        text)))
 
 (def (tab app tab label)
@@ -69,7 +72,7 @@
               :bare)))
 
 (def (caption text)
-  (ui/label {:size 12 :wrap #f :color theme/faint} text))
+  (ui/label {:size 12 :wrap #f :color theme/FAINT} text))
 
 (def (status pending? done?)
   (caption (cond
@@ -149,7 +152,7 @@
         (selected (state :selected)))
     (list (ui/row {:gap 6 :align-items :center}
                   (button "Back" (fn () (model/back! state)))
-                  (ui/label {:size 14 :wrap #f :width 0 :grow 1 :color theme/text} (state :label))
+                  (ui/label {:size 14 :wrap #f :width 0 :grow 1 :color theme/TEXT} (state :label))
                   (when (state :binding)
                     (button "Re-read binding"
                             (fn ()
@@ -165,7 +168,7 @@
                        (str (inspect/summary (get selected 0)) " · live, not a snapshot")
                        "Pick a binding, or open the last REPL result."))
           (if (page :text)
-              (ui/scroll {:grow 1 :height 0} (ui/label {:size 13 :font :mono :color theme/text} (page :text)))
+              (ui/scroll {:grow 1 :height 0} (ui/label {:size 13 :font :mono :color theme/TEXT} (page :text)))
               (paged/view :values (map (fn (row) {:key (row :label) :row row :text (row :label) :detail (row :preview)})
                                        (page :rows))
                           (fn (entry)
@@ -176,7 +179,7 @@
                   (when (and selected (array? (get selected 0))) (jump-field app state))
                   (w/spacer)
                   (status (state :pending?) (page :done?)))
-          (unless (equal? (state :error) "") (ui/label {:size 12 :color theme/red} (state :error))))))
+          (unless (equal? (state :error) "") (ui/label {:size 12 :color theme/RED} (state :error))))))
 
 (defmethod (apps/view (app BrowserApp))
   (apply ui/column

@@ -4,71 +4,132 @@
 (require manse.apps :as apps)
 (require manse.theme :as theme)
 
-(def width 220)
+(def width 248)
 
-(def (row label key selected? action &optional (row-width 196))
+;; Rows sit inside the sidebar's padding; nesting steps in by the caret's width,
+;; so an app's icon lines up under its workspace's name.
+(def- PADDING 8)
+
+(def- ROW_WIDTH (- width 1 (* 2 PADDING)))
+
+(def- CARET 20)
+
+(def- TEXT_SIZE 13)
+
+(def- (fit label room)
+  "label cut to about room pixels of text, with an ellipsis when cut."
+  (let ((chunk (text-chunk label 0 (max 4 (quotient room 7)))))
+    (str (car chunk)
+         (if (< (cadr chunk) (caddr chunk))
+             "…"
+             ""))))
+
+;; lint: allow(rest-arguments) a row holds any number of children
+(def- (row-button key on-press width background . children)
   (ui/button {:key key
-              :width row-width
-              :padding 8
-              :style (if selected?
-                         :accent
-                         :bare)
-              :radius 4
-              :on-press action}
-             (ui/label {:size 13
-                        :wrap #f
-                        :color (if selected?
-                                   theme/background
-                                   theme/text)}
-                       (let ((chunk (text-chunk label 0 (max 4 (quotient (- row-width 16) 8)))))
-                         (str (car chunk)
-                              (if (< (cadr chunk) (caddr chunk))
-                                  "…"
-                                  ""))))))
+              :width width
+              :padding 0
+              :radius 6
+              :style :bare
+              :background background
+              :hover (or background theme/SIDEBAR_HOVER)
+              :on-press on-press}
+             (ui/row {:padding-x 8 :padding-y 6 :gap 8 :align-items :center} children)))
+
+(def- (icon-button key name on-press)
+  (ui/button {:key key :focusable #f :padding 4 :radius 4 :style :bare :hover theme/SIDEBAR_HOVER :on-press on-press}
+             (ui/icon {:name name :size 14 :color theme/FAINT})))
+
+(def- (header dispatch)
+  (ui/row {:padding-x 8 :padding-y 4 :align-items :center}
+          (ui/label {:size 12 :grow 1 :color theme/FAINT} "Workspaces")
+          (icon-button :new-workspace :plus (fn () (dispatch :workspace-new)))))
+
+(def- (workspace-row item active? dispatch)
+  ;; Only the active item is filled: the focused app, or the active workspace
+  ;; itself when it has no apps. The active workspace keeps brighter text.
+  (let ((id (item :id))
+        (filled? (and active? (not (strip/focused (item :strip))))))
+    (ui/row {:key (str "workspace-row-" id)
+             :align-items :center
+             :radius 6
+             :background (when filled? theme/SIDEBAR_SELECTED)}
+            (ui/button {:key (str "expand-" id)
+                        :focusable #f
+                        :width CARET
+                        :padding 4
+                        :radius 4
+                        :style :bare
+                        :on-press (fn () (dispatch (list :workspace-expand id)))}
+                       (ui/icon {:name (if (item :expanded?)
+                                           :caret-down
+                                           :caret-right)
+                                 :size 12
+                                 :color theme/FAINT}))
+            (row-button (str "workspace-" id)
+                        (fn () (dispatch (list :workspace-select id)))
+                        (- ROW_WIDTH CARET)
+                        (when filled? theme/SIDEBAR_SELECTED)
+                        (ui/label {:size TEXT_SIZE
+                                   :wrap #f
+                                   :color (if active?
+                                              theme/TEXT
+                                              theme/MUTED)}
+                                  (fit (item :name) (- ROW_WIDTH CARET 16)))))))
+
+(def- (app-row entry workspace-id focused? dispatch)
+  (let ((app-id (entry :id))
+        (exited? (eq? (get (apps/info (entry :app)) :status) :exited)))
+    (ui/row {}
+            (ui/column {:width CARET})
+            (row-button (str "app-" app-id)
+                        (fn () (dispatch (list :app-select workspace-id app-id)))
+                        (- ROW_WIDTH CARET)
+                        (when focused? theme/SIDEBAR_SELECTED)
+                        (ui/icon {:name (apps/icon (entry :app))
+                                  :size 14
+                                  :color (cond
+                                           (exited? theme/RED)
+                                           (focused? theme/TEXT)
+                                           (else theme/FAINT))})
+                        (ui/label {:size TEXT_SIZE
+                                   :wrap #f
+                                   :color (if focused?
+                                              theme/TEXT
+                                              theme/MUTED)}
+                                  (fit (apps/label entry) (- ROW_WIDTH CARET 38)))))))
 
 (def (view state registry dispatch)
-  (ui/column {:key :sidebar
-              :width width
-              :padding 8
-              :gap 4
-              :background theme/panel
-              :keymap {"Up" :sidebar-up
-                       "Down" :sidebar-down
-                       "Escape" :sidebar-dismiss
-                       "Meta+B" :sidebar-dismiss
-                       "Meta+P" :palette}
-              :on-action dispatch}
-             (row "+ Workspace" :new-workspace #f (fn () (dispatch :workspace-new)))
-             (ui/scroll {:axis :y :grow 1 :width (- width 16) :reveal (state :sidebar-key)}
-                        (map (fn (item)
-                               (let ((id (item :id))
-                                     (selected? (equal? id (state :active))))
-                                 (ui/column {:key (str "group-" id) :gap 2}
-                                            (ui/row {:gap 2}
-                                                    (row (if (item :expanded?)
-                                                             "−"
-                                                             "+")
-                                                         (str "expand-" id)
-                                                         #f
-                                                         (fn () (dispatch (list :workspace-expand id)))
-                                                         28)
-                                                    (row (item :name)
-                                                         (str "workspace-" id)
-                                                         selected?
-                                                         (fn () (dispatch (list :workspace-select id)))
-                                                         162))
-                                            (when (item :expanded?)
-                                              (ui/column {:padding-x 6}
-                                                         (map (fn (app-id)
-                                                                (let ((entry (find (fn (e) (equal? (e :id) app-id))
-                                                                                   (registry :entries))))
-                                                                  (when entry
-                                                                    (row (apps/label entry)
-                                                                         (str "app-" app-id)
-                                                                         (and selected?
-                                                                              (equal? app-id
-                                                                                      (strip/focused (item :strip))))
-                                                                         (fn () (dispatch (list :app-select id app-id)))
-                                                                         184))))
-                                                              (strip/ids (item :strip))))))))
-                             (state :items)))))
+  (ui/row {:key :sidebar-edge :width width :background theme/SIDEBAR_EDGE}
+          (ui/column {:key :sidebar
+                      :width (- width 1)
+                      :padding-x PADDING
+                      :padding-y 10
+                      :gap 2
+                      :background theme/SIDEBAR
+                      :keymap {"Up" :sidebar-up
+                               "Down" :sidebar-down
+                               "Escape" :sidebar-dismiss
+                               "Meta+B" :sidebar-dismiss
+                               "Meta+P" :palette}
+                      :on-action dispatch}
+                     (header dispatch)
+                     (ui/scroll {:axis :y :grow 1 :gap 1 :width ROW_WIDTH :reveal (state :sidebar-key)}
+                                (map (fn (item)
+                                       (let ((id (item :id))
+                                             (selected? (equal? id (state :active))))
+                                         (ui/column {:key (str "group-" id) :gap 1}
+                                                    (workspace-row item selected? dispatch)
+                                                    (when (item :expanded?)
+                                                      (map (fn (app-id)
+                                                             (let ((entry (find (fn (e) (equal? (e :id) app-id))
+                                                                                (registry :entries))))
+                                                               (when entry
+                                                                 (app-row entry
+                                                                          id
+                                                                          (and selected?
+                                                                               (equal? app-id
+                                                                                       (strip/focused (item :strip))))
+                                                                          dispatch))))
+                                                           (strip/ids (item :strip)))))))
+                                     (state :items))))))

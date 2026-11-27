@@ -12,25 +12,6 @@
 /* VM value slots. */
 #define STACK_LIMIT (128u * 1024u)
 
-[[noreturn]] void sbi_shutdown(bool failure) {
-  /* SBI system reset extension: shutdown, with no reason or a system failure. */
-  register uintptr_t a0 __asm__("a0") = 0;
-  register uintptr_t a1 __asm__("a1") = failure ? 1 : 0;
-  register uintptr_t a6 __asm__("a6") = 0;
-  register uintptr_t a7 __asm__("a7") = 0x53525354;
-  __asm__ volatile("ecall" : "+r"(a0), "+r"(a1) : "r"(a6), "r"(a7) : "memory");
-  for (;;) __asm__ volatile("wfi");
-}
-
-/* picolibc's exit and abort end here. */
-[[noreturn]] void _exit(int status) { sbi_shutdown(status != 0); }
-
-[[noreturn]] void kernel_fault(uintptr_t cause, uintptr_t pc, uintptr_t value) {
-  printf("otos: trap cause=%#lx pc=%#lx value=%#lx\n", (unsigned long)cause, (unsigned long)pc,
-         (unsigned long)value);
-  sbi_shutdown(true);
-}
-
 /* Evaluates one form and prints its value or error. Returns false when the
  * form asked to exit. */
 static bool evaluate(ot_state* rt, const char* source, size_t length, int* status) {
@@ -104,22 +85,19 @@ static int repl(ot_state* rt) {
   return status;
 }
 
-[[noreturn]] void kmain(uintptr_t hart, uintptr_t device_tree) {
-  printf("otos: hart %lu, device tree at %#lx\n", (unsigned long)hart, (unsigned long)device_tree);
-
-  console_init();
+[[noreturn]] void kmain(void) {
   uint64_t start = kernel_uptime_ns();
   ot_state* rt = ot_create(HEAP_INITIAL, STACK_LIMIT);
   if (rt == NULL) {
     puts("otos: ot_create failed");
-    sbi_shutdown(true);
+    board_reset(true);
   }
   /* The I/O host has to be in place before the core library loads, since the
    * runtime reads its library files and standard ports through it. */
   if (!ot_set_heap_limit(rt, HEAP_LIMIT) || !ot_set_io_host(rt, &kernel_io_host, NULL) ||
-      !ot_load_expander(rt, "/lib") || !ot_load_core(rt, "/lib") || !gfx_register(rt)) {
+      !ot_load_expander(rt, "/lib") || !ot_load_core(rt, "/lib")) {
     printf("otos: cannot start the runtime: %s\n", ot_error(rt));
-    sbi_shutdown(true);
+    board_reset(true);
   }
   ot_set_interrupt_flag(rt, &console_interrupt);
   printf("otos: runtime ready in %lu ms\n",
@@ -127,5 +105,5 @@ static int repl(ot_state* rt) {
 
   puts("otium repl (otos) - ^C interrupts, ^D shuts down");
   int status = repl(rt);
-  sbi_shutdown(status != 0);
+  board_reset(status != 0);
 }

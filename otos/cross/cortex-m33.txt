@@ -1,0 +1,14 @@
+# Target settings for the Cortex-M33, the core of the Fruit Jam's RP2350 and
+# of QEMU's mps2-an505. Its FPU is single precision, so doubles still go
+# through the soft float helpers. Use it together with a toolchain file that
+# sets [binaries]: cross/homebrew.txt or cross/llvm-21.txt.
+
+[built-in options]
+c_args = ['--target=thumbv8m.main-none-eabihf', '-mcpu=cortex-m33', '-mfloat-abi=hard', '-mfpu=fpv5-sp-d16', '-fno-stack-protector']
+c_link_args = ['--target=thumbv8m.main-none-eabihf', '-mcpu=cortex-m33', '-mfloat-abi=hard', '-fuse-ld=lld', '-nostdlib', '-static']
+
+[host_machine]
+system = 'none'
+cpu_family = 'arm'
+cpu = 'cortex-m33'
+endian = 'little'

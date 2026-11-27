@@ -59,10 +59,10 @@ embedded_files = custom_target('files.c',
             '@OUTPUT@', '@DEPFILE@', meson.current_source_dir() / '..',
             'c/src/primitives.ot', 'lib'])
 
-linker_script = meson.current_source_dir() / 'src/kernel.ld'
+# The board: QEMU's mps2-an505, a Cortex-M33 laid out like the Fruit Jam.
+linker_script = meson.current_source_dir() / 'src/mps2.ld'
 executable('otos.elf',
-  'src/boot.S', 'src/kernel.c', 'src/line.c', 'src/ot-kernel.c', 'src/virtio.c',
-  'src/display.c', 'src/gfx.c', embedded_files,
+  'src/mps2.c', 'src/kernel.c', 'src/line.c', 'src/ot-kernel.c', embedded_files,
   c_args: platform_args,
   include_directories: include_directories(runtime_dir / 'include', 'src'),
   dependencies: picolibc,

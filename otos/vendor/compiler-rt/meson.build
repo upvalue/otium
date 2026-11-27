@@ -1,6 +1,9 @@
 # compiler-rt's generic builtins: 64-bit integer and soft float helpers
-# that rv32 code calls for operations it has no instructions for.
+# that Cortex-M33 code calls for operations it has no instructions for, such
+# as anything on doubles. arm/ has the EABI entry points written in assembly.
 builtins = static_library('builtins',
+  'arm/aeabi_dcmp.S',
+  'arm/aeabi_uldivmod.S',
   'absvdi2.c',
   'absvsi2.c',
   'absvti2.c',

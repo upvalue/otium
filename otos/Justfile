@@ -4,13 +4,9 @@ toolchain := if os() == "macos" { "homebrew" } else { "llvm-21" }
 
 # Configure and build the kernel
 build:
-    @test -d build || meson setup build --cross-file=cross/riscv32.txt --cross-file=cross/{{toolchain}}.txt
+    @test -d build || meson setup build --cross-file=cross/cortex-m33.txt --cross-file=cross/{{toolchain}}.txt
     meson compile -C build
 
-# Build and boot in QEMU; output goes to this terminal
+# Build and boot on QEMU's mps2-an505; the console is this terminal
 run: build
-    qemu-system-riscv32 -machine virt -m 256M -bios default -nographic -no-reboot -kernel build/otos.elf
-
-# Boot with a virtio-gpu display window; the REPL stays in this terminal
-run-display: build
-    qemu-system-riscv32 -machine virt -m 256M -bios default -no-reboot -kernel build/otos.elf -serial mon:stdio -device virtio-gpu-device -global virtio-mmio.force-legacy=false
+    qemu-system-arm -machine mps2-an505 -nographic -no-reboot -kernel build/otos.elf

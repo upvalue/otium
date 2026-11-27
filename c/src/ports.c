@@ -365,8 +365,8 @@ static long transfer(ot_state* rt, ot_value* port, bool writing, size_t start, s
                      : p->host.read(p->userdata, p->handle, bytes, length);
     if (!host_end(rt, *port)) return -1;
     if (n == -EAGAIN || n == -EWOULDBLOCK) {
-      if (can_wait(rt)) return park_on_fd(rt, port, writing, true);
 #ifndef OTIUM_FREESTANDING
+      if (can_wait(rt)) return park_on_fd(rt, port, writing, true);
       /* A non-blocking descriptor where this thread can't park: wait here. */
       struct pollfd fd = {.fd = (int)port_object(*port)->handle,
                           .events = writing ? POLLOUT : POLLIN};
